@@ -1,0 +1,128 @@
+# ============================================================
+# jobmatch .gitignore
+# ============================================================
+
+# ---- Runtime data: contractor personal information lives here ----
+# Ignore everything under data/ (CSVs, embeddings, backups, run logs),
+# then re-include only the placeholder and synthetic samples.
+# Never put real contractor or job data in data/samples/.
+data/*
+!data/.gitkeep
+!data/samples/
+exports/
+*.bak
+*.csv.lock
+*.lock.tmp
+*.tmp
+
+# ---- Secrets and local configuration ----
+.env
+.env.*
+!.env.example
+config/*.local.yaml
+config/*.local.yml
+.streamlit/secrets.toml
+*.pem
+*.key
+*.p12
+credentials*.json
+secrets*.json
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+wheels/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Keep lockfiles committed: they pin torch/numpy/onnxruntime versions
+# for the Intel-Mac target. Do NOT add uv.lock, poetry.lock or
+# requirements*.txt lockfiles here.
+
+# ---- Tooling caches ----
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pytype/
+.pyre/
+.hypothesis/
+.cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+
+# ---- Notebooks ----
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ---- Model and download caches (large, re-downloadable) ----
+models/
+.hf_cache/
+huggingface/
+sentence_transformers_cache/
+*.onnx
+*.gguf
+*.safetensors
+*.bin
+*.pt
+*.pth
+
+# ---- Logs ----
+logs/
+*.log
+
+# ---- Docker (local overrides only) ----
+docker-compose.override.yml
+compose.override.yml
+.docker/
+
+# ---- Local scheduler files (contain machine-specific paths) ----
+*.local.plist
+launchd/*.local.plist
+
+# ---- Claude Code local files ----
+# CLAUDE.md and PROJECT_CONTEXT.md SHOULD be committed.
+CLAUDE.local.md
+.claude/settings.local.json
+.claude/cache/
+
+# ---- IDEs and editors ----
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+
+# ---- OS files ----
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk

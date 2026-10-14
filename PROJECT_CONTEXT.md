@@ -1,0 +1,152 @@
+# PROJECT_CONTEXT.md: jobmatch (preliminary context for Claude Code)
+
+Status: design stage, nothing built yet. Estimates and model choices below are starting assumptions, not verified facts. Rules for how you work are in `CLAUDE.md`; follow them.
+
+## 1. Problem
+
+Contractors constantly look for contract work, and companies constantly hire contractors. We have a **precompiled list of contractors** with descriptions of their expertise. The job is to **discover Canadian contract postings quickly** (first come, first served), **match each posting to the best-fit contractors**, and put the best matches in front of a **human**, who approves or rejects. Later (not in the prototype) the system will find the company's HR contact and draft a personalized outreach email from a sample template. The system never sends email; a human always sends.
+
+Scope: **public job sources in Canada only.** Postings in English and French.
+
+## 2. Prototype scope (v0)
+
+In scope:
+1. Job intake from (a) job-board APIs and feeds, and (b) manual human input for LinkedIn jobs.
+2. Normalize, filter and dedupe jobs into one canonical schema.
+3. Local embeddings for jobs and contractors, plus rule-based skill/constraint scoring, producing a ranked best-k per job.
+4. File-based storage (CSV tables plus NumPy embedding files) for contractors, jobs, embeddings, matches and reviews, behind repository interfaces.
+5. Human review: approve / reject (with reason) / needs-info.
+6. Runs as a CLI that can be scheduled (launchd on the client's Mac; cron or Windows Task Scheduler elsewhere).
+
+Out of scope for v0: **any LLM (no LLM judge)**, contact discovery, email drafting or sending, any LinkedIn/Indeed automation, paid APIs, cloud hosting. The email block is only kept in mind for the architecture (a later `outreach/` module reading approved matches). An LLM judge is a possible future addition (section 9).
+
+## 3. Key decisions already made
+
+- Language: **Python 3.12**.
+- **Hardware target (client machine): MacBook Pro 13-inch (2019), Intel Core i5 1.4 GHz quad-core, 16 GB LPDDR3 RAM, Intel Iris Plus 645 graphics, macOS on Intel x86_64.** CPU-only; the integrated GPU is not usable for ML. Every model, library and batch size must be chosen for this CPU. Report model size and memory in cost estimates. See section 3a for Intel-Mac constraints.
+- **Development machine:** Windows PC, AMD Ryzen 9 9950X3D, NVIDIA RTX 5070 Ti, 32 GB DDR5 RAM (x86_64). It is much faster than the client's Mac and has a GPU the client lacks: **never use the GPU** (no CUDA dependencies or code paths, no `--gpus`), develop and test in CPU-only containers, and treat any timing measured on the dev machine as optimistic; benchmark on the client Mac.
+- Storage: **no database in v0.** Data lives in **CSV files** (human-readable tables) and **NumPy `.npz` files** (embeddings) in a `data/` folder mounted as a Docker volume (section 8a). Similarity is computed in-process with NumPy (a few hundred contractors and thousands of jobs need no vector index). All access goes through repository interfaces (`JobRepository`, `ContractorRepository`, `MatchRepository`, `ReviewRepository`, `VectorStore`), so MongoDB or SQLite can replace the CSV layer later without touching matching code. MongoDB was considered and deferred to keep v0 lightweight.
+- AI is **local only** in v0: pretrained multilingual embeddings via `sentence-transformers`, zero-shot, no training.
+- **No LLM in v0.** The LLM judge is deferred. Explanations come from data, not generated text.
+- Final deliverable: a **Python package with a CLI** run by a scheduler, plus a small local **Streamlit review UI**. Not an EXE (section 10).
+- The human always makes the final call.
+
+## 3a. Intel Mac platform constraints (from web research in October 2026; re-verify before relying)
+
+- **PyTorch publishes no macOS x86_64 wheels after 2.2.2** (2.3.0 and later are Apple-silicon only). Torch 2.2.2 needs Python 3.12 or lower and `numpy<2`, and it is incompatible with very recent `transformers` releases (an Open WebUI report showed an import crash), so a native install needs older `transformers` / `sentence-transformers` pins found by testing.
+- **ONNX Runtime dropped macOS x86_64 wheels from 1.24** (1.23.x is the last). A native ONNX path needs `onnxruntime<1.24`, and the chosen model must exist in the runtime or catalog used. Other ML packages have also dropped Intel-Mac wheels.
+- **Default runtime decision (chosen by the user): Docker Compose with a Linux x86_64 image for the app.** On an Intel Mac this runs at native CPU speed (no emulation) and allows current dependency versions. **Fallback:** a native venv with a frozen lockfile (Python 3.12, `torch==2.2.2`, `numpy<2`, tested pins). Use the fallback only if Docker proves unworkable on the client Mac, and ask first.
+- Docker Desktop must support this Mac's macOS version (a 2019 model likely cannot run the newest macOS, so check Docker Desktop's current system requirements and licensing terms for the client's organization size). Cap the Docker VM memory (about 4 GB).
+- The development machine (Windows, AMD Ryzen 9, x86_64) has the same CPU architecture as the client's Intel Mac, so `linux/amd64` images built locally run unchanged on the client. If anyone builds on Apple silicon instead, build for `linux/amd64`.
+- Expect thermal throttling on this laptop under sustained load; keep batch jobs short.
+
+## 4. Pipeline
+
+```
+sources (APIs/feeds + manual intake)
+ -> normalize -> dedupe -> hard filters (Canada, contract signal, freshness, language)
+ -> build embedding text -> embed job (local, CPU)
+ -> score vs contractor facet vectors (cosine, NumPy) + skill-overlap + rule gates
+ -> top-k (default 5) -> confidence band (high / medium / low)
+ -> store matches (pending_review) -> human review (approve / reject + reason / needs info)
+ -> [later] contact discovery -> email draft -> human sends
+```
+
+Principles: favor recall in the prefilter (a false positive costs seconds of review, a miss costs an opportunity); precision comes from the rule gates and the human reviewer; log every filtered-out posting with its reason for tuning; queue for the human immediately, enrich later.
+
+## 5. Sources
+
+- **Job-board APIs:** Adzuna (free key, Canada endpoint), possibly Jooble; **Job Bank** (jobbank.gc.ca; no official search API known, so scraper or export, to be decided); optional public **ATS feeds** (Greenhouse, Lever, SmartRecruiters and similar) for a curated list of Canadian employers. Mind rate limits (a free Adzuna tier may be around 1,000 calls per month; verify) and each source's terms.
+- **Manual (LinkedIn):** a human pastes jobs through the intake modes below. No automated LinkedIn access.
+- Every source implements one `JobSource` interface and returns raw records; normalization is shared.
+
+### Manual intake modes (no LLM)
+1. **Paste-page mode:** human pastes the whole job page text plus the URL; **rule-based extraction** (regex and section heuristics for common LinkedIn page text patterns: title line, company, location, employment type, "About the job" description) pre-fills a form; the human corrects and confirms in the UI. Unparseable fields are left blank for the human.
+2. **Structured form:** title, company, location, URL, employment type, description.
+3. **Bulk CSV/JSON template** for several jobs at once.
+4. **Stub records** for LinkedIn dashboard or alert lists that show only title, company, location and link: stored as `status = needs_details`; a cheap title/company skill score decides which stubs are worth pasting full details for; the same job found through an API source can fill the stub automatically (match on company_norm + title_norm).
+
+## 6. Canonical job schema (`data/jobs.csv`)
+
+`source`, `source_id`, `url` (canonical), `title_raw`, `title_norm`, `company_raw`, `company_norm`, `location_raw`, `city`, `province` (ISO 3166-2:CA), `country`, `remote_type` (onsite/hybrid/remote/unknown), `employment_type` (contract/permanent/temporary/unknown), `contract_signals` (matched phrases), `duration_months`, `language` (en/fr/bilingual), `description_raw`, `description_clean`, `requirements` (list), `skills` (normalized list), `seniority`, `pay` (min, max, unit, currency), `noc_code`, `posted_at`, `first_seen_at`, `fingerprint`, `embedding` {model, version, dim, vector}, `status` (new / needs_details / filtered_out / matched / no_match), `filter_reason`.
+
+Uniqueness on (`source`, `source_id`) is enforced in code; fingerprints are loaded into an in-memory set at the start of each run. List-valued fields share one cell joined with `|` (conventions in section 8a).
+
+### Standardization techniques
+- HTML to text (BeautifulSoup + lxml), Unicode NFKC normalization (ftfy for mojibake), whitespace cleanup.
+- **Boilerplate stripping:** drop sections by header heuristics ("About us", "Benefits", "Equal opportunity", French equivalents) before embedding.
+- **Title normalization:** remove requisition IDs, location suffixes, "(Contract)", gender markers such as (m/f/d) and "H/F"; casefold copy for matching.
+- **Company normalization:** strip Inc., Ltd., Corp., Ltée, etc.; casefold; alias table in `company_aliases.yaml`.
+- **Location parsing:** Canadian city/province lookup, "Remote - Canada" handling, keep `location_raw`.
+- **Language detection** on description (e.g. lingua); bilingual flag when both languages are present.
+- **Contract detection:** structured employment-type field first, then weighted phrase list in `contract_phrases.yaml` (English and French: contract, fixed-term, mat leave, CDD, durée déterminée, mandat, freelance, etc.), with down-weights for permanent signals and false positives such as "contract management".
+- **Skill extraction:** YAML taxonomy with synonyms (ReactJS, React.js -> react) matched with rapidfuzz or a phrase matcher. This taxonomy is central in v0 because it replaces LLM extraction; plan time to build and maintain it.
+- **Dedupe:** exact (source + source_id, canonical URL), fingerprint hash of (company_norm, title_norm, city), fuzzy (rapidfuzz token-set ratio on titles within the same company), and near-duplicate embeddings (very high cosine within the same company in a recent window).
+
+## 7. Contractors
+
+Schema (`data/contractors.csv` plus `data/contractor_facets.csv`, with one facet per row linked by `contractor_id`): `contractor_id`, `display_name` (personal data), `profile_text_raw`, `profile_text_clean`, `facets` (list of {area, skills, years, seniority, domains}), `languages`, `regions` and remote preference, `noc_codes`, `rate_range` (optional), `profile_hash`; embeddings live in `data/embeddings/` (one vector per facet, plus one for the whole profile, keyed by content hash, with model/version/dim in a metadata file).
+
+Technique: without an LLM, facets are built from a **human-fillable template** (CSV or YAML: area, skills, years, seniority, domains) and checked against the skill taxonomy; the skill matcher can propose skills from the raw description for the human to confirm. Embed each facet from a **fixed text template** so jobs and contractors compare like with like. A contractor's score for a job is the **max over facets**. Re-embed when `profile_hash` or the embedding model changes. Contractor data is personal information: keep it local and out of logs.
+
+## 8. Matching (no LLM)
+
+- **Embedding text template (same for jobs and facets):** `Title: ... | Skills: ... | Domain: ... | Seniority: ... | Summary: <requirements-first cleaned text, truncated to the model's limit>`. E5-family models need `query:` / `passage:` prefixes; check the model card.
+- **Model (CPU-friendly, configurable):** start with `intfloat/multilingual-e5-small` (roughly 118M parameters, well under 1 GB in memory; the lightest sensible option for this laptop's 1.4 GHz Intel CPU, with roughly tens to a few hundred milliseconds per text as an estimate to measure). Consider `multilingual-e5-base` if recall is poor. `BAAI/bge-m3` (roughly 560M parameters, longer inputs) is heavier on CPU: benchmark it before adopting. Multilingual is required for French postings. A lighter ONNX runtime path is an optional later optimization, but on Intel macOS it needs `onnxruntime<1.24` and a model available in that runtime's catalog (verify first).
+- **Score:** weighted combination of cosine similarity and skill overlap. **Rule gates** (configurable): must-have skills present, seniority compatible, location/remote compatible, language compatible, contract signal present. Thresholds live in `settings.yaml` and are tuned on reviewer decisions. Top-k default 5.
+- **Explainability shown to the human (all data-derived):** similarity score, matched facet, matched skills, missing must-have skills, contract phrases found, which gates passed or failed, confidence band.
+- **Review queue ordering:** by confidence band then score; lower bands still shown (recall first).
+- **Evaluation:** a script computing recall and precision against reviewer-labeled pairs; use it to set thresholds and to compare embedding models.
+- Cosine similarity can rank related-but-wrong skills highly (for example Java vs JavaScript): keep must-have skills in the rule gate.
+
+## 8a. Data storage: CSV and NumPy files (no database in v0)
+
+Layout under `data/` (a Docker volume; never overwrite without a backup):
+- `contractors.csv`, `contractor_facets.csv`: human-maintained inputs. The tool only reads them.
+- `jobs.csv`: normalized jobs. New rows are appended; status changes rewrite the file atomically.
+- `matches.csv`: one row per shortlisted (job, contractor, facet): `match_id`, `job_id`, `contractor_id`, `facet`, `cosine`, `skill_overlap`, `score`, `band`, `matched_skills`, `missing_must_have`, `gates_failed`, `created_at`.
+- `reviews.csv`: **append-only** reviewer decisions: `match_id`, `decision` (approved / rejected / needs_info), `reason_code`, `notes`, `reviewer`, `reviewed_at`. The current status of a match is its latest review. This file doubles as the evaluation dataset. Reason codes: wrong_skills, seniority, location, language, not_contract, duplicate, expired, other.
+- `runs.csv`: per-run stats (counts per source, filtered, matched, errors, durations, model and version).
+- `embeddings/*.npz` plus `embeddings/meta.json`: float32 vectors with ids and content hashes, and the model name, version, dimension and text-template hash. Re-embed only rows whose content hash or model changed. Vectors do not belong in CSV.
+- `backups/`: timestamped copies taken before any rewrite of a CSV.
+
+**CSV parser/store module** (`storage/csv_store.py`), standard-library `csv` plus pydantic (no pandas in v0 unless approved):
+- Read with `encoding="utf-8-sig"` (tolerates Excel's BOM) and `newline=""`; write UTF-8 with LF in internal files, with a BOM only in human-facing exports.
+- Validate headers and every row against the pydantic models, with errors naming the file and row number; record a `schema_version` in a sidecar so changes can be migrated. A `validate-data` command runs these checks.
+- Conventions: multi-value cells joined with `|`; booleans `true`/`false`; timestamps ISO 8601 UTC; IDs and NOC codes stay **strings** (Excel strips leading zeros, and some NOC codes start with 0); an empty cell means null; commas and newlines in text are quoted by the `csv` module.
+- **Atomic writes:** write a temp file in the same folder, fsync, then `os.replace`, under a file lock (for example `filelock`) around every read-modify-write. One writer at a time: the scheduled run and the review UI both go through the store inside the container.
+- **CSV/formula injection:** posting text is untrusted. In any human-facing export meant for Excel or Numbers, neutralize cells beginning with `=`, `+`, `-`, `@`, tab or carriage return; keep internal files unsanitized.
+- Humans should not open the live `data/` CSVs in Excel while a run is active (Excel can lock files on Windows and rewrite formatting); use exported copies.
+- Dedupe, lookups and joins happen in memory (loaded at run start), which is fine for thousands to tens of thousands of rows. Retention: archive jobs older than N days (default 90) into `jobs_archive_YYYY-MM.csv`; keep reviews forever.
+- **When to move on:** concurrent writers, frequent row-level updates, cross-file queries or growth beyond tens of thousands of jobs. Then swap the repository implementation to SQLite (single file, no server) or MongoDB.
+
+## 9. Future (not v0): optional LLM judge
+
+If added later, behind an `LLMProvider` interface: input = posting + top-k facets; output = JSON verdicts (strong/possible/reject, reason, matched/missing requirements, red flags, evidence quotes), temperature 0, pydantic-validated. On this hardware, only small local models are realistic (roughly 4B parameters or less, quantized) and CPU inference may take tens of seconds per posting, so it would run only on the shortlist, or optionally through free Groq/Gemini (disabled by default; review data terms; never send contractor personal data without explicit approval). Decide this only after v0 has produced reviewer data showing whether the rule gates and embeddings are not enough.
+
+## 10. Packaging and scheduling
+
+- Python package (`pyproject.toml`), CLI built with Typer, review UI in Streamlit. The app runs in a Docker container (Docker Compose) with `data/` mounted as a volume; there is no database service in v0.
+- **Not an EXE** for v0: bundling PyTorch plus models into an EXE is huge and fragile. Later options: a Docker Compose bundle, or a PyInstaller build of the review UI only.
+- **Scheduling on macOS:** a **launchd** LaunchAgent (preferred over cron on macOS) with a 10 to 15 minute interval running `docker compose run --rm app python -m jobmatch run-once` (or the native equivalent). Runs take a lock file, are idempotent and log to a file. A sleeping or lid-closed laptop skips runs: keep it plugged in with sleep disabled on power (or use `caffeinate`), or use an always-on machine for real use.
+- Latency: on this 1.4 GHz Intel laptop, expect tens to a few hundred milliseconds to embed a job text with a small model (an estimate; measure it); contractors are embedded once. Without an LLM step, a full run per batch of jobs should be fast. Measure on the real machine.
+
+## 11. Suggested build phases (each needs a cost report and approval)
+
+1. Repo skeleton, config, pydantic schemas, repository interfaces with the CSV store and NumPy vector store (atomic writes, locking, backups, `validate-data`), Dockerfile and Docker Compose (app with `data/` volume and capped memory), and a smoke test that the embedding model loads and encodes on the target Mac.
+2. Normalization modules with tests (English and French fixtures), skill taxonomy v1, contract phrase list v1.
+3. Adzuna source, manual intake (paste-page with rule-based extraction, form, CSV), stubs and dedupe.
+4. Contractor template import and facet embedding; job embedding; NumPy scorer with rule gates; evaluation script.
+5. Streamlit review UI with approve/reject/needs-info and reason codes, plus reviewer-decision logging.
+6. Scheduler wrapper (lock, logging) and run reports.
+7. Later: Job Bank source, ATS feeds, threshold tuning and few-shot ideas from reviewer data, optional LLM judge, then contact discovery and email drafting.
+
+## 12. Assumptions and open questions
+
+- Known: the client machine is a 2019 13-inch MacBook Pro (Intel i5 1.4 GHz quad-core, 16 GB RAM, Intel graphics). Development machine (decided): Windows PC with AMD Ryzen 9 9950X3D, RTX 5070 Ti and 32 GB RAM, x86_64 like the client's Mac. Docker is the chosen runtime. Still to confirm: the client Mac's macOS version and Docker Desktop support, free disk space, whether it can stay on and plugged in, and Docker Desktop licensing for the client's organization size.
+- How many contractors, and what does a typical description look like (length, structure, number of distinct specialties)?
+- How many labeled examples or historical selections exist?
+- Which Job Bank access method is acceptable (own scraper, export, third-party actor)?
+- Expected posting volume per day after hard filters.
+- Who maintains the skill taxonomy and contract phrase list, and how often?
+- Compliance: CASL for outreach later, and privacy obligations (PIPEDA) for contractor data. Not legal advice; get qualified review.
