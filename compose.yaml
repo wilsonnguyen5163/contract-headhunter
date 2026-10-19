@@ -1,0 +1,26 @@
+services:
+  app:
+    build:
+      context: .
+      platforms:
+        - linux/amd64
+    platform: linux/amd64
+    image: jobmatch:dev
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-0}
+    volumes:
+      - ./data:/app/data
+      - ./exports:/app/exports
+      - ./config:/app/config:ro
+      # Source and tests mounted so code edits need no rebuild (the project is installed editable).
+      - ./src:/app/src
+      - ./tests:/app/tests
+      - hf-cache:/cache/huggingface
+    # Client Mac has 16 GB; keep the container well under it.
+    mem_limit: 4g
+
+volumes:
+  hf-cache:

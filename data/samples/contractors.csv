@@ -1,0 +1,4 @@
+contractor_id,display_name,profile_text_raw,languages,regions,remote_preference,noc_codes,rate_min,rate_max,rate_unit,rate_currency
+C001,Sample Contractor A,"SYNTHETIC SAMPLE. Senior Python and data engineer, 10 years building ETL pipelines on AWS for banks and insurers.",en|fr,CA-ON|CA-QC,hybrid,21231|21211,95,120,hour,CAD
+C002,Sample Contractor B,"EXEMPLE FICTIF. Analyste d'affaires bilingue, 8 ans en gestion de projet et analyse des processus dans le secteur public.",fr|en,CA-QC,remote,21222,750,900,day,CAD
+C003,Sample Contractor C,"SYNTHETIC SAMPLE. IT director, 15 years leading programs, budgets and vendors in banking and telecom.",en,CA,any,00012|20012,,,,

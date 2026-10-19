@@ -1,6 +1,6 @@
 # PROJECT_CONTEXT.md: jobmatch (preliminary context for Claude Code)
 
-Status: design stage, nothing built yet. Estimates and model choices below are starting assumptions, not verified facts. Rules for how you work are in `CLAUDE.md`; follow them.
+Status: build phases 1 (skeleton) and 2 (normalization) done on 2026-10-19 and verified on the dev machine; not yet run on the client Mac. Other estimates and model choices below are starting assumptions, not verified facts. Decisions made since the first draft are logged in section 13. Rules for how you work are in `CLAUDE.md`; follow them.
 
 ## 1. Problem
 
@@ -109,6 +109,7 @@ Layout under `data/` (a Docker volume; never overwrite without a backup):
 - `runs.csv`: per-run stats (counts per source, filtered, matched, errors, durations, model and version).
 - `embeddings/*.npz` plus `embeddings/meta.json`: float32 vectors with ids and content hashes, and the model name, version, dimension and text-template hash. Re-embed only rows whose content hash or model changed. Vectors do not belong in CSV.
 - `backups/`: timestamped copies taken before any rewrite of a CSV.
+- `raw/<source>-YYYY-MM.jsonl` (phase 3): **append-only** raw records exactly as fetched or pasted, one JSON object per line with source, source_id, fetched_at and payload. Feeds the later HR-contact step (the "raw DATABASE" in the pipeline diagram) and allows re-normalizing when rules change.
 
 **CSV parser/store module** (`storage/csv_store.py`), standard-library `csv` plus pydantic (no pandas in v0 unless approved):
 - Read with `encoding="utf-8-sig"` (tolerates Excel's BOM) and `newline=""`; write UTF-8 with LF in internal files, with a BOM only in human-facing exports.
@@ -150,3 +151,17 @@ If added later, behind an `LLMProvider` interface: input = posting + top-k facet
 - Expected posting volume per day after hard filters.
 - Who maintains the skill taxonomy and contract phrase list, and how often?
 - Compliance: CASL for outreach later, and privacy obligations (PIPEDA) for contractor data. Not legal advice; get qualified review.
+- Backup retention: `data/backups/` grows without limit (every `jobs.csv` status rewrite adds a copy). Deleting old backups is destructive, so a retention policy needs an explicit decision.
+
+## 13. Decisions log
+
+**2026-10-19**
+- **Pipeline diagram** (`JTBD2-Full_pipeline.png`) is a general template for data flow, not a v0 spec. Its blocks map to the build phases: job intake and filtering (phases 2–3), embedding and DATABASE (phase 1, CSV + NumPy), summary/context = rule-based embedding text template (phase 4), matching (phase 4), human decision (phase 5). The "Human / LLM" decision makers are to be finalized later; v0 is human only, no LLM. HR-contact search, outreach email and send are out of scope for v0, and a human always sends.
+- **Contractor sign-up:** v0 uses a human-maintained (dummy, synthetic for now) contractor CSV. A live sign-up flow is a later option.
+- **Raw job store:** add append-only `data/raw/*.jsonl` in phase 3 (section 8a).
+- **Dependency policy:** versions are chosen for the client Mac, not the dev PC. The app runs in a Linux x86_64 container, so the Intel-macOS wheel limits (section 3a) do not apply inside it; what matters is the CPU instruction set (the client's i5 has AVX2, no AVX-512) and Docker Desktop support for the client's macOS version (to verify). `uv.lock` is resolved with `exclude-newer` (cutoff 2026-10-05) so only releases at least about 2 weeks old are used; move the cutoff deliberately and re-test.
+- **Locked stack (phase 1):** Python 3.12, torch 2.14.1+cpu (PyTorch CPU index, no CUDA), sentence-transformers 6.1.0, transformers 5.18.0, numpy 2.5.3, pydantic 2.13.5, filelock 4.0.10. Image `jobmatch:dev` is 2.08 GB on disk (456 MB compressed).
+- **Embedding model pinned:** `intfloat/multilingual-e5-small` at revision `614241f622f53c4eeff9890bdc4f31cfecc418b3`. Dev-PC smoke test: dim 384, 6.6 ms/text, about 1 GB peak memory. Client-Mac numbers still to measure.
+- **Phase 2 (normalization):** `normalize/` turns a `RawJob` into a `Job` with pure, deterministic functions. Language detection is a built-in English/French function-word check (no lingua); words shared with Spanish and other Romance languages are excluded so other languages are not mistaken for French. Skill matching is exact whole-word, accent-insensitive; rapidfuzz (fuzzy dedupe) waits for phase 3. The skill taxonomy v1 covers diverse fields (about 200 skills in 15 categories), since the real contractor list is diverse and will be filled in by hand. New config files: `normalization.yaml`, `canada_locations.yaml`. New dependencies: beautifulsoup4, lxml, ftfy.
+- **Hard filters (recall first):** `not_canada` only when a foreign location is explicit, `not_contract` only on a clear permanent signal, `stale` past `normalize.freshness_days`, `unsupported_language` only for texts of 40+ words with no English/French signal. Unknowns stay `new`; postings with no description become `needs_details`.
+- **Score-scale finding:** raw E5 cosines are compressed (an unrelated profile scored 0.83 against a job, a related one 0.92), so the GUESS bands in `settings.yaml` (high 0.80, medium 0.65) cannot be used on raw cosine. Phase 4 must rescale scores (for example relative to each job's score distribution) before banding, then tune on reviewer data.

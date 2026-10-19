@@ -1,0 +1,42 @@
+# jobmatch settings. Values marked GUESS are starting assumptions, to be tuned on reviewer data.
+schema_version: 1
+
+paths:
+  # Relative paths resolve against the project root (the parent of this config folder).
+  data_dir: data
+  exports_dir: exports
+
+storage:
+  lock_timeout_seconds: 30 # GUESS: how long a run or the review UI waits for a CSV lock
+
+embedding:
+  model_name: intfloat/multilingual-e5-small # changing the model needs approval and a re-embed
+  # Exact Hugging Face commit of the model (verified by smoke-embed on 2026-10-19).
+  model_revision: 614241f622f53c4eeff9890bdc4f31cfecc418b3
+  batch_size: 16 # GUESS: small batches for the client's 1.4 GHz Intel CPU
+  max_seq_length: 512 # e5-small's input limit (tokens)
+  normalize_embeddings: true
+  # E5 models need "query: " / "passage: " prefixes (see the model card).
+  # Which side gets which prefix is a GUESS, to be evaluated in phase 4.
+  job_prefix: "query: "
+  facet_prefix: "passage: "
+
+normalize:
+  freshness_days: 30 # GUESS: postings older than this are filtered as stale
+  contract_score_threshold: 0.8 # GUESS: net phrase score to call a posting contract (or, if negative, permanent)
+  language_min_hits: 4 # GUESS: EN/FR function words needed before trusting language detection
+  bilingual_min_share: 0.25 # GUESS: minority-language share of those words to call a text bilingual
+  language_filter_min_words: 40 # GUESS: filter as unsupported language only for texts at least this long
+  max_requirements: 15 # requirement bullets kept per posting
+
+matching: # used from phase 4
+  top_k: 5
+  weights:
+    cosine: 0.7 # GUESS
+    skill_overlap: 0.3 # GUESS
+  bands:
+    high: 0.80 # GUESS
+    medium: 0.65 # GUESS
+
+logging:
+  level: INFO

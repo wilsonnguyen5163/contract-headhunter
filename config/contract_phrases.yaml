@@ -1,0 +1,117 @@
+# Contract-signal phrases, v1 (English and French).
+# Matching is case- and accent-insensitive, whole words, plural "s" allowed.
+# All weights are GUESSES, to be tuned on reviewer decisions.
+# Score = sum(contract weights found) - sum(permanent weights found)
+#         + duration_weight if a duration ("6-month", "12 mois") is found next to a contract signal.
+# The posting is "contract" at score >= normalize.contract_score_threshold (settings.yaml),
+# "permanent" at score <= -threshold, otherwise "unknown" (kept for review: recall first).
+version: 2
+
+duration_weight: 0.5
+
+contract:
+  # English
+  - { phrase: "contract", lang: en, weight: 1.0 }
+  - { phrase: "contractor", lang: en, weight: 1.0 }
+  - { phrase: "contract role", lang: en, weight: 1.0 }
+  - { phrase: "contract position", lang: en, weight: 1.0 }
+  - { phrase: "contract duration", lang: en, weight: 1.0 }
+  - { phrase: "independent contractor", lang: en, weight: 1.0 }
+  - { phrase: "incorporated contractor", lang: en, weight: 1.0 }
+  - { phrase: "contract-to-hire", lang: en, weight: 0.6 }
+  - { phrase: "fixed-term", lang: en, weight: 1.0 }
+  - { phrase: "term position", lang: en, weight: 0.8 }
+  - { phrase: "term role", lang: en, weight: 0.8 }
+  - { phrase: "temporary", lang: en, weight: 0.6 }
+  # No bare "temp": with the optional plural it would match French "temps" ("temps plein" = full-time).
+  - { phrase: "interim", lang: en, weight: 0.6 }
+  - { phrase: "secondment", lang: en, weight: 0.6 }
+  - { phrase: "seasonal", lang: en, weight: 0.5 }
+  - { phrase: "casual", lang: en, weight: 0.4 }
+  - { phrase: "project-based", lang: en, weight: 0.6 }
+  - { phrase: "maternity leave", lang: en, weight: 0.8 }
+  - { phrase: "mat leave", lang: en, weight: 0.8 }
+  - { phrase: "parental leave", lang: en, weight: 0.7 }
+  - { phrase: "leave coverage", lang: en, weight: 0.7 }
+  - { phrase: "freelance", lang: en, weight: 0.9 }
+  - { phrase: "freelancer", lang: en, weight: 0.9 }
+  - { phrase: "consultant", lang: en, weight: 0.3 }
+  - { phrase: "mandate", lang: en, weight: 0.5 }
+  - { phrase: "possibility of extension", lang: en, weight: 0.6 }
+  - { phrase: "possible extension", lang: en, weight: 0.6 }
+  - { phrase: "with extension", lang: en, weight: 0.6 }
+  # French
+  - { phrase: "contrat", lang: fr, weight: 1.0 }
+  - { phrase: "contractuel", lang: fr, weight: 1.0 }
+  - { phrase: "contractuelle", lang: fr, weight: 1.0 }
+  - { phrase: "poste contractuel", lang: fr, weight: 1.0 }
+  - { phrase: "durée déterminée", lang: fr, weight: 1.0 }
+  - { phrase: "CDD", lang: fr, weight: 1.0 }
+  - { phrase: "mandat", lang: fr, weight: 0.5 }
+  - { phrase: "pigiste", lang: fr, weight: 0.9 }
+  - { phrase: "travailleur autonome", lang: fr, weight: 0.9 }
+  - { phrase: "travailleuse autonome", lang: fr, weight: 0.9 }
+  - { phrase: "consultant autonome", lang: fr, weight: 0.9 }
+  - { phrase: "temporaire", lang: fr, weight: 0.6 }
+  - { phrase: "occasionnel", lang: fr, weight: 0.4 }
+  - { phrase: "occasionnelle", lang: fr, weight: 0.4 }
+  - { phrase: "intérimaire", lang: fr, weight: 0.6 }
+  - { phrase: "saisonnier", lang: fr, weight: 0.5 }
+  - { phrase: "détachement", lang: fr, weight: 0.6 }
+  - { phrase: "remplacement", lang: fr, weight: 0.6 }
+  - { phrase: "remplacement de congé de maternité", lang: fr, weight: 1.0 }
+  - { phrase: "congé de maternité", lang: fr, weight: 0.8 }
+  - { phrase: "congé parental", lang: fr, weight: 0.7 }
+  - { phrase: "possibilité de prolongation", lang: fr, weight: 0.6 }
+  - { phrase: "prolongation possible", lang: fr, weight: 0.6 }
+
+permanent:
+  - { phrase: "permanent", lang: en, weight: 1.0 }
+  - { phrase: "permanent full-time", lang: en, weight: 1.0 }
+  - { phrase: "full-time permanent", lang: en, weight: 1.0 }
+  - { phrase: "permanent position", lang: en, weight: 1.0 }
+  - { phrase: "indeterminate", lang: en, weight: 1.0 }
+  - { phrase: "permanente", lang: fr, weight: 1.0 }
+  - { phrase: "poste permanent", lang: fr, weight: 1.0 }
+  - { phrase: "emploi permanent", lang: fr, weight: 1.0 }
+  - { phrase: "poste régulier", lang: fr, weight: 0.8 }
+  - { phrase: "emploi régulier", lang: fr, weight: 0.8 }
+  - { phrase: "CDI", lang: fr, weight: 1.0 }
+  - { phrase: "durée indéterminée", lang: fr, weight: 1.0 }
+
+# Phrases containing a signal word that do NOT describe the job's employment type.
+false_positives:
+  - { phrase: "contract management", lang: en }
+  - { phrase: "contract negotiation", lang: en }
+  - { phrase: "contract law", lang: en }
+  - { phrase: "contract administration", lang: en }
+  - { phrase: "contract drafting", lang: en }
+  - { phrase: "contract manager", lang: en }
+  - { phrase: "contracts manager", lang: en }
+  - { phrase: "contract specialist", lang: en }
+  - { phrase: "contract analyst", lang: en }
+  - { phrase: "contracting officer", lang: en }
+  - { phrase: "gestionnaire de contrats", lang: fr }
+  - { phrase: "agent de contrats", lang: fr }
+  - { phrase: "permanent resident", lang: en }
+  - { phrase: "permanent residency", lang: en }
+  - { phrase: "permanent residence", lang: en }
+  - { phrase: "temporary foreign worker", lang: en }
+  - { phrase: "our mandate", lang: en }
+  - { phrase: "gestion des contrats", lang: fr }
+  - { phrase: "négociation de contrats", lang: fr }
+  - { phrase: "administration des contrats", lang: fr }
+  - { phrase: "rédaction de contrats", lang: fr }
+  - { phrase: "résident permanent", lang: fr }
+  - { phrase: "résidente permanente", lang: fr }
+  - { phrase: "résidence permanente", lang: fr }
+  - { phrase: "travailleur étranger temporaire", lang: fr }
+  - { phrase: "notre mandat", lang: fr }
+  - { phrase: "votre mandat", lang: fr }
+
+# Values of a source's own employment-type field (compared case-insensitively,
+# with "_", "-" and spaces treated alike). The structured field wins over phrases.
+structured_types:
+  contract: [contract, contractor, freelance, fixed term, contrat, contractuel, cdd]
+  temporary: [temporary, temp, temporaire, seasonal, saisonnier, casual, occasionnel]
+  permanent: [permanent, permanent full time, permanent part time, regular, régulier, indeterminate, cdi]

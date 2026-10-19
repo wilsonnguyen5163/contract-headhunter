@@ -1,0 +1,206 @@
+# Canadian location lookup, v1 (hand-written; extend as postings show gaps).
+# Names and terms match case- and accent-insensitively as whole words;
+# province abbreviations match case-sensitively ("ON", never the word "on").
+version: 1
+
+provinces:
+  CA-AB: { names: [alberta], abbreviations: [AB, Alta., ALTA] }
+  CA-BC: { names: [british columbia, colombie-britannique], abbreviations: [BC, B.C., C.-B., CB] }
+  CA-MB: { names: [manitoba], abbreviations: [MB, Man.] }
+  CA-NB: { names: [new brunswick, nouveau-brunswick], abbreviations: [NB, N.B., N.-B.] }
+  CA-NL:
+    names: [newfoundland and labrador, terre-neuve-et-labrador, newfoundland, terre-neuve, labrador]
+    abbreviations: [NL, N.L., T.-N.-L., NFLD]
+  CA-NS: { names: [nova scotia, nouvelle-écosse], abbreviations: [NS, N.S., N.-É.] }
+  CA-NT:
+    names: [northwest territories, territoires du nord-ouest]
+    abbreviations: [NT, NWT, N.W.T., T.N.-O.]
+  CA-NU: { names: [nunavut], abbreviations: [NU] }
+  CA-ON: { names: [ontario], abbreviations: ["ON", Ont., ONT] } # quoted: YAML reads bare ON as true
+  CA-PE:
+    names: [prince edward island, île-du-prince-édouard]
+    abbreviations: [PE, PEI, P.E.I., Î.-P.-É.]
+  CA-QC:
+    names: [quebec, québec, province de québec, province of quebec]
+    abbreviations: [QC, Qc, Qué., QUE, PQ]
+  CA-SK: { names: [saskatchewan], abbreviations: [SK, Sask.] }
+  CA-YT: { names: [yukon], abbreviations: [YT, Yuk.] }
+
+# City -> province. A city alone implies Canada unless a foreign country is named.
+cities:
+  CA-ON:
+    - Toronto
+    - Ottawa
+    - Mississauga
+    - Brampton
+    - Hamilton
+    - London
+    - Markham
+    - Vaughan
+    - Kitchener
+    - Waterloo
+    - Windsor
+    - Richmond Hill
+    - Oakville
+    - Burlington
+    - Oshawa
+    - Barrie
+    - Guelph
+    - Kingston
+    - Cambridge
+    - Sudbury
+    - Greater Sudbury
+    - Thunder Bay
+    - Milton
+    - Ajax
+    - Pickering
+    - Whitby
+    - Newmarket
+    - St. Catharines
+    - Niagara Falls
+    - Peterborough
+    - Sault Ste. Marie
+    - North York
+    - Scarborough
+    - Etobicoke
+    - Kanata
+    - Nepean
+  CA-QC:
+    - Montréal
+    - Laval
+    - Gatineau
+    - Longueuil
+    - Sherbrooke
+    - Saguenay
+    - Lévis
+    - Trois-Rivières
+    - Terrebonne
+    - Brossard
+    - Drummondville
+    - Saint-Jérôme
+    - Granby
+    - Blainville
+    - Boucherville
+    - Rimouski
+    - Saint-Hyacinthe
+    - Repentigny
+    - Québec City
+    - Ville de Québec
+    - Dorval
+    - Pointe-Claire
+    - Mirabel
+  CA-BC:
+    - Vancouver
+    - Surrey
+    - Burnaby
+    - Richmond
+    - Victoria
+    - Kelowna
+    - Abbotsford
+    - Coquitlam
+    - Langley
+    - Nanaimo
+    - Kamloops
+    - North Vancouver
+    - Prince George
+    - Chilliwack
+    - New Westminster
+  CA-AB:
+    - Calgary
+    - Edmonton
+    - Red Deer
+    - Lethbridge
+    - St. Albert
+    - Medicine Hat
+    - Fort McMurray
+    - Airdrie
+    - Grande Prairie
+  CA-MB: [Winnipeg, Brandon, Steinbach]
+  CA-SK: [Saskatoon, Regina, Prince Albert, Moose Jaw]
+  CA-NS: [Halifax, Dartmouth, Sydney, Truro]
+  CA-NB: [Moncton, Saint John, Fredericton, Dieppe, Bathurst]
+  CA-NL: [St. John's, Mount Pearl, Corner Brook]
+  CA-PE: [Charlottetown, Summerside]
+  CA-NT: [Yellowknife]
+  CA-YT: [Whitehorse]
+  CA-NU: [Iqaluit]
+
+canada_terms: [canada]
+
+# Clear non-Canada signals -> ISO country code. "US" alone is not listed (English pronoun).
+foreign_countries:
+  US: [united states, united states of america, usa, u.s.a., u.s., états-unis, é.-u.]
+  GB: [united kingdom, uk, u.k., royaume-uni, england, angleterre, scotland]
+  IE: [ireland, irlande]
+  FR: [france]
+  DE: [germany, allemagne]
+  NL: [netherlands, pays-bas]
+  BE: [belgium, belgique]
+  CH: [switzerland, suisse]
+  IN: [india, inde]
+  PH: [philippines]
+  AU: [australia, australie]
+  MX: [mexico, mexique]
+  BR: [brazil, brésil]
+  ES: [spain, espagne]
+
+us_states:
+  - alabama
+  - alaska
+  - arizona
+  - arkansas
+  - california
+  - colorado
+  - connecticut
+  - delaware
+  - florida
+  - georgia
+  - hawaii
+  - idaho
+  - illinois
+  - indiana
+  - iowa
+  - kansas
+  - kentucky
+  - louisiana
+  - maine
+  - maryland
+  - massachusetts
+  - michigan
+  - minnesota
+  - mississippi
+  - missouri
+  - montana
+  - nebraska
+  - nevada
+  - new hampshire
+  - new jersey
+  - new mexico
+  - new york
+  - north carolina
+  - north dakota
+  - ohio
+  - oklahoma
+  - oregon
+  - pennsylvania
+  - rhode island
+  - south carolina
+  - south dakota
+  - tennessee
+  - texas
+  - utah
+  - vermont
+  - virginia
+  - washington
+  - west virginia
+  - wisconsin
+  - wyoming
+  - district of columbia
+
+# Two-letter codes recognised only as ", XX" in a location ("Seattle, WA").
+# "CA" is deliberately absent: here it means Canada.
+us_state_codes: [AL, AK, AZ, AR, CO, CT, DE, FL, GA, HI, ID, IL, IN, IA, KS, KY, LA, ME, MD, MA, MI, MN, MS, MO, MT, NE, NV, NH, NJ, NM, NY, NC, ND, OH, OK, OR, PA, RI, SC, SD, TN, TX, UT, VT, VA, WA, WV, WI, WY, DC]
+
+remote_terms: [remote, fully remote, 100% remote, work from home, wfh, télétravail, en télétravail, à distance, travail à distance, virtual]
+hybrid_terms: [hybrid, hybride, hybrid work, mode hybride]
+onsite_terms: [on-site, onsite, on site, in office, in-office, sur place, en présentiel, présentiel, sur site]

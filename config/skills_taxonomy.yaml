@@ -1,0 +1,237 @@
+# Skill taxonomy v1: canonical skill (lowercase key) -> synonyms in English and French.
+# Matching is case- and accent-insensitive and whole-word ("java" never matches "javascript").
+# Each alias may belong to one skill only (checked on load).
+# Ambiguous everyday words are left out on purpose (go, swift, spring, vue, node, tableau,
+# lean, safe, docker containers...): add a longer, unambiguous alias instead.
+# Fields are diverse; extend this file as real contractor profiles and postings come in.
+version: 1
+skills:
+  # ---------------- software development ----------------
+  python: { category: software, aliases: [python3, python 3] }
+  java: { category: software, aliases: [java se, java ee, jakarta ee, j2ee] }
+  javascript: { category: software, aliases: [js, ecmascript] }
+  typescript: { category: software, aliases: [] }
+  "c#": { category: software, aliases: [csharp, c sharp] }
+  .net: { category: software, aliases: [dotnet, .net core, asp.net, asp.net core] }
+  c++: { category: software, aliases: [cpp] }
+  golang: { category: software, aliases: [go language, go programming] }
+  rust: { category: software, aliases: [rust programming] }
+  php: { category: software, aliases: [laravel] }
+  ruby: { category: software, aliases: [ruby on rails, rails] }
+  kotlin: { category: software, aliases: [] }
+  ios development: { category: software, aliases: [développement ios, swiftui, objective-c] }
+  android development: { category: software, aliases: [développement android] }
+  react: { category: software, aliases: [reactjs, react.js, react native] }
+  angular: { category: software, aliases: [angularjs, angular.js] }
+  vue.js: { category: software, aliases: [vuejs] }
+  node.js: { category: software, aliases: [nodejs, express.js] }
+  django: { category: software, aliases: [] }
+  flask: { category: software, aliases: [fastapi] }
+  spring boot: { category: software, aliases: [spring framework] }
+  html: { category: software, aliases: [html5] }
+  css: { category: software, aliases: [css3, sass, scss] }
+  rest api: { category: software, aliases: [rest apis, restful, restful api, api rest, apis rest] }
+  graphql: { category: software, aliases: [] }
+  microservices: { category: software, aliases: [microservice, micro-services, architecture microservices] }
+  git: { category: software, aliases: [github, gitlab, bitbucket] }
+  qa testing: { category: software, aliases: [software testing, tests logiciels, quality assurance testing, test automation, automatisation des tests, selenium, cypress, playwright] }
+  ui/ux design: { category: software, aliases: [ux design, ui design, user experience design, expérience utilisateur, figma] }
+  mainframe: { category: software, aliases: [cobol, z/os] }
+  salesforce: { category: software, aliases: [sfdc, salesforce crm, apex] }
+  sap: { category: software, aliases: [sap s/4hana, s/4hana, sap erp, sap fico] }
+  servicenow: { category: software, aliases: [] }
+  sharepoint: { category: software, aliases: [sharepoint online] }
+  power platform: { category: software, aliases: [power apps, powerapps, power automate] }
+  dynamics 365: { category: software, aliases: [microsoft dynamics, dynamics crm, d365] }
+
+  # ---------------- data and analytics ----------------
+  sql: { category: data, aliases: [t-sql, pl/sql, tsql] }
+  postgresql: { category: data, aliases: [postgres] }
+  mysql: { category: data, aliases: [mariadb] }
+  sql server: { category: data, aliases: [microsoft sql server, ms sql, mssql] }
+  oracle database: { category: data, aliases: [oracle db] }
+  mongodb: { category: data, aliases: [mongo] }
+  nosql: { category: data, aliases: [cassandra, dynamodb] }
+  etl: { category: data, aliases: [elt, data pipeline, data pipelines, pipelines de données, ssis, informatica] }
+  data engineering: { category: data, aliases: [data engineer, ingénierie des données, ingénieur de données, ingénieure de données] }
+  data analysis: { category: data, aliases: [data analyst, analyse de données, analyste de données] }
+  data science: { category: data, aliases: [data scientist, science des données, scientifique des données] }
+  machine learning: { category: data, aliases: [apprentissage automatique, deep learning, apprentissage profond, scikit-learn, tensorflow, pytorch] }
+  generative ai: { category: data, aliases: [genai, large language models, llm, llms, ia générative] }
+  nlp: { category: data, aliases: [natural language processing, traitement du langage naturel] }
+  power bi: { category: data, aliases: [powerbi, dax] }
+  tableau software: { category: data, aliases: [tableau desktop, tableau server] }
+  excel: { category: data, aliases: [microsoft excel, ms excel, advanced excel, excel avancé, vba] }
+  spark: { category: data, aliases: [apache spark, pyspark] }
+  databricks: { category: data, aliases: [] }
+  snowflake: { category: data, aliases: [] }
+  airflow: { category: data, aliases: [apache airflow] }
+  kafka: { category: data, aliases: [apache kafka] }
+  hadoop: { category: data, aliases: [hdfs, hive] }
+  dbt: { category: data, aliases: [data build tool] }
+  data governance: { category: data, aliases: [gouvernance des données, data quality, qualité des données, master data management] }
+  data modeling: { category: data, aliases: [data modelling, modélisation des données, dimensional modeling] }
+  data warehouse: { category: data, aliases: [data warehousing, entrepôt de données, entrepôts de données] }
+  sas: { category: data, aliases: [sas programming, sas enterprise guide] }
+  r programming: { category: data, aliases: [rstudio, r language, langage r] }
+  statistics: { category: data, aliases: [statistical analysis, statistiques, analyse statistique] }
+
+  # ---------------- cloud, infrastructure, devops ----------------
+  aws: { category: cloud, aliases: [amazon web services] }
+  azure: { category: cloud, aliases: [microsoft azure] }
+  gcp: { category: cloud, aliases: [google cloud, google cloud platform] }
+  docker: { category: cloud, aliases: [] }
+  kubernetes: { category: cloud, aliases: [k8s, aks, eks, openshift] }
+  terraform: { category: cloud, aliases: [infrastructure as code, ansible] }
+  ci/cd: { category: cloud, aliases: [cicd, continuous integration, intégration continue, jenkins, github actions, azure devops] }
+  devops: { category: cloud, aliases: [] }
+  linux: { category: cloud, aliases: [unix, red hat, rhel, ubuntu] }
+  windows server: { category: cloud, aliases: [] }
+  active directory: { category: cloud, aliases: [entra id, azure ad, azure active directory] }
+  network administration: { category: cloud, aliases: [administration réseau, réseautique, cisco, tcp/ip, lan/wan] }
+  vmware: { category: cloud, aliases: [vsphere] }
+  itil: { category: cloud, aliases: [it service management, itsm, gestion des services ti] }
+  help desk: { category: cloud, aliases: [service desk, technical support, soutien technique, support technique, centre de services] }
+  microsoft 365: { category: cloud, aliases: [office 365, m365, o365, exchange online] }
+
+  # ---------------- cybersecurity ----------------
+  cybersecurity: { category: security, aliases: [cyber security, cybersécurité, information security, sécurité de l'information, infosec] }
+  penetration testing: { category: security, aliases: [pen testing, pentest, pentesting, tests d'intrusion, ethical hacking] }
+  siem: { category: security, aliases: [splunk, qradar, microsoft sentinel] }
+  identity and access management: { category: security, aliases: [iam, gestion des identités et des accès, okta, sailpoint] }
+  security architecture: { category: security, aliases: [architecture de sécurité] }
+  threat and risk assessment: { category: security, aliases: [threat risk assessment, évaluation des menaces et des risques] }
+  iso 27001: { category: security, aliases: [iso/iec 27001] }
+  soc 2: { category: security, aliases: [soc2] }
+  cloud security: { category: security, aliases: [sécurité infonuagique, sécurité du nuage] }
+  security clearance: { category: security, aliases: [secret clearance, reliability status, enhanced reliability, top secret clearance, cote de fiabilité, cote de sécurité, cote secret] }
+
+  # ---------------- project, program, product, business analysis ----------------
+  project management: { category: management, aliases: [project manager, gestion de projet, gestion de projets, chargé de projet, chargée de projet, chef de projet, gestionnaire de projet, pmp] }
+  program management: { category: management, aliases: [program manager, gestion de programme, gestionnaire de programme] }
+  business analysis: { category: business, aliases: [business analyst, analyse d'affaires, analyste d'affaires, analyste fonctionnel, analyste fonctionnelle, requirements gathering, collecte des exigences] }
+  process mapping: { category: business, aliases: [cartographie des processus, process modelling, process modeling, bpmn, modélisation des processus] }
+  agile: { category: management, aliases: [scrum, agilité, kanban, scrum master, scaled agile] }
+  product management: { category: management, aliases: [product manager, product owner, gestion de produit, propriétaire de produit, responsable de produit] }
+  change management: { category: management, aliases: [gestion du changement, organizational change management, prosci] }
+  budgeting: { category: management, aliases: [budget management, gestion budgétaire, budget planning, planification budgétaire] }
+  vendor management: { category: management, aliases: [gestion des fournisseurs, supplier management] }
+  stakeholder management: { category: management, aliases: [gestion des parties prenantes, stakeholder engagement, mobilisation des parties prenantes] }
+  risk management: { category: management, aliases: [gestion des risques, enterprise risk management] }
+  six sigma: { category: management, aliases: [lean six sigma, lean management, continuous improvement, amélioration continue] }
+  erp implementation: { category: management, aliases: [erp, progiciel de gestion intégré, pgi] }
+  ms project: { category: management, aliases: [microsoft project] }
+  jira: { category: management, aliases: [confluence] }
+
+  # ---------------- finance and accounting ----------------
+  accounting: { category: finance, aliases: [comptabilité, accountant, comptable] }
+  cpa: { category: finance, aliases: [chartered professional accountant, comptable professionnel agréé, cpa canada] }
+  financial reporting: { category: finance, aliases: [rapports financiers, information financière, états financiers, financial statements] }
+  ifrs: { category: finance, aliases: [] }
+  aspe: { category: finance, aliases: [] }
+  accounts payable: { category: finance, aliases: [comptes fournisseurs, a/p] }
+  accounts receivable: { category: finance, aliases: [comptes clients, a/r] }
+  payroll: { category: finance, aliases: [paie, payroll administration, ceridian, adp] }
+  bookkeeping: { category: finance, aliases: [tenue de livres] }
+  financial analysis: { category: finance, aliases: [analyse financière, financial analyst, analyste financier, analyste financière, fp&a, financial planning and analysis] }
+  financial modeling: { category: finance, aliases: [financial modelling, modélisation financière] }
+  audit: { category: finance, aliases: [auditing, internal audit, audit interne, external audit, vérification interne] }
+  taxation: { category: finance, aliases: [fiscalité, impôts, corporate tax, impôt des sociétés, gst/hst, tps/tvh, tps/tvq] }
+  quickbooks: { category: finance, aliases: [quickbooks online, qbo] }
+  sage accounting: { category: finance, aliases: [sage 300, sage 50, sage intacct, simple comptable] }
+  treasury: { category: finance, aliases: [trésorerie, cash management, gestion de trésorerie] }
+  month-end close: { category: finance, aliases: [month end close, clôture mensuelle, fin de mois, year-end close, fin d'exercice] }
+  reconciliation: { category: finance, aliases: [account reconciliation, bank reconciliation, conciliation bancaire, rapprochement bancaire] }
+  cost accounting: { category: finance, aliases: [comptabilité de coûts, prix de revient] }
+
+  # ---------------- human resources ----------------
+  recruitment: { category: hr, aliases: [recruiting, talent acquisition, recrutement, acquisition de talents, recruiter, recruteur, recruteuse] }
+  human resources: { category: hr, aliases: [hr generalist, ressources humaines, conseiller en ressources humaines, conseillère en ressources humaines, hr business partner, hrbp, partenaire d'affaires rh] }
+  labour relations: { category: hr, aliases: [labor relations, relations de travail, collective agreement, convention collective] }
+  compensation: { category: hr, aliases: [total rewards, rémunération globale, compensation analyst] }
+  hris: { category: hr, aliases: [workday, successfactors, sirh] }
+  training and development: { category: hr, aliases: [learning and development, l&d, formation et développement] }
+  occupational health and safety: { category: hr, aliases: [ohs, health and safety, santé et sécurité au travail, sst, whmis, simdut] }
+
+  # ---------------- marketing, communications, translation ----------------
+  digital marketing: { category: marketing, aliases: [marketing numérique, online marketing, google ads, paid media, sem] }
+  seo: { category: marketing, aliases: [search engine optimization, référencement, référencement naturel] }
+  social media: { category: marketing, aliases: [social media marketing, médias sociaux, réseaux sociaux, community management, gestion de communauté] }
+  copywriting: { category: marketing, aliases: [content writing, rédaction web, rédaction publicitaire, content creation, création de contenu] }
+  corporate communications: { category: marketing, aliases: [internal communications, communications internes, communications d'entreprise, public relations, relations publiques] }
+  graphic design: { category: marketing, aliases: [design graphique, infographie, adobe creative suite, photoshop, illustrator, indesign] }
+  translation: { category: marketing, aliases: [traduction, translator, traducteur, traductrice, révision linguistique] }
+  marketing strategy: { category: marketing, aliases: [stratégie marketing, brand management, gestion de marque, marketing campaigns, campagnes marketing] }
+  crm: { category: marketing, aliases: [customer relationship management, gestion de la relation client, hubspot] }
+  market research: { category: marketing, aliases: [étude de marché, études de marché] }
+  event planning: { category: marketing, aliases: [event management, planification d'événements, gestion d'événements] }
+
+  # ---------------- legal and compliance ----------------
+  legal counsel: { category: legal, aliases: [lawyer, avocat, avocate, legal advisor, conseiller juridique, conseillère juridique] }
+  paralegal: { category: legal, aliases: [parajuriste, technicien juridique, technicienne juridique, law clerk] }
+  contract drafting: { category: legal, aliases: [rédaction de contrats, contract negotiation, négociation de contrats] }
+  regulatory compliance: { category: legal, aliases: [conformité réglementaire, regulatory affairs, affaires réglementaires, compliance officer, agent de conformité] }
+  privacy: { category: legal, aliases: [pipeda, protection des renseignements personnels, privacy impact assessment, loi 25, gdpr] }
+  anti-money laundering: { category: legal, aliases: [aml, lutte contre le blanchiment, kyc, know your customer, fintrac, canafe] }
+  employment law: { category: legal, aliases: [droit du travail, labour law] }
+  corporate law: { category: legal, aliases: [droit des affaires, mergers and acquisitions, fusions et acquisitions] }
+  litigation: { category: legal, aliases: [litige, litiges, contentieux] }
+  access to information: { category: legal, aliases: [atip, accès à l'information, aiprp] }
+
+  # ---------------- engineering ----------------
+  civil engineering: { category: engineering, aliases: [génie civil, civil engineer, ingénieur civil, ingénieure civile] }
+  structural engineering: { category: engineering, aliases: [génie des structures, structural engineer, ingénieur en structure, ingénieure en structure] }
+  mechanical engineering: { category: engineering, aliases: [génie mécanique, mechanical engineer, ingénieur mécanique, ingénieure mécanique] }
+  electrical engineering: { category: engineering, aliases: [génie électrique, electrical engineer, ingénieur électrique, ingénieure électrique] }
+  professional engineer: { category: engineering, aliases: [p.eng, p.eng., peng, ingénieur professionnel, oiq, ordre des ingénieurs du québec, professional engineers ontario] }
+  autocad: { category: engineering, aliases: [civil 3d, autocad civil 3d] }
+  revit: { category: engineering, aliases: [bim, building information modeling] }
+  solidworks: { category: engineering, aliases: [] }
+  plc programming: { category: engineering, aliases: [plc, automate programmable, automates programmables, scada] }
+  hvac: { category: engineering, aliases: [cvac, cvca, chauffage ventilation climatisation] }
+  geotechnical engineering: { category: engineering, aliases: [génie géotechnique, geotechnical engineer] }
+  environmental assessment: { category: engineering, aliases: [évaluation environnementale, environmental impact assessment, environmental compliance] }
+  gis: { category: engineering, aliases: [arcgis, qgis, sig, geographic information systems, systèmes d'information géographique] }
+  quality control: { category: engineering, aliases: [contrôle de la qualité, qa/qc, quality inspection] }
+
+  # ---------------- construction and project controls ----------------
+  construction management: { category: construction, aliases: [gestion de construction, gestion de chantier, site supervision, surveillance de chantier, construction manager] }
+  estimating: { category: construction, aliases: [cost estimating, estimation des coûts, estimateur, estimatrice, quantity surveying] }
+  project controls: { category: construction, aliases: [contrôle de projets, primavera p6, earned value management, valeur acquise] }
+  building codes: { category: construction, aliases: [code du bâtiment, national building code, ontario building code] }
+
+  # ---------------- supply chain and procurement ----------------
+  procurement: { category: supply_chain, aliases: [purchasing, approvisionnement, strategic sourcing, sourcing stratégique, acheteur, acheteuse] }
+  contract administration: { category: supply_chain, aliases: [contract management, gestion des contrats, administration des contrats] }
+  supply chain management: { category: supply_chain, aliases: [supply chain, chaîne d'approvisionnement, gestion de la chaîne d'approvisionnement] }
+  logistics: { category: supply_chain, aliases: [logistique, transportation management, gestion du transport, shipping and receiving, expédition et réception] }
+  inventory management: { category: supply_chain, aliases: [gestion des stocks, gestion d'inventaire, inventory control, contrôle des stocks] }
+  warehouse operations: { category: supply_chain, aliases: [warehouse management, wms, gestion d'entrepôt] }
+  demand planning: { category: supply_chain, aliases: [demand forecasting, prévision de la demande, planification de la demande] }
+
+  # ---------------- healthcare and social services ----------------
+  nursing: { category: healthcare, aliases: [registered nurse, infirmière, infirmier, infirmière auxiliaire, registered practical nurse, licensed practical nurse] }
+  patient care: { category: healthcare, aliases: [soins aux patients, soins infirmiers, triage] }
+  medical office administration: { category: healthcare, aliases: [medical office assistant, adjointe médicale, adjoint médical, medical billing, facturation médicale, unit clerk] }
+  pharmacy: { category: healthcare, aliases: [pharmacist, pharmacien, pharmacienne, pharmacy technician, technicien en pharmacie] }
+  health informatics: { category: healthcare, aliases: [electronic medical records, emr, ehr, dossier médical électronique, epic systems, meditech] }
+  clinical research: { category: healthcare, aliases: [recherche clinique, clinical trials, essais cliniques] }
+  social work: { category: healthcare, aliases: [social worker, travail social, travailleur social, travailleuse sociale, case management, gestion de cas] }
+  personal support: { category: healthcare, aliases: [personal support worker, psw, préposé aux bénéficiaires, préposée aux bénéficiaires] }
+
+  # ---------------- administration and customer service ----------------
+  administrative support: { category: admin, aliases: [administrative assistant, adjointe administrative, adjoint administratif, executive assistant, adjointe de direction, soutien administratif, office administration] }
+  customer service: { category: admin, aliases: [service à la clientèle, service client, customer support, call centre, call center, centre d'appels] }
+  data entry: { category: admin, aliases: [saisie de données] }
+  records management: { category: admin, aliases: [gestion documentaire, gestion des documents, information management, gestion de l'information] }
+  reception: { category: admin, aliases: [receptionist, réceptionniste] }
+
+  # ---------------- education and training ----------------
+  instructional design: { category: education, aliases: [conception pédagogique, e-learning, elearning, articulate storyline, formation en ligne] }
+  training delivery: { category: education, aliases: [corporate training, facilitation, formateur, formatrice, trainer] }
+  teaching: { category: education, aliases: [teacher, enseignant, enseignante, enseignement, tutoring, tutorat] }
+  curriculum development: { category: education, aliases: [élaboration de programmes, développement de curriculum] }
+
+  # ---------------- public sector ----------------
+  policy analysis: { category: public_sector, aliases: [policy analyst, analyse des politiques, analyste des politiques, public policy, politiques publiques] }
+  grants and contributions: { category: public_sector, aliases: [subventions et contributions, gestion des subventions, grant management] }

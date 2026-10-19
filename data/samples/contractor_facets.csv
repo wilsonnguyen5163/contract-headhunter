@@ -1,0 +1,6 @@
+contractor_id,facet_id,area,skills,years,seniority,domains
+C001,data_engineering,Data engineering,python|sql|aws|etl,10,senior,banking|insurance
+C001,backend,Backend development,python|django|postgresql,7,senior,fintech
+C002,business_analysis,Business analysis,business analysis|process mapping|sql,8,senior,public sector
+C002,project_management,Project management,project management|agile,5,intermediate,public sector
+C003,it_leadership,IT leadership,project management|budgeting|vendor management,15,executive,banking|telecom

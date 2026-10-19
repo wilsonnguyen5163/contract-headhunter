@@ -1,0 +1,26 @@
+# Company normalization. Seed version for phase 1.
+version: 1
+
+# Legal suffixes stripped from company names (compared casefolded, trailing punctuation ignored).
+legal_suffixes:
+  - inc
+  - incorporated
+  - ltd
+  - limited
+  - corp
+  - corporation
+  - co
+  - llc
+  - llp
+  - ulc
+  - ltée
+  - limitée
+  - s.e.n.c.
+  - s.e.n.c.r.l.
+  - enr
+
+# Canonical name -> variants seen in postings.
+aliases:
+  royal bank of canada: [rbc, rbc royal bank, banque royale du canada]
+  desjardins: [mouvement desjardins, desjardins group, groupe desjardins]
+  government of canada: [gouvernement du canada, govt of canada]

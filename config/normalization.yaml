@@ -1,0 +1,189 @@
+# Normalization rules, v1 (English and French). Header and word matching is
+# case- and accent-insensitive.
+version: 1
+
+# Sections dropped from description_clean before embedding.
+boilerplate_headers:
+  en:
+    - about us
+    - about the company
+    - about the organization
+    - about the organisation
+    - who we are
+    - our company
+    - company overview
+    - benefits
+    - our benefits
+    - what we offer
+    - "what's in it for you"
+    - perks
+    - perks and benefits
+    - compensation and benefits
+    - why join us
+    - why work with us
+    - our culture
+    - equal opportunity
+    - equal opportunity employer
+    - equal employment opportunity
+    - diversity and inclusion
+    - "diversity, equity and inclusion"
+    - diversity equity and inclusion
+    - accessibility
+    - accommodation
+    - accommodations
+    - how to apply
+    - application process
+    - privacy notice
+    - disclaimer
+  fr:
+    - à propos de nous
+    - à propos de l'entreprise
+    - à propos de l'organisation
+    - qui sommes-nous
+    - qui nous sommes
+    - notre entreprise
+    - avantages
+    - nos avantages
+    - avantages sociaux
+    - ce que nous offrons
+    - ce que nous vous offrons
+    - pourquoi nous joindre
+    - pourquoi travailler chez nous
+    - notre culture
+    - équité en matière d'emploi
+    - égalité des chances
+    - diversité et inclusion
+    - "équité, diversité et inclusion"
+    - accessibilité
+    - mesures d'adaptation
+    - comment postuler
+    - pour postuler
+    - processus de candidature
+    - avis de confidentialité
+    - avis de non-responsabilité
+
+# Sections whose bullet lines become Job.requirements (they stay in description_clean).
+requirement_headers:
+  en:
+    - requirements
+    - job requirements
+    - qualifications
+    - required qualifications
+    - minimum qualifications
+    - preferred qualifications
+    - must have
+    - must-have
+    - must haves
+    - nice to have
+    - assets
+    - asset qualifications
+    - what you bring
+    - "what you'll bring"
+    - "what we're looking for"
+    - skills and experience
+    - skills and qualifications
+    - required skills
+    - experience
+    - education and experience
+    - who you are
+    - your profile
+  fr:
+    - exigences
+    - exigences du poste
+    - qualifications requises
+    - profil recherché
+    - profil
+    - compétences
+    - compétences requises
+    - compétences recherchées
+    - ce que vous apportez
+    - ce que vous nous apportez
+    - atouts
+    - expérience
+    - expérience et compétences
+    - scolarité et expérience
+    - formation et expérience
+    - votre profil
+
+# Other known headers: they end the previous section and are kept.
+section_headers:
+  en:
+    - about the job
+    - about the role
+    - about this role
+    - job description
+    - description
+    - overview
+    - position overview
+    - role overview
+    - responsibilities
+    - key responsibilities
+    - duties
+    - "what you'll do"
+    - what you will do
+    - your role
+    - the role
+    - the opportunity
+    - job details
+    - details
+    - location
+    - schedule
+    - salary
+    - compensation
+    - pay
+    - contract details
+    - duration
+    - start date
+  fr:
+    - à propos de l'emploi
+    - à propos du poste
+    - description du poste
+    - aperçu
+    - responsabilités
+    - principales responsabilités
+    - tâches
+    - principales tâches
+    - votre rôle
+    - le rôle
+    - le poste
+    - le mandat
+    - détails du poste
+    - lieu de travail
+    - horaire
+    - salaire
+    - rémunération
+    - durée
+    - date de début
+    - conditions
+
+# Regexes (case-insensitive) removed from titles, in order. Single-quoted so backslashes stay literal.
+title_noise_patterns:
+  # gender markers: (m/f/d), (H/F), (f/h/x), H/F
+  - '\(\s*[mhfwdx]\s*/\s*[mhfwdx](?:\s*/\s*[mhfwdx])?\s*\)'
+  - '\b[hf]\s*/\s*[hf]\b'
+  # French inclusive endings: principal(e), analyste(s), développeur·se
+  - '\((?:e|s|es|ne|se|euse|rice|trice)\)'
+  - '·(?:e|ne|se|euse|rice|trice)\b'
+  # requisition / reference numbers: "Req #A1029", "Réf. 12345", "Job ID: 778"
+  - '\b(?:req(?:uisition)?|job\s*id|r[ée]f(?:[ée]rence)?\.?|ref\.?)\s*(?:#|n°|no\.?|:)?\s*[a-z]{0,3}-?\d[\w-]*'
+  - '#\s*[a-z]{0,3}-?\d[\w-]*'
+  # employment-type parentheticals: "(Contract)", "(mandat de 6 mois / 6-month contract)", "(Permanent, Full-time)"
+  - '\([^)]*\b(?:contract|contractor|contrat|contractuel(?:le)?|temporary|temporaire|temp|fixed[- ]term|mandat|mandate|cdd|cdi|freelance|permanent|full[- ]time|part[- ]time|temps plein|temps partiel)\b[^)]*\)'
+  # trailing employment-type segments: " - 12 Month Contract", " – contrat de 12 mois", " | Permanent"
+  - '\s[-–—|]\s*[^-–—|]*\b(?:contract|contrat|mandat|mandate|cdd|cdi|temporary|temporaire|fixed[- ]term|permanent|freelance)\b[^-–—|]*$'
+
+# Seniority words looked up in the title. When several match, the highest level wins
+# (junior < intermediate < senior < lead < executive).
+seniority:
+  junior: [junior, jr, entry level, entry-level, débutant, débutante]
+  intermediate: [intermediate, mid-level, mid level, intermédiaire, confirmé, confirmée, ii]
+  senior: [senior, sr, sénior, principal, principale, expert, experte, chevronné, chevronnée, iii, iv]
+  lead: [lead, team lead, tech lead, technical lead, chef d'équipe, responsable d'équipe, architect, architecte]
+  executive: [director, directeur, directrice, head of, vice president, vice-president, vice-président, vice-présidente, vp, chief, cto, cio, cfo, ciso]
+
+# Function words used to tell English from French (must not overlap after accent folding).
+# Words shared with Spanish/Italian/Portuguese (de, en, un, la, que...) are left out on purpose,
+# so postings in other languages are not mistaken for French.
+language_words:
+  en: [the, and, of, to, with, you, will, our, we, is, are, this, your, be, for, that, have, from, who, at, by, it, in, as, all, can, has]
+  fr: [le, les, des, du, et, pour, avec, vous, nous, est, sont, dans, une, au, aux, sur, par, votre, notre, ce, cette, qui, qu, d, l, être, ses, leur]
