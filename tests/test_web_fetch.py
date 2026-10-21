@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from jobmatch.config import WebSourceSettings
-from jobmatch.sources.web import FetchError, WebFetcher
+from jobmatch.sources.web import FetchError, WebFetcher, decode_page
 
 SETTINGS = WebSourceSettings(
     user_agent="jobmatch-test",
@@ -150,3 +150,30 @@ def test_requests_are_spaced_out() -> None:
     # robots.txt + 3 pages = 4 requests; the fake clock advances 1 s per reading,
     # so each later request waits the remainder of the 2 s delay.
     assert sleeps and all(0 < s <= SETTINGS.delay_seconds for s in sleeps)
+
+
+def test_http_status_is_kept_on_errors() -> None:
+    fetcher = fetcher_for(site({}))
+    with pytest.raises(FetchError) as caught:
+        fetcher.fetch("https://jobs.example.ca/missing")
+    assert caught.value.status == 404
+
+
+@pytest.mark.parametrize(
+    ("body", "header", "expected"),
+    [
+        ("Développeur".encode(), "utf-8", "Développeur"),  # header wins
+        (b'<meta charset="iso-8859-1"><p>D\xe9veloppeur</p>', None, "Développeur"),
+        (
+            b'<meta http-equiv="Content-Type" content="text/html; charset=windows-1252">'
+            b"<p>Qu\xe9bec</p>",
+            None,
+            "Québec",
+        ),
+        ("Développeur".encode(), None, "Développeur"),  # no charset anywhere: UTF-8
+        (b"<p>Montr\xe9al</p>", None, "Montréal"),  # not UTF-8, no charset: Windows-1252
+        (b'<meta charset="no-such-codec"><p>ok</p>', None, "ok"),  # unknown: ignored
+    ],
+)
+def test_page_encoding(body: bytes, header: str | None, expected: str) -> None:
+    assert expected in decode_page(body, header)

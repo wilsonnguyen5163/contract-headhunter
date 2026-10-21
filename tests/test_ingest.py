@@ -162,3 +162,16 @@ def test_cli_ingests_the_sample_files(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     assert "example_linkedin_contract.txt" in result.output
     assert "1 needs details" in result.output  # the stub; the full sample may age into "stale"
+
+
+def test_empty_files_are_skipped_not_errors(normalizer: Normalizer, tmp_path: Path) -> None:
+    inbox, data_dir = tmp_path / "inbox", tmp_path / "data"
+    write(inbox, "a_empty.txt", "")
+    write(inbox, "b_blank.txt", "  \n\n\t\n")
+    write(inbox, "c.txt", EN_CONTRACT)
+    report = run(normalizer, data_dir, inbox)
+    by_file = {Path(o.file).name: o for o in report.outcomes}
+    assert by_file["a_empty.txt"].outcome == "skipped"
+    assert by_file["b_blank.txt"].detail == "empty file"
+    assert by_file["c.txt"].outcome == "new"
+    assert report.count("error") == 0

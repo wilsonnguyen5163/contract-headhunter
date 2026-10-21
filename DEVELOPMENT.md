@@ -17,8 +17,10 @@ Technical companion to the plain-language [README.md](README.md). Goals and arch
   - **posting links** (`ingest-links`): fetch each link a person adds and read its schema.org `JobPosting` block, falling back to the page's main text
   - **paste files** (`ingest-manual`) as the fallback
   - an append-only raw store / page cache in `data/raw/`
-  - dedupe: same source and ID, fingerprint, stub completion
-- **Not built yet:** Adzuna/API sources, fuzzy dedupe, matching (phase 4), review UI (phase 5), the scheduler (phase 6).
+  - dedupe: same source and ID; same fingerprint; or a similar title (rapidfuzz, after expanding "Sr."/"Mgr"…) at the same company, city and seniority; stub completion
+  - dead links (HTTP 404/410) are dropped and remembered; empty input files are skipped
+- **Not built yet:** Adzuna/API sources, matching (phase 4), review UI (phase 5), the scheduler (phase 6).
+- **Reminder, fix before real use:** `freshness_days` is 999 in `settings.yaml`, so the stale filter is off while matching is tested. There's also no "expired" filter from `JobPosting.validThrough` yet.
 
 ## Layout
 
@@ -62,7 +64,9 @@ tests/             unit and end-to-end tests; fixtures are synthetic, network is
 - plain GET only: no cookies, logins or JavaScript
 - 2 s between requests; robots.txt respected; timeout, size and redirect limits
 - Indeed is never fetched (CLAUDE.md rule 6); LinkedIn links a person pastes are allowed
-- a failed fetch is reported and retried on the next run
+- **a page that's gone** (HTTP 404/410) is dropped. It's recorded in `data/raw/`, never fetched again (`--refresh` retries), and doesn't count as an error
+- **other failures** (timeouts, 429, 5xx) are reported as errors and retried on the next run
+- **page encoding:** the HTTP header's charset, else the page's `<meta charset>`, else UTF-8 with a Windows-1252 fallback
 
 ## Running (Docker)
 

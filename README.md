@@ -12,7 +12,7 @@ Contract jobs are often filled on a first-come, first-served basis. Our contract
 
 ## How it works, step by step
 
-1. **Collect jobs.** The tool pulls new postings from free job-board sources. Jobs found on LinkedIn are added by a teammate through a simple form, because we are not allowed to use automated tools on LinkedIn.
+1. **Collect jobs.** A teammate pastes the links of interesting postings into a simple list, and the tool reads each posting from its link. This works for most job boards and company career pages, including LinkedIn links. The tool never searches LinkedIn on its own, and never opens Indeed links: Indeed postings are copied in by hand. Automatic collection from free job-board feeds comes later.
 2. **Tidy them up.** Postings are cleaned and put in one consistent format. Duplicates (the same job on several sites) are merged. Non-Canadian jobs and jobs that aren't contracts are set aside.
 3. **Compare to our contractors.** The tool turns each job description and each contractor's profile into numbers that capture their meaning (the technical word is "embedding"). It then measures how close each job is to each contractor. It also checks simple rules, such as "does the contractor have the must-have skills?" and "is the language right?"
 4. **Make a shortlist.** For each job it picks the few best-fit contractors and shows why: the skills that match, the skills that are missing, and a confidence level (high, medium or low).
@@ -23,7 +23,7 @@ Everything runs on one computer: the client's 2019 MacBook Pro. Information is k
 ## What a person does
 
 - **Reviewer:** works through the shortlist, ideally several times a day, and records approve or reject. Each decision also teaches us how to improve the tool.
-- **Whoever handles LinkedIn:** copies promising LinkedIn jobs into the form (a few clicks per job).
+- **Whoever collects jobs:** pastes the links of promising postings into the list (one line per job), and copies in the occasional posting that can't be read from its link.
 - **Someone who knows the contractors:** fills in a short, structured profile for each (specialties, skills, years of experience, seniority, languages).
 
 ## What it will *not* do (in this first version)
@@ -36,7 +36,7 @@ Everything runs on one computer: the client's 2019 MacBook Pro. Information is k
 ## What it costs
 
 - **Software and data:** expected to be close to **$0** to start. It uses free tools, free job sources and the client's existing laptop. One thing to check: the container software we plan to use (Docker Desktop) can require a paid license for larger organizations. Some free job sources limit how many requests we can make, so we may hit those limits.
-- **People's time is the real cost.** The tool should reduce it, but reviewing, filling in profiles and pasting LinkedIn jobs still take time.
+- **People's time is the real cost.** The tool should reduce it, but reviewing, filling in profiles and collecting job links still take time.
 - Later steps (finding contacts, drafting emails) may add costs. We will price them before building.
 
 ## How we'll know it works
@@ -47,7 +47,7 @@ We will keep track of how many of the tool's suggestions reviewers approve, and 
 
 - **Accuracy:** matches can be wrong or missed, especially at the start. The human review step is the safety net.
 - **Privacy:** contractor profiles are personal information. They stay on our computer and should not be shared outside the team. Because they are plain files, the laptop should be password-protected with disk encryption turned on.
-- **Speed:** a job posted a few hours ago may already be taken, and LinkedIn jobs depend on how quickly a person adds them.
+- **Speed:** a job posted a few hours ago may already be taken, and jobs only enter the list as fast as someone adds their links.
 - **Older laptop:** the 2019 MacBook must stay on, plugged in and awake for the scheduled checks, and some modern AI software no longer supports its Intel chip, so setup needs extra care. This is a technical issue we have a plan for.
 - **Rules for outreach:** Canada has an anti-spam law (CASL) that affects commercial emails, even business-to-business ones. We need qualified advice before the email step. This summary is not legal advice.
 - **Upkeep:** the lists of skills and "contract" wording need occasional updates.
@@ -56,7 +56,7 @@ We will keep track of how many of the tool's suggestions reviewers approve, and 
 
 - The contractor list with a description of each person's expertise.
 - A few examples of past good and bad matches, if they exist.
-- A decision on who reviews, how often, and who adds LinkedIn jobs.
+- A decision on who reviews, how often, and who collects job links.
 - Confirmation of which job sources we are allowed and comfortable using.
 
 ## Plan in plain terms

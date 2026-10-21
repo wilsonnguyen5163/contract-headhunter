@@ -4,6 +4,61 @@ What each change solves, for the team. Newest first. Add an entry with every com
 
 ---
 
+## 2026-10-21 · Fewer duplicates, dead links dropped, accents fixed (phase 3, manual intake)
+
+### What this solves
+- **The same job posted twice with a slightly different title is caught.** "Sr. Data Engineer" and "Senior Data Engineer" at the same company and city are now recognized as one job. The second is stored as `duplicate` with a pointer to the first, so you only review it once.
+- **Dead links no longer fail every run.** A posting that has been taken down (the site answers "404 Not Found" or "410 Gone") is dropped: it shows as `skipped · page gone`, is remembered, and isn't fetched again. Before, it was retried and reported as an `ERROR` on every run.
+- **Accents on older French sites come out right.** Pages that don't declare their character set in the usual place are now read correctly, so "Montréal", not "MontrÃ©al".
+- **Empty files in the inbox are skipped quietly** instead of reported as errors.
+
+### How to use it
+Nothing new to learn. Add links and run the same script as before:
+```
+bash scripts/fetch_and_import.sh            # import new links (and paste files)
+bash scripts/fetch_and_import.sh --refresh  # fetch everything again, including links marked "page gone"
+```
+New lines you may see in the report:
+```
+  skipped     links.txt:5   page gone (HTTP 404): dropped, not fetched again
+  skipped     links.txt:5   page gone (HTTP 404) since 2026-10-20; not fetched again (--refresh retries)
+  duplicate   links.txt:9   manual:url-… · same job as manual:url-… (similar title)
+  skipped     example.txt   empty file
+```
+You can leave dead links in your file, or delete them; either way they cost nothing.
+
+### What counts as a duplicate
+All of these must be true:
+- the same company
+- the same city
+- the same seniority level
+- titles that are nearly identical after expanding common abbreviations (Sr. → Senior, Mgr → Manager, Eng. → Engineer, & → and…)
+
+So "Data Analyst" and "Senior Data Analyst" stay separate. The abbreviation list is in `config/normalization.yaml` (`title_abbreviations`), and the strictness is `fuzzy_title_threshold: 92` in `config/settings.yaml`.
+
+### Known limits
+- **Openings that look identical are merged:** two genuinely separate openings at one company, in one city, with near-identical titles become one. The second is kept as `duplicate`, so it's still visible.
+- **Reminder, fix before real use:** the freshness limit is still 999 days (old postings aren't filtered) so the matching algorithm can be tested. There's also no check yet for postings whose closing date has passed.
+
+### Changed in this commit
+- **New dependency:** `rapidfuzz`, about 3 MB.
+- **Code:**
+  - `normalize/dedupe.py`: the similar-title rule
+  - `sources/web.py`: page encoding and dead-link status
+  - `ingest.py`: dead-link memory, empty files
+- **Config:** `title_abbreviations` in `normalization.yaml`; `fuzzy_title_threshold`, plus the freshness reminder, in `settings.yaml`.
+- **Docs:** `README.md` (collecting jobs is now by link), `DEVELOPMENT.md`, `PROJECT_CONTEXT.md`, this file.
+
+### Checks run
+- 388 automated tests pass (17 new: similar titles, dead links, page encoding, empty files). They never use the internet.
+- Lint is clean. The lockfile adds only `rapidfuzz` 3.14.6, and the Docker image was rebuilt from it (2.11 GB, unchanged).
+- Live run on the example links file:
+  - first run: the removed CharityVillage posting is `skipped · page gone (HTTP 404)` instead of an `ERROR`
+  - second run: **no** network requests (`page gone … since 2026-10-21`), and both stored jobs show `already stored`
+  - no errors in either run
+
+---
+
 ## 2026-10-20 · Import jobs from posting links (phase 3, manual intake)
 
 ### What this solves

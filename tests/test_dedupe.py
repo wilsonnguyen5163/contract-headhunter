@@ -1,6 +1,8 @@
 from collections.abc import Callable
 
-from jobmatch.normalize.dedupe import DedupeDecision, dedupe
+import pytest
+
+from jobmatch.normalize.dedupe import DedupeDecision, TitleSimilarity, dedupe
 from jobmatch.schemas import Job, JobStatus
 
 
@@ -84,3 +86,68 @@ def test_filtered_jobs_are_not_used_as_originals(make_job: Callable[..., Job]) -
     result = dedupe([rejected], [other])
     assert result.to_add == [other]
     assert result.outcomes[0].decision is DedupeDecision.NEW
+
+
+# ---- similar titles (rapidfuzz) ----
+
+SIMILARITY = TitleSimilarity(92, {"sr": "senior", "eng": "engineer", "&": "and"})
+
+
+def job(make_job: Callable[..., Job], n: int, title: str, **fields: object) -> Job:
+    base: dict[str, object] = {
+        "job_id": f"manual:url-{n}",
+        "source": "manual",
+        "source_id": f"url-{n}",
+        "title_norm": title,
+        "company_norm": "example insurance",
+        "city": "Toronto",
+        "seniority": "senior",
+        "fingerprint": f"fp-{n}",  # different fingerprints: only the fuzzy rule can match
+        "description_clean": "text",
+    }
+    base.update(fields)
+    return make_job(**base)
+
+
+def test_abbreviated_title_at_same_company_is_a_duplicate(make_job: Callable[..., Job]) -> None:
+    stored = job(make_job, 1, "senior data engineer")
+    result = dedupe([stored], [job(make_job, 2, "sr. data eng.")], similarity=SIMILARITY)
+    [outcome] = result.outcomes
+    assert outcome.decision is DedupeDecision.DUPLICATE
+    assert (outcome.other_job_id, outcome.similar_title) == (stored.job_id, True)
+
+
+@pytest.mark.parametrize(
+    ("title", "fields"),
+    [
+        ("data analyst", {"seniority": None}),  # "Data Analyst" vs "Senior Data Analyst"
+        ("senior data engineer", {"city": "Ottawa"}),  # same title, other city
+        ("senior data engineer", {"company_norm": "other co"}),
+        ("senior data analyst", {}),  # a different role at the same company
+        ("senior data engineer", {"company_norm": None}),  # no company: no fuzzy matching
+    ],
+)
+def test_similar_rule_needs_same_company_city_seniority(
+    make_job: Callable[..., Job], title: str, fields: dict[str, object]
+) -> None:
+    stored = job(make_job, 1, "senior data engineer")
+    result = dedupe([stored], [job(make_job, 2, title, **fields)], similarity=SIMILARITY)
+    assert result.outcomes[0].decision is DedupeDecision.NEW
+
+
+def test_similar_title_completes_a_stub_from_another_source(make_job: Callable[..., Job]) -> None:
+    stub = job(make_job, 1, "senior data engineer", status=JobStatus.NEEDS_DETAILS)
+    full = job(make_job, 2, "sr data engineer")
+    result = dedupe([stub], [full], similarity=SIMILARITY)
+    assert result.outcomes[0].decision is DedupeDecision.SUPERSEDES_STUB
+    assert result.to_replace[0].filter_reason == f"duplicate:{full.job_id}"
+
+
+def test_without_similarity_only_exact_fingerprints_match(make_job: Callable[..., Job]) -> None:
+    stored = job(make_job, 1, "senior data engineer")
+    result = dedupe([stored], [job(make_job, 2, "sr. data eng.")])
+    assert result.outcomes[0].decision is DedupeDecision.NEW
+
+
+def test_title_key_expands_abbreviations() -> None:
+    assert SIMILARITY.title_key("Sr. Data Eng. & Analyst") == "senior data engineer and analyst"

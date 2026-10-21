@@ -6,6 +6,8 @@ redirects to them are refused; non-HTML and oversized responses are refused.
 Settings: config/sources.yaml. The page body is untrusted data and is only parsed.
 """
 
+import codecs
+import re
 import time
 from collections.abc import Callable
 from typing import Protocol
@@ -19,7 +21,37 @@ from jobmatch.config import WebSourceSettings
 
 
 class FetchError(Exception):
-    """A page that could not be fetched; the message says why (shown in the report)."""
+    """A page that could not be fetched; the message says why (shown in the report).
+    `status` is the HTTP status when the server answered (404 = the posting is gone)."""
+
+    def __init__(self, message: str, *, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+# <meta charset="..."> or <meta http-equiv="Content-Type" content="...; charset=...">
+_META_CHARSET = re.compile(rb"<meta[^>]+charset\s*=\s*[\"']?\s*([A-Za-z0-9._:-]+)", re.IGNORECASE)
+
+
+def decode_page(body: bytes, header_charset: str | None) -> str:
+    """The HTTP header's charset, else the page's own <meta charset>, else UTF-8 with a
+    Windows-1252 fallback (older French sites often send Latin-1 without saying so)."""
+    for candidate in (header_charset, _meta_charset(body)):
+        if candidate:
+            try:
+                codecs.lookup(candidate)
+            except LookupError:
+                continue
+            return body.decode(candidate, errors="replace")
+    try:
+        return body.decode("utf-8")
+    except UnicodeDecodeError:
+        return body.decode("cp1252", errors="replace")
+
+
+def _meta_charset(body: bytes) -> str | None:
+    match = _META_CHARSET.search(body[:4096])
+    return match.group(1).decode("ascii", errors="ignore") if match else None
 
 
 class FetchedPage(BaseModel):
@@ -86,10 +118,10 @@ class WebFetcher:
                 current = urljoin(current, location)
                 continue
             if status >= 400:
-                raise FetchError(f"HTTP {status}")
+                raise FetchError(f"HTTP {status}", status=status)
             if "html" not in content_type:
                 raise FetchError(f"not an HTML page ({content_type or 'no content type'})")
-            html = body.decode(encoding or "utf-8", errors="replace")
+            html = decode_page(body, encoding)
             return FetchedPage(requested_url=url, final_url=current, status=status, html=html)
         raise FetchError(f"more than {self._settings.max_redirects} redirects")
 

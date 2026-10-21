@@ -22,7 +22,11 @@ embedding:
   facet_prefix: "passage: "
 
 normalize:
-  freshness_days: 999 # GUESS: postings older than this are filtered as stale
+  # TODO (reminder): 999 effectively turns the stale filter off, on purpose, while the
+  # matching algorithm is being tested. Set a real limit (30 was the starting GUESS) and
+  # consider an "expired" filter from JobPosting.validThrough before real use.
+  freshness_days: 999
+  fuzzy_title_threshold: 92 # GUESS: 0-100 title similarity (same company, city, seniority) for a duplicate
   contract_score_threshold: 0.8 # GUESS: net phrase score to call a posting contract (or, if negative, permanent)
   language_min_hits: 4 # GUESS: EN/FR function words needed before trusting language detection
   bilingual_min_share: 0.25 # GUESS: minority-language share of those words to call a text bilingual
