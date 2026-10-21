@@ -526,6 +526,30 @@ class CsvJobRepository:
         if updates:
             self._table.update(apply)
 
+    def replace(self, jobs: Iterable[Job]) -> None:
+        """Replace stored rows (matched by job_id) in one atomic rewrite, after a backup."""
+        replacements = {job.job_id: job for job in jobs}
+
+        def apply(rows: list[Job]) -> list[Job]:
+            unknown = set(replacements) - {j.job_id for j in rows}
+            if unknown:
+                raise KeyError(f"unknown job_id(s): {', '.join(sorted(unknown))}")
+            return [replacements.get(job.job_id, job) for job in rows]
+
+        if replacements:
+            self._table.update(apply)
+
+
+class CsvRunRepository:
+    def __init__(self, store: CsvStore) -> None:
+        self._table = store.runs
+
+    def append(self, run: Run) -> None:
+        self._table.append([run])
+
+    def list_all(self) -> list[Run]:
+        return self._table.read_all()
+
 
 class CsvContractorRepository:
     def __init__(self, store: CsvStore) -> None:

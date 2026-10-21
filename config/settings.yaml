@@ -22,12 +22,13 @@ embedding:
   facet_prefix: "passage: "
 
 normalize:
-  freshness_days: 30 # GUESS: postings older than this are filtered as stale
+  freshness_days: 999 # GUESS: postings older than this are filtered as stale
   contract_score_threshold: 0.8 # GUESS: net phrase score to call a posting contract (or, if negative, permanent)
   language_min_hits: 4 # GUESS: EN/FR function words needed before trusting language detection
   bilingual_min_share: 0.25 # GUESS: minority-language share of those words to call a text bilingual
   language_filter_min_words: 40 # GUESS: filter as unsupported language only for texts at least this long
-  max_requirements: 15 # requirement bullets kept per posting
+  max_section_items: 20 # bullets kept per list (requirements, nice to have)
+  max_responsibilities: 20 # bullets kept for responsibilities
 
 matching: # used from phase 4
   top_k: 5

@@ -47,7 +47,14 @@ def test_v1_config_files_load() -> None:
     assert len(taxonomy.skills) >= 150
     assert len({entry.category for entry in taxonomy.skills.values()}) >= 10
     rules = load_normalization_rules(CONFIG_DIR)
-    assert "about us" in rules.boilerplate_headers.en
+    assert "about us" in rules.sections["employer"].headers.en
+    assert list(rules.sections)[:4] == [
+        "overview",
+        "responsibilities",
+        "nice_to_have",
+        "requirements",
+    ]
+    assert set(rules.pay.units) == {"hour", "day", "week", "month", "year"}
     locations = load_canada_locations(CONFIG_DIR)
     assert len(locations.provinces) == 13
     assert "ON" in locations.provinces["CA-ON"].abbreviations  # not YAML's boolean "on"

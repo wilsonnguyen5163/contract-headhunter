@@ -13,6 +13,8 @@ dependencies = [
     "torch>=2.4",
     "transformers>=4.41",
     "sentence-transformers>=3.0",
+    # Fetching posting links that a person adds (phase 3). Already in the lock via huggingface-hub.
+    "httpx>=0.27",
     # Normalization (phase 2): HTML to text, mojibake repair.
     "beautifulsoup4>=4.12",
     "lxml>=5.0",

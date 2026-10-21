@@ -16,6 +16,9 @@ _BLOCK_TAGS = [
 ]  # fmt: skip
 _INLINE_SPACES = re.compile(r"[^\S\n]+")
 _EXTRA_BLANK_LINES = re.compile(r"\n{3,}")
+# A line holding only a bullet marker, then (after any blank lines) the item's text:
+# "<li><p>Text</p></li>" in HTML, or a list copied from a web page.
+_LONE_BULLET = re.compile(r"(?m)^([•·▪◦●*–—-])\n(?:\n)*(?=\S)")
 
 
 def looks_like_html(text: str) -> bool:
@@ -44,7 +47,8 @@ def clean_text(text: str) -> str:
     text = unicodedata.normalize("NFKC", text)
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     lines = [_INLINE_SPACES.sub(" ", line).strip() for line in text.split("\n")]
-    return _EXTRA_BLANK_LINES.sub("\n\n", "\n".join(lines)).strip()
+    joined = _LONE_BULLET.sub(r"\1 ", "\n".join(lines))  # "•" alone + next line -> "• text"
+    return _EXTRA_BLANK_LINES.sub("\n\n", joined).strip()
 
 
 def to_plain_text(raw: str) -> str:

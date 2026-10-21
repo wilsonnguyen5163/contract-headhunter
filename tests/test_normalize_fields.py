@@ -12,15 +12,18 @@ from jobmatch.config import (
 )
 from jobmatch.normalize.company import CompanyNormalizer
 from jobmatch.normalize.contract import ContractDetector, parse_duration_months
+from jobmatch.normalize.description import format_pay
+from jobmatch.normalize.experience import years_experience_min
 from jobmatch.normalize.fingerprint import job_fingerprint
 from jobmatch.normalize.language import LanguageDetector
 from jobmatch.normalize.location import LocationParser
-from jobmatch.normalize.sections import SectionSplitter
+from jobmatch.normalize.pay import PayInfo, PayParser
+from jobmatch.normalize.sections import SectionKind, SectionSplitter
 from jobmatch.normalize.seniority import SeniorityDetector
 from jobmatch.normalize.skills import SkillExtractor
 from jobmatch.normalize.text import to_plain_text
 from jobmatch.normalize.title import TitleNormalizer
-from jobmatch.schemas import EmploymentType, Language, RemoteType
+from jobmatch.schemas import EmploymentType, Language, PayUnit, RemoteType
 
 RULES = load_normalization_rules(CONFIG_DIR)
 LOCATIONS = LocationParser(load_canada_locations(CONFIG_DIR))
@@ -31,6 +34,7 @@ LANGUAGE = LanguageDetector(RULES.language_words, min_hits=4, bilingual_min_shar
 CONTRACT = ContractDetector(load_contract_phrases(CONFIG_DIR), threshold=0.8)
 SKILLS = SkillExtractor(load_skills_taxonomy(CONFIG_DIR))
 SENIORITY = SeniorityDetector(RULES.seniority)
+PAY = PayParser(RULES.pay)
 
 
 # ---- sections: boilerplate and requirements ----
@@ -82,6 +86,178 @@ def test_unknown_subheader_stays_in_requirements() -> None:
     assert SECTIONS.requirements(text, limit=5) == ["Java", "Kubernetes"]
 
 
+def test_posting_with_pitch_and_ats_metadata_is_split_by_kind() -> None:
+    """Real-world shape: unlisted "Why ...?" pitch, Title Case sub-headings, ATS pay fields."""
+    parsed = SECTIONS.parse(posting("en_pitch_and_ats_metadata.txt"))
+    assert parsed.items(SectionKind.RESPONSIBILITIES, 10) == [
+        "Manage and grow our online communities across Instagram, TikTok and Facebook",
+        "Track and report on community health metrics",
+        "Write platform-native social copy informed by SEO best practices",
+    ]
+    assert parsed.items(SectionKind.REQUIREMENTS, 10) == [
+        "A minimum of 5 years' experience in social media copywriting",
+        "Working knowledge of SEO principles as they relate to social media copy",
+    ]
+    clean = parsed.clean_text()
+    assert "Example Charity Canada is seeking" in clean
+    for leaked in ("Agile mindset", "actively recruiting", "Hiring Min Rate", "Job Family"):
+        assert leaked not in clean
+    assert "70000" in parsed.text({SectionKind.PAY})
+
+
+@pytest.mark.parametrize(
+    ("text", "kind"),
+    [
+        ("Key Responsibilities", SectionKind.RESPONSIBILITIES),
+        ("What you'll be doing:", SectionKind.RESPONSIBILITIES),
+        ("Vos responsabilités", SectionKind.RESPONSIBILITIES),
+        ("Required Skills & Experience", SectionKind.REQUIREMENTS),
+        ("Profil recherché", SectionKind.REQUIREMENTS),
+        ("Preferred Qualifications", SectionKind.NICE_TO_HAVE),
+        ("Atouts", SectionKind.NICE_TO_HAVE),
+        ("Salary Range", SectionKind.PAY),
+        ("Rémunération", SectionKind.PAY),
+        ("Compensation & Benefits", SectionKind.BENEFITS),
+        ("Why join Example Co?", SectionKind.EMPLOYER),
+        ("About Example Insurance", SectionKind.EMPLOYER),
+        ("Pourquoi se joindre à nous ?", SectionKind.EMPLOYER),
+        ("About the role", SectionKind.OVERVIEW),
+        ("Diversity & Inclusion", SectionKind.EQUAL_OPPORTUNITY),
+    ],
+)
+def test_header_kinds_en_fr(text: str, kind: SectionKind) -> None:
+    assert SECTIONS.classify(text) == (kind, "")
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "- Salary negotiable",  # a bullet, not a header
+        "Experience with SQL Server is required.",  # a sentence
+        "Pay attention to detail in all client reports and audits",  # too long
+        "5 years of experience",  # has digits
+    ],
+)
+def test_content_lines_are_not_headers(line: str) -> None:
+    assert SECTIONS.classify(line) is None
+
+
+def test_role_lines_drop_metadata_and_application_steps() -> None:
+    text = (
+        "Position:\n\nData Analyst\n\nReports to: Director, Finance\n"
+        "Please apply with your resume and portfolio.\n"
+        "Note: this role requires occasional travel to client sites across Ontario.\n"
+        "About the role\nYou will build the monthly reporting for our finance team.\n"
+        "Lieu de travail : Montréal\nVeuillez soumettre votre candidature en ligne."
+    )
+    assert SECTIONS.parse(text).role_lines() == [
+        "Note: this role requires occasional travel to client sites across Ontario.",
+        "You will build the monthly reporting for our finance team.",
+    ]
+
+
+def test_pattern_header_inside_same_kind_is_content() -> None:
+    text = "Requirements\n\nExperience with SQL Server\n- Python"
+    assert SECTIONS.requirements(text, limit=5) == ["Experience with SQL Server", "Python"]
+
+
+def test_skills_come_only_from_job_sections() -> None:
+    clean = SECTIONS.strip_boilerplate(posting("en_pitch_and_ats_metadata.txt"))
+    skills = SKILLS.extract(clean)
+    assert {"social media", "copywriting", "seo"} <= set(skills)
+    assert not {"agile", "recruitment", "compensation"} & set(skills)  # all in the pitch
+
+
+# ---- pay ----
+
+
+@pytest.mark.parametrize(
+    ("pay_text", "body", "expected"),
+    [
+        ("", "Salary: $70,000 - $85,000 per year", (70000, 85000, PayUnit.YEAR, "CAD")),
+        ("", "Rémunération : 70 000 $ à 85 000 $ par année", (70000, 85000, PayUnit.YEAR, "CAD")),
+        ("", "Rate: $45/hr", (45, None, PayUnit.HOUR, "CAD")),  # single amount: no range
+        ("", "Taux : 90 $ de l'heure", (90, None, PayUnit.HOUR, "CAD")),
+        ("", "Pay range $100K-$120K", (100000, 120000, PayUnit.YEAR, "CAD")),
+        ("", "Compensation: USD 60-75 per hour", (60, 75, PayUnit.HOUR, "USD")),
+        ("Pay Type\nHourly\nHiring Min Rate\n70000\nHiring Max Rate\n85000", "",
+         (70000, 85000, PayUnit.YEAR, None)),  # "Hourly" contradicts the amounts
+        ("Salary\n$650 per day", "", (650, None, PayUnit.DAY, "CAD")),
+        ("", "Salary: $75,000 to $75,000 per year", (75000, None, PayUnit.YEAR, "CAD")),
+    ],
+)  # fmt: skip
+def test_pay_parsing(pay_text: str, body: str, expected: tuple) -> None:
+    info = PAY.parse(pay_text, body)
+    assert info is not None
+    assert (info.pay_min, info.pay_max, info.unit, info.currency) == expected
+
+
+@pytest.mark.parametrize(
+    ("pay", "shown"),
+    [
+        (PayInfo(pay_min=75000, pay_max=None, unit=PayUnit.YEAR, currency=None),
+         "Annual salary: 75,000"),
+        (PayInfo(pay_min=70000, pay_max=85000, unit=PayUnit.YEAR, currency="CAD"),
+         "Annual salary: 70,000–85,000 CAD"),
+        (PayInfo(pay_min=45.5, pay_max=None, unit=PayUnit.HOUR, currency="CAD"),
+         "Hourly rate: 45.50 CAD"),
+        (PayInfo(pay_min=650, pay_max=None, unit=None, currency=None), "Pay: 650"),
+    ],
+)  # fmt: skip
+def test_pay_is_shown_as_single_amount_or_range(pay: PayInfo, shown: str) -> None:
+    assert format_pay(pay) == shown
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "You will manage a $250,000 budget across 3 projects.",  # no pay wording
+        "Our foundation raised $5M in 2025.",
+        "We have 2 offices and 5 000 employees.",
+        "",
+    ],
+)
+def test_amounts_that_are_not_pay(body: str) -> None:
+    assert PAY.parse("", body) is None
+
+
+# ---- years of experience ----
+
+
+@pytest.mark.parametrize(
+    ("lines", "years"),
+    [
+        (["5+ years of Python experience"], 5.0),
+        (["A minimum of 5 years' experience in social media"], 5.0),
+        (["3-5 years in a similar role"], 3.0),
+        (["Minimum de 8 ans d'expérience en analyse d'affaires"], 8.0),
+        (["Au moins 2 années en gestion de projet"], 2.0),
+        (["Strong SQL", "7 years managing vendors"], 7.0),
+        (["Bilingual English/French"], None),
+    ],
+)
+def test_years_of_experience(lines: list[str], years: float | None) -> None:
+    assert years_experience_min(lines) == years
+
+
+@pytest.mark.parametrize(
+    ("line", "years"),
+    [
+        ("Job requires a minimum of seven (7) years' experience", 7.0),
+        ("The position requires a minimum of seven years of experience", 7.0),
+        ("(5) years of experience in a similar role", 5.0),
+        ("Sept ans d'expérience en gestion de projet", 7.0),
+        ("Au moins un an d'expérience", 1.0),
+        ("Two or more years in broadcasting", 2.0),
+        ("Twenty-four years of service", 24.0),
+        ("Rate of $45 an hour", None),  # "an" is not "année" here
+        ("A year of experience is an asset", None),  # "a" is not counted on purpose
+    ],
+)
+def test_years_written_as_words(line: str, years: float | None) -> None:
+    assert years_experience_min([line], RULES.number_words) == years
+
+
 # ---- titles ----
 
 
@@ -92,6 +268,14 @@ def test_unknown_subheader_stays_in_requirements() -> None:
         ("Analyste d'affaires principal(e) – contrat de 12 mois", "analyste d'affaires principal"),
         ("Développeur·se Full Stack (H/F) - Montréal, QC", "développeur full stack"),
         ("Data Engineer - 12 Month Contract", "data engineer"),
+        ("Marketing Coordinator - 12 month FTC", "marketing coordinator"),
+        ("HR Advisor (FTC, part-time)", "hr advisor"),
+        (
+            "Senior Producer, CBC Life (English Services) (Hybrid)",
+            "senior producer, cbc life (english services)",
+        ),
+        ("Data Analyst (Remote - Canada)", "data analyst"),
+        ("Analyste (télétravail)", "analyste"),
         ("Business Analyst | Remote", "business analyst"),
         ("Senior Developer (m/f/d) Job ID: 4471", "senior developer"),
         (
@@ -237,6 +421,9 @@ def test_permanent_role_about_contracts_is_permanent() -> None:
         ("Temporary role", EmploymentType.UNKNOWN),  # weak signal alone: kept for review
         ("Responsable de la gestion des contrats. Poste permanent.", EmploymentType.PERMANENT),
         ("Votre mandat : diriger l'équipe TI.", EmploymentType.UNKNOWN),
+        ("Marketing Coordinator - 12 month FTC", EmploymentType.CONTRACT),
+        ("Full-time FTC until March 2027", EmploymentType.CONTRACT),
+        ("Our FTCs are paid weekly", EmploymentType.CONTRACT),  # plural still counts
         ("Great team, great culture.", EmploymentType.UNKNOWN),
     ],
 )
@@ -267,6 +454,9 @@ def test_structured_field_wins_over_phrases(
         ("12 Month Contract", 12.0),
         ("contrat de 2 ans", 24.0),
         ("3-year contract", 36.0),
+        ("12-month FTC", 12.0),
+        ("1-year FTC", 12.0),
+        ("FTC of 2 years", 24.0),
         ("8 weeks contract", 1.8),
         ("contrat de 1,5 mois", 1.5),
         ("5+ years of Python", None),
@@ -274,6 +464,88 @@ def test_structured_field_wins_over_phrases(
 )
 def test_duration_parsing(text: str, months: float | None) -> None:
     assert parse_duration_months(text) == months
+
+
+@pytest.mark.parametrize(
+    ("text", "months"),
+    [
+        ("This is a one-year contract position.", 12.0),
+        ("A six-month mandate", 6.0),
+        ("Contrat d'un an", 12.0),
+        ("Mandat de douze mois", 12.0),
+        ("Twelve month FTC", 12.0),
+        ("Contract of two years", 24.0),
+        ("Seven years of Python", None),  # years without a contract word are experience
+    ],
+)
+def test_duration_written_as_words(text: str, months: float | None) -> None:
+    assert parse_duration_months(text, RULES.number_words) == months
+
+
+# ---- where a list ends ----
+
+
+def test_bulleted_list_ends_at_the_first_plain_sentence() -> None:
+    text = (
+        "What you bring:\n"
+        "• Strong SQL\n"
+        "• Python and\n"
+        "dbt modelling\n"
+        "The position requires a minimum of seven years of experience in data work.\n"
+        "Interactive agency experience is preferred\n"
+        "• A bullet after the list has ended\n"
+    )
+    parsed = SECTIONS.parse(text)
+    assert parsed.items(SectionKind.REQUIREMENTS, None) == [
+        "Strong SQL",
+        "Python and dbt modelling",
+    ]
+    # the trailing sentence still counts for years of experience
+    reader_lines = parsed.lines({SectionKind.REQUIREMENTS})
+    assert years_experience_min(reader_lines, RULES.number_words) == 7.0
+
+
+def test_list_items_wrapped_in_paragraphs_are_all_kept() -> None:
+    """Real-world shape (Built In / CBC): <li><p>text</p></li>, with a plain lead-in line."""
+    html = (
+        "<h3>Key Tasks</h3><p>Under the direction of the Managing Editor</p><ul>"
+        + "".join(f"<li><p>Duty number {i} for the platform</p></li>" for i in range(13))
+        + "</ul><h3>Qualifications</h3><ul><li><p>Seven (7) years of experience</p></li></ul>"
+    )
+    parsed = SECTIONS.parse(to_plain_text(html))
+    duties = parsed.items(SectionKind.RESPONSIBILITIES, None)
+    assert duties[0] == "Under the direction of the Managing Editor"  # lead-in kept
+    assert len(duties) == 14
+    assert parsed.items(SectionKind.REQUIREMENTS, None) == ["Seven (7) years of experience"]
+
+
+def test_sub_headings_between_bullets_do_not_end_the_list() -> None:
+    text = "Requirements\n• SQL\nTechnical\n• Python\nNice extras\n• dbt"
+    assert SECTIONS.requirements(text, limit=10) == ["SQL", "Python", "dbt"]
+
+
+def test_plain_lists_have_no_end_signal_so_the_cap_bounds_them() -> None:
+    sentence = "Requirement number {} written as a full plain sentence here."
+    lines = "\n".join(sentence.format(i) for i in range(30))
+    assert len(SECTIONS.requirements(f"Requirements\n{lines}", limit=20)) == 20
+
+
+def test_asides_are_never_bullets() -> None:
+    text = (
+        "Requirements\n"
+        "• Ability to apply Agile principles\n"
+        "• Web application security experience\n"
+        "• Experience managing $1M budgets\n"
+        "• The anticipated salary range is $70,000 – $80,000 CAD.\n"
+        "• Applicants are invited to submit a portfolio of work.\n"
+        "• As part of our recruitment process, candidates complete a short test.\n"
+        "• Veuillez soumettre votre candidature en ligne\n"
+    )
+    assert SECTIONS.requirements(text, limit=10) == [
+        "Ability to apply Agile principles",
+        "Web application security experience",
+        "Experience managing $1M budgets",
+    ]
 
 
 # ---- skills ----

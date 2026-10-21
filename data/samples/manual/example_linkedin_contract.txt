@@ -1,0 +1,23 @@
+# SYNTHETIC SAMPLE: a filled-in paste file.
+url: https://www.linkedin.com/jobs/view/senior-business-analyst-at-example-insurance-4012345678/?trk=public_jobs
+title: Senior Business Analyst (12-month contract)
+company: Example Insurance Inc.
+location: Toronto, ON (Hybrid)
+employment_type:
+posted: 2026-10-18
+---
+About the job
+Example Insurance is looking for a Senior Business Analyst for a 12-month contract to support our claims modernization program. Hybrid, two days a week in our Toronto office.
+
+Responsibilities
+- Run requirements workshops with claims and IT stakeholders
+- Document current and future-state processes (BPMN)
+- Write user stories and support testing in an Agile team
+
+Qualifications
+- 7+ years as a business analyst, ideally in insurance
+- Strong SQL and process mapping skills
+- Bilingual English/French is an asset
+
+About us
+Example Insurance is a fictional insurer serving Canadians since 1950.

@@ -1,0 +1,6 @@
+# SYNTHETIC SAMPLE: a stub from a LinkedIn job alert (title, company and location only).
+url: https://www.linkedin.com/jobs/search/?currentJobId=4019876543
+title: Gestionnaire de projet TI (mandat)
+company: Exemple Services Ltée
+location: Québec, QC
+---

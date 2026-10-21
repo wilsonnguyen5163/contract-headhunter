@@ -1,0 +1,16 @@
+# Job sources. v1: posting links that a person adds to data/inbox/links/*.txt.
+version: 1
+
+web:
+  # Each link is chosen and pasted by a person, which is the approval to fetch it
+  # (CLAUDE.md rules 4 and 6). One request at a time, no cookies, no logins, no JavaScript.
+  user_agent: "Mozilla/5.0 (compatible; jobmatch/0.1; manual job-link import)"
+  delay_seconds: 2 # GUESS: pause between requests
+  timeout_seconds: 20
+  max_bytes: 5000000 # pages larger than this are refused
+  max_redirects: 5
+  respect_robots_txt: true
+  # Never fetched (CLAUDE.md rule 6 allows pasted LinkedIn links, not Indeed): paste these
+  # postings by hand in data/inbox/manual/. Matched against every label of the host name,
+  # so it covers indeed.ca, ca.indeed.com, fr.indeed.com, indeed.co.uk ...
+  blocked_host_labels: [indeed]

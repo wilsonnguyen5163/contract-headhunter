@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from jobmatch.config import CanadaLocations
 from jobmatch.normalize.phrases import PhraseMatcher, fold
+from jobmatch.normalize.work_mode import WorkModeDetector
 from jobmatch.schemas import RemoteType
 
 # Words that may surround location terms in a title segment ("Remote or Toronto").
@@ -50,20 +51,10 @@ class LocationParser:
         self._foreign = PhraseMatcher(foreign)
         codes = "|".join(re.escape(c) for c in locations.us_state_codes)
         self._us_state_code_re = re.compile(rf",\s*({codes})\b")
-        self._remote = PhraseMatcher.from_terms(locations.remote_terms)
-        self._hybrid = PhraseMatcher.from_terms(locations.hybrid_terms)
-        self._onsite = PhraseMatcher.from_terms(locations.onsite_terms)
+        self.work_mode = WorkModeDetector(locations)
 
     def remote_type(self, text: str | None) -> RemoteType:
-        if not text:
-            return RemoteType.UNKNOWN
-        if self._hybrid.find(text):
-            return RemoteType.HYBRID
-        if self._remote.find(text):
-            return RemoteType.REMOTE
-        if self._onsite.find(text):
-            return RemoteType.ONSITE
-        return RemoteType.UNKNOWN
+        return self.work_mode.detect(text)
 
     def _province(self, text: str) -> str | None:
         abbreviation = self._abbreviation_re.search(text)
@@ -105,9 +96,7 @@ class LocationParser:
             self._cities,
             self._canada,
             self._foreign,
-            self._remote,
-            self._hybrid,
-            self._onsite,
+            self.work_mode,
         ):
             reduced = matcher.remove(remainder)
             found = found or reduced != remainder

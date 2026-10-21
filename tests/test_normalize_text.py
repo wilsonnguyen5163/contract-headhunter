@@ -49,6 +49,18 @@ def test_html_blocks_become_lines_and_list_items_bullets() -> None:
     assert lines == ["We need Python", "• One", "• Two"]
 
 
+def test_list_items_wrapping_paragraphs_keep_bullet_and_text_together() -> None:
+    html = "<ul><li><p>Leads a team of producers</p></li><li><p>Tracks spending</p></li></ul>"
+    lines = [line for line in to_plain_text(html).split("\n") if line]
+    assert lines == ["• Leads a team of producers", "• Tracks spending"]
+
+
+def test_lone_bullet_lines_from_a_copied_page_are_joined() -> None:
+    assert (
+        clean_text("•\n\nManage budgets\n-\nWrite reports") == "• Manage budgets\n- Write reports"
+    )
+
+
 def test_scripts_and_styles_are_dropped() -> None:
     text = to_plain_text(posting("en_contract_data_engineer.html"))
     assert "alert" not in text

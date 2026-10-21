@@ -1,0 +1,13 @@
+# Copy this file to a new name (e.g. 2026-10-20-example-insurance-ba.txt), fill it in, save as UTF-8.
+# Files whose name starts with "_" are never imported.
+# Required: url, title. Leave other fields empty if unknown.
+# employment_type: only if the posting states it (Contract, Temporary, Permanent...).
+# posted: the date the job was posted, as YYYY-MM-DD.
+# Nothing after the --- line = a stub (needs details); paste the text later into the same file.
+url:
+title:
+company:
+location:
+employment_type:
+posted:
+---

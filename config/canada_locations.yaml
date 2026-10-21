@@ -201,6 +201,82 @@ us_states:
 # "CA" is deliberately absent: here it means Canada.
 us_state_codes: [AL, AK, AZ, AR, CO, CT, DE, FL, GA, HI, ID, IL, IN, IA, KS, KY, LA, ME, MD, MA, MI, MN, MS, MO, MT, NE, NV, NH, NJ, NM, NY, NC, ND, OH, OK, OR, PA, RI, SC, SD, TN, TX, UT, VT, VA, WA, WV, WI, WY, DC]
 
-remote_terms: [remote, fully remote, 100% remote, work from home, wfh, télétravail, en télétravail, à distance, travail à distance, virtual]
-hybrid_terms: [hybrid, hybride, hybrid work, mode hybride]
-onsite_terms: [on-site, onsite, on site, in office, in-office, sur place, en présentiel, présentiel, sur site]
+# Work mode. Terms are whole words, case- and accent-insensitive; the longest term wins
+# ("télétravail partiel" is hybrid, not remote). When a posting gives several modes:
+# hybrid + remote -> remote; hybrid + on-site -> on-site; remote + on-site -> the first seen.
+# Left out on purpose: "virtual" (virtual assistant), "distributed" (distributed systems),
+# "à domicile" (soins à domicile = home care).
+remote_terms:
+  - remote
+  - fully remote
+  - 100% remote
+  - remote first
+  - remote-first
+  - work from home
+  - working from home
+  - from home
+  - wfh
+  - home-based
+  - home based
+  - telework
+  - teleworking
+  - telecommute
+  - telecommuting
+  - virtual role
+  - virtual position
+  - anywhere in canada
+  - télétravail
+  - en télétravail
+  - télétravail complet
+  - 100 % télétravail
+  - 100% télétravail
+  - entièrement en télétravail
+  - à distance
+  - travail à distance
+  - entièrement à distance
+  - de la maison
+  - depuis la maison
+hybrid_terms:
+  - hybrid
+  - hybrid work
+  - hybrid model
+  - mixed
+  - mixed work
+  - mixed model
+  - partially remote
+  - partly remote
+  - partial remote
+  - hybride
+  - mode hybride
+  - travail hybride
+  - mode mixte
+  - travail mixte
+  - télétravail partiel
+  - partiellement en télétravail
+  - partiellement à distance
+  - en partie à distance
+onsite_terms:
+  - on-site
+  - onsite
+  - on site
+  - fully on-site
+  - 100% on-site
+  - in office
+  - in-office
+  - in the office
+  - office-based
+  - office based
+  - in person
+  - in-person
+  - sur place
+  - sur site
+  - en présentiel
+  - présentiel
+  - au bureau
+  - en personne
+# Regexes (folded text) that also mean hybrid: "3 days a week in the office",
+# "2 jours par semaine au bureau". Matched before the terms above, so their "in office"
+# does not count as on-site.
+hybrid_patterns:
+  - '\b\d\s*(?:-\s*\d\s*)?days?\s+(?:a|per|each|every)?\s*(?:week\s+)?(?:in|at|on)\s+(?:the\s+|our\s+)?(?:office|site)'
+  - '\b\d\s*(?:-\s*\d\s*)?(?:jours?|journees?)\s+(?:par|/)\s*semaine\s+(?:au|en|sur)\s+(?:bureau|presentiel|site)'

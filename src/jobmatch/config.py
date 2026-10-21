@@ -19,6 +19,7 @@ CONTRACT_PHRASES_FILE = "contract_phrases.yaml"
 COMPANY_ALIASES_FILE = "company_aliases.yaml"
 NORMALIZATION_FILE = "normalization.yaml"
 CANADA_LOCATIONS_FILE = "canada_locations.yaml"
+SOURCES_FILE = "sources.yaml"
 
 
 def _fold(text: str) -> str:
@@ -59,7 +60,8 @@ class NormalizeSettings(StrictModel):
     language_min_hits: int = Field(ge=1)
     bilingual_min_share: float = Field(gt=0, le=0.5)
     language_filter_min_words: int = Field(ge=1)
-    max_requirements: int = Field(ge=1)
+    max_section_items: int = Field(ge=1)
+    max_responsibilities: int = Field(ge=1)
 
 
 class MatchingWeights(StrictModel):
@@ -150,6 +152,12 @@ class StructuredTypes(StrictModel):
     permanent: list[str]
 
 
+class CommitmentRules(StrictModel):
+    full_time: list[str]
+    part_time: list[str]
+    full_time_min_hours: float = Field(gt=0)
+
+
 class ContractPhrases(StrictModel):
     version: int
     contract: list[WeightedPhrase]
@@ -157,6 +165,7 @@ class ContractPhrases(StrictModel):
     false_positives: list[PlainPhrase]
     duration_weight: float = Field(ge=0)
     structured_types: StructuredTypes
+    commitment: CommitmentRules
 
     @model_validator(mode="after")
     def _unique_phrases(self) -> "ContractPhrases":
@@ -191,24 +200,79 @@ class SeniorityLevels(StrictModel):
     executive: list[str]
 
 
+SectionName = Literal[
+    "overview", "responsibilities", "nice_to_have", "requirements", "benefits", "pay",
+    "employer", "equal_opportunity", "application", "other",
+]  # fmt: skip
+
+
+def _check_patterns(patterns: list[str], what: str) -> list[str]:
+    for pattern in patterns:
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise ValueError(f"invalid {what} {pattern!r}: {exc}") from exc
+    return patterns
+
+
+class SectionRule(StrictModel):
+    headers: BilingualList
+    patterns: list[str] = []
+
+    @field_validator("patterns")
+    @classmethod
+    def _patterns_compile(cls, patterns: list[str]) -> list[str]:
+        return _check_patterns(patterns, "section pattern")
+
+
+class PayUnitRule(StrictModel):
+    terms: list[str]
+    min: float = Field(gt=0)
+    max: float = Field(gt=0)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> "PayUnitRule":
+        if self.min > self.max:
+            raise ValueError("pay unit min must not exceed max")
+        return self
+
+
+class PayRules(StrictModel):
+    units: dict[Literal["hour", "day", "week", "month", "year"], PayUnitRule]
+    context_terms: list[str]
+    usd_markers: list[str]
+    cad_markers: list[str]
+
+    @model_validator(mode="after")
+    def _all_units(self) -> "PayRules":
+        missing = {"hour", "day", "week", "month", "year"} - set(self.units)
+        if missing:
+            raise ValueError(f"pay units missing: {', '.join(sorted(missing))}")
+        return self
+
+
 class NormalizationRules(StrictModel):
     version: int
-    boilerplate_headers: BilingualList
-    requirement_headers: BilingualList
-    section_headers: BilingualList
+    sections: dict[SectionName, SectionRule]  # tried in this order
+    kept_sections: list[SectionName]
+    pay: PayRules
     title_noise_patterns: list[str]
+    number_words: dict[str, int] = {}
     seniority: SeniorityLevels
     language_words: BilingualList
+
+    @field_validator("number_words")
+    @classmethod
+    def _numbers_positive(cls, words: dict[str, int]) -> dict[str, int]:
+        bad = [w for w, n in words.items() if not 0 < n < 100]
+        if bad:
+            raise ValueError(f"number words must map to 1-99: {', '.join(bad)}")
+        return {_fold(w): n for w, n in words.items()}
 
     @field_validator("title_noise_patterns")
     @classmethod
     def _patterns_compile(cls, patterns: list[str]) -> list[str]:
-        for pattern in patterns:
-            try:
-                re.compile(pattern)
-            except re.error as exc:
-                raise ValueError(f"invalid title noise pattern {pattern!r}: {exc}") from exc
-        return patterns
+        return _check_patterns(patterns, "title noise pattern")
 
     @model_validator(mode="after")
     def _language_words_disjoint(self) -> "NormalizationRules":
@@ -236,6 +300,12 @@ class CanadaLocations(StrictModel):
     remote_terms: list[str]
     hybrid_terms: list[str]
     onsite_terms: list[str]
+    hybrid_patterns: list[str] = []
+
+    @field_validator("hybrid_patterns")
+    @classmethod
+    def _hybrid_patterns_compile(cls, patterns: list[str]) -> list[str]:
+        return _check_patterns(patterns, "hybrid pattern")
 
     @model_validator(mode="after")
     def _cities_unique(self) -> "CanadaLocations":
@@ -299,3 +369,22 @@ def load_normalization_rules(config_dir: Path) -> NormalizationRules:
 
 def load_canada_locations(config_dir: Path) -> CanadaLocations:
     return CanadaLocations.model_validate(_read_yaml(config_dir / CANADA_LOCATIONS_FILE))
+
+
+class WebSourceSettings(StrictModel):
+    user_agent: str = Field(min_length=1)
+    delay_seconds: float = Field(ge=0)
+    timeout_seconds: float = Field(gt=0)
+    max_bytes: int = Field(gt=0)
+    max_redirects: int = Field(ge=0)
+    respect_robots_txt: bool
+    blocked_host_labels: list[str]
+
+
+class SourcesConfig(StrictModel):
+    version: int
+    web: WebSourceSettings
+
+
+def load_sources(config_dir: Path) -> SourcesConfig:
+    return SourcesConfig.model_validate(_read_yaml(config_dir / SOURCES_FILE))

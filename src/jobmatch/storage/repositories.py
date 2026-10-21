@@ -12,6 +12,7 @@ from jobmatch.schemas import (
     JobStatus,
     Match,
     Review,
+    Run,
     VectorSet,
 )
 
@@ -26,6 +27,18 @@ class JobRepository(Protocol):
         ...
 
     def update_statuses(self, updates: Mapping[str, tuple[JobStatus, str | None]]) -> None: ...
+
+    def replace(self, jobs: Iterable[Job]) -> None:
+        """Replace stored jobs with the same job_id (e.g. a stub filled with details)."""
+        ...
+
+
+class RunRepository(Protocol):
+    """Append-only per-run statistics."""
+
+    def append(self, run: Run) -> None: ...
+
+    def list_all(self) -> list[Run]: ...
 
 
 class ContractorRepository(Protocol):

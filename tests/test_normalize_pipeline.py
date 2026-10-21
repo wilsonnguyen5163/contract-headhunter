@@ -1,12 +1,22 @@
 """End-to-end RawJob -> Job tests with synthetic English, French and bilingual postings."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from conftest import posting
+from conftest import CONFIG_DIR, posting
+from jobmatch.config import load_settings
 from jobmatch.normalize.fingerprint import job_fingerprint
 from jobmatch.normalize.pipeline import Normalizer
-from jobmatch.schemas import EmploymentType, Job, JobStatus, Language, RawJob, RemoteType
+from jobmatch.schemas import (
+    Commitment,
+    EmploymentType,
+    Job,
+    JobStatus,
+    Language,
+    PayUnit,
+    RawJob,
+    RemoteType,
+)
 
 NOW = datetime(2026, 10, 19, 12, 0, tzinfo=UTC)
 
@@ -114,8 +124,12 @@ def test_unknown_location_is_kept(normalizer: Normalizer) -> None:
 
 
 def test_stale_posting_is_filtered(normalizer: Normalizer) -> None:
-    job = normalizer.normalize(raw_job(posted_at=datetime(2026, 8, 1, tzinfo=UTC)), now=NOW)
+    limit = load_settings(CONFIG_DIR).normalize.freshness_days  # whatever settings.yaml says
+    too_old = NOW - timedelta(days=limit + 1)
+    job = normalizer.normalize(raw_job(posted_at=too_old), now=NOW)
     assert (job.status, job.filter_reason) == (JobStatus.FILTERED_OUT, "stale")
+    fresh = normalizer.normalize(raw_job(posted_at=NOW - timedelta(days=limit - 1)), now=NOW)
+    assert fresh.status is JobStatus.NEW
 
 
 def test_other_language_is_filtered(normalizer: Normalizer) -> None:
@@ -165,3 +179,102 @@ def test_normalization_is_deterministic_and_csv_safe(normalizer: Normalizer, sto
 def test_job_model_accepts_output_types(normalizer: Normalizer) -> None:
     job = normalizer.normalize(raw_job(), now=NOW)
     assert Job.model_validate(job.model_dump()) == job
+
+
+def test_posting_is_split_into_fields(normalizer: Normalizer) -> None:
+    job = normalizer.normalize(
+        raw_job(
+            source="manual",
+            source_id="url-1",
+            title="Social Media Community Manager",
+            company="Example Charity Canada",
+            location="Mississauga, ON, Canada",
+            employment_type="Contract",
+            description=posting("en_pitch_and_ats_metadata.txt"),
+        ),
+        now=NOW,
+    )
+    assert len(job.responsibilities) == 3
+    assert job.requirements[0].startswith("A minimum of 5 years")
+    assert job.years_experience_min == 5.0
+    assert (job.pay_min, job.pay_max, job.pay_unit) == (70000, 85000, PayUnit.YEAR)
+    assert "agile" not in job.skills
+    assert job.employment_type is EmploymentType.CONTRACT
+    assert job.duration_months == 12.0  # header block: "Full-Time Temporary (1-Year Contract)"
+    assert job.commitment is Commitment.FULL_TIME  # same line, recorded without filtering
+    assert job.remote_type is RemoteType.HYBRID  # header block: "Workplace Type:" / "Hybrid"
+
+
+def test_clean_description_is_pruned_and_ordered(normalizer: Normalizer) -> None:
+    job = normalizer.normalize(
+        raw_job(
+            title="Social Media Community Manager",
+            location="Mississauga, ON, Canada",
+            description=posting("en_pitch_and_ats_metadata.txt"),
+        ),
+        now=NOW,
+    )
+    clean = job.description_clean or ""
+    assert clean.startswith(
+        "Social Media Community Manager\n\nResponsibilities\n- Manage and grow our online"
+    )
+    order = [clean.index(h) for h in ("Responsibilities\n", "Requirements\n", "Pay\n")]
+    assert order == sorted(order)
+    assert clean.endswith("Pay\nAnnual salary: 70,000–85,000")
+    pruned = (
+        "Example Charity Canada is seeking",  # overview prose
+        "Reports to",
+        "People Leader",
+        "portfolio",
+        "Workplace Type",
+        "Agile mindset",
+        "Community Management & Reporting",  # sub-heading, not a duty
+    )
+    for text in pruned:
+        assert text not in clean
+
+
+def test_company_intro_does_not_add_skills(normalizer: Normalizer) -> None:
+    description = (
+        "Example Agency delivers Brand, Commerce, CRM and Data services worldwide.\n\n"
+        "Responsibilities\n• Lead SEO campaigns for our clients\n"
+        "Requirements\n• A minimum of seven (7) years' experience in digital marketing\n"
+    )
+    job = normalizer.normalize(raw_job(description=description), now=NOW)
+    assert "seo" in job.skills
+    assert "crm" not in job.skills  # only in the company intro
+    assert job.years_experience_min == 7.0
+
+
+def test_posting_without_lists_keeps_its_prose(normalizer: Normalizer) -> None:
+    job = normalizer.normalize(
+        raw_job(
+            title="IT Project Manager",
+            location="Remote - Canada",
+            description=posting("bilingual_project_manager.txt"),
+        ),
+        now=NOW,
+    )
+    clean = job.description_clean or ""
+    assert clean.startswith("IT Project Manager\n\nDescription\n")
+    assert "6-month remote contract" in clean
+
+
+def test_single_structured_amount_is_not_a_range(normalizer: Normalizer) -> None:
+    job = normalizer.normalize(
+        raw_job(pay_min=75000, pay_unit=PayUnit.YEAR, pay_currency="CAD"), now=NOW
+    )
+    assert (job.pay_min, job.pay_max) == (75000, None)
+    assert (job.description_clean or "").endswith("Pay\nAnnual salary: 75,000 CAD")
+
+
+def test_structured_pay_from_source_wins(normalizer: Normalizer) -> None:
+    job = normalizer.normalize(
+        raw_job(pay_min=95, pay_max=110, pay_unit=PayUnit.HOUR, pay_currency="CAD"), now=NOW
+    )
+    assert (job.pay_min, job.pay_max, job.pay_unit, job.pay_currency) == (
+        95,
+        110,
+        PayUnit.HOUR,
+        "CAD",
+    )

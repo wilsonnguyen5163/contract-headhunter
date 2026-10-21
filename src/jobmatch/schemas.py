@@ -10,7 +10,7 @@ from typing import Annotated, Any
 import numpy as np
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3  # 2: responsibilities, nice_to_have, years_experience_min; 3: commitment
 
 _PROVINCES = "AB|BC|MB|NB|NL|NS|NT|NU|ON|PE|QC|SK|YT"
 
@@ -48,6 +48,14 @@ class EmploymentType(StrEnum):
     CONTRACT = "contract"
     PERMANENT = "permanent"
     TEMPORARY = "temporary"
+    UNKNOWN = "unknown"
+
+
+class Commitment(StrEnum):
+    """Hours commitment, independent of employment type: a contract can be full- or part-time."""
+
+    FULL_TIME = "full_time"
+    PART_TIME = "part_time"
     UNKNOWN = "unknown"
 
 
@@ -101,6 +109,8 @@ class FilterReason(StrEnum):
     NOT_CONTRACT = "not_contract"
     STALE = "stale"
     UNSUPPORTED_LANGUAGE = "unsupported_language"
+    # Stored as "duplicate:<job_id of the original>".
+    DUPLICATE = "duplicate"
 
 
 class RunStatus(StrEnum):
@@ -110,6 +120,18 @@ class RunStatus(StrEnum):
 
 
 # ---- intake ----
+
+
+class RawRecord(BaseModel):
+    """A posting exactly as received, kept append-only in data/raw/<source>-YYYY-MM.jsonl."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: Annotated[str, Field(pattern=r"^[a-z0-9_]+$")]
+    source_id: NonEmptyStr
+    fetched_at: AwareDatetime
+    content_hash: NonEmptyStr  # sha256 of the payload, to skip identical re-imports
+    payload: dict[str, Any]
 
 
 class RawJob(Record):
@@ -158,14 +180,18 @@ class Job(Record):
     country: CountryCode | None = None
     remote_type: RemoteType = RemoteType.UNKNOWN
     employment_type: EmploymentType = EmploymentType.UNKNOWN
+    commitment: Commitment = Commitment.UNKNOWN
     contract_signals: list[str] = []
     duration_months: float | None = Field(default=None, ge=0)
     language: Language | None = None
     description_raw: str | None = None
-    description_clean: str | None = None
+    description_clean: str | None = None  # the job itself: no employer pitch, benefits or pay
+    responsibilities: list[str] = []
     requirements: list[str] = []
+    nice_to_have: list[str] = []
     skills: list[str] = []
     seniority: str | None = None
+    years_experience_min: float | None = Field(default=None, ge=0)
     pay_min: float | None = Field(default=None, ge=0)
     pay_max: float | None = Field(default=None, ge=0)
     pay_unit: PayUnit | None = None

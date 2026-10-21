@@ -5,21 +5,47 @@ Recall first: a posting is called permanent only on a clear signal; anything unc
 """
 
 import re
+from collections.abc import Mapping
 
 from pydantic import BaseModel
 
 from jobmatch.config import ContractPhrases
+from jobmatch.normalize.numbers import count_pattern, count_value, folded_words
 from jobmatch.normalize.phrases import PhraseMatch, PhraseMatcher, fold
 from jobmatch.schemas import EmploymentType
 
-# Durations in folded text: "6-month", "12 mois", "3 months", "2-year contract", "contrat de 2 ans".
-_MONTHS = re.compile(r"\b(\d{1,2}(?:[.,]\d)?)\s*\+?\s*-?\s*(?:months?|mois)\b")
-_WEEKS = re.compile(r"\b(\d{1,2})\s*-?\s*(?:weeks?|semaines?)\b")
-_YEARS = re.compile(
-    r"\b(\d)\s*-?\s*(?:years?|ans?|annees?)\s+(?:contract|term|mandate|contrat|mandat)\b"
-    r"|\b(?:contract|contrat|mandat|mandate)\s+(?:of|de|d')\s*(\d)\s*(?:years?|ans?|annees?)\b"
-)
 _WEEKS_PER_MONTH = 52 / 12
+_CONTRACT_WORDS = r"(?:contract|term|mandate|contrat|mandat|ftc|cdd)"
+
+
+class DurationParser:
+    """Contract length in folded text: "6-month", "12 mois", "six-month mandate",
+    "a one-year contract", "2-year FTC", "contrat d'un an", "8 weeks". Years only count next
+    to a contract word, so "5+ years of Python" is not a duration."""
+
+    def __init__(self, number_words: Mapping[str, int] | None = None) -> None:
+        self._words = folded_words(number_words or {})
+        count = count_pattern(self._words)
+        self._months = re.compile(rf"{count}\s*\+?\s*-?\s*(?:months?|mois)\b")
+        self._weeks = re.compile(rf"{count}\s*-?\s*(?:weeks?|semaines?)\b")
+        years = r"(?:years?|ans?|annees?)"
+        self._years_before = re.compile(rf"{count}\s*-?\s*{years}\s+{_CONTRACT_WORDS}\b")
+        self._years_after = re.compile(
+            rf"\b{_CONTRACT_WORDS}\s+(?:of|de|d'|d)\s*{count}\s*{years}\b"
+        )
+
+    def months(self, text: str) -> float | None:
+        folded = fold(text)
+        match = self._months.search(folded)
+        if match:
+            return count_value(match.group("n"), self._words)
+        match = self._years_before.search(folded) or self._years_after.search(folded)
+        if match:
+            return 12.0 * count_value(match.group("n"), self._words)
+        match = self._weeks.search(folded)
+        if match:
+            return round(count_value(match.group("n"), self._words) / _WEEKS_PER_MONTH, 1)
+        return None
 
 
 class ContractAssessment(BaseModel):
@@ -29,18 +55,8 @@ class ContractAssessment(BaseModel):
     duration_months: float | None
 
 
-def parse_duration_months(text: str) -> float | None:
-    folded = fold(text)
-    months = _MONTHS.search(folded)
-    if months:
-        return float(months.group(1).replace(",", "."))
-    years = _YEARS.search(folded)
-    if years:
-        return 12.0 * int(years.group(1) or years.group(2))
-    weeks = _WEEKS.search(folded)
-    if weeks:
-        return round(int(weeks.group(1)) / _WEEKS_PER_MONTH, 1)
-    return None
+def parse_duration_months(text: str, number_words: Mapping[str, int] | None = None) -> float | None:
+    return DurationParser(number_words).months(text)
 
 
 def _structured_key(value: str) -> str:
@@ -48,8 +64,14 @@ def _structured_key(value: str) -> str:
 
 
 class ContractDetector:
-    def __init__(self, phrases: ContractPhrases, threshold: float) -> None:
+    def __init__(
+        self,
+        phrases: ContractPhrases,
+        threshold: float,
+        number_words: Mapping[str, int] | None = None,
+    ) -> None:
         self._threshold = threshold
+        self._durations = DurationParser(number_words)
         self._duration_weight = phrases.duration_weight
         self._contract_weights = {p.phrase: p.weight for p in phrases.contract}
         self._permanent_weights = {p.phrase: p.weight for p in phrases.permanent}
@@ -75,7 +97,7 @@ class ContractDetector:
 
         contract_hits = hits(self._contract)
         permanent_hits = hits(self._permanent)
-        duration = parse_duration_months(text) if contract_hits else None
+        duration = self._durations.months(text) if contract_hits else None
         score = sum(self._contract_weights[h] for h in contract_hits)
         score -= sum(self._permanent_weights[h] for h in permanent_hits)
         if duration is not None:

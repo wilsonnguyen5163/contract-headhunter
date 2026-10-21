@@ -19,7 +19,8 @@ contract:
   - { phrase: "independent contractor", lang: en, weight: 1.0 }
   - { phrase: "incorporated contractor", lang: en, weight: 1.0 }
   - { phrase: "contract-to-hire", lang: en, weight: 0.6 }
-  - { phrase: "fixed-term", lang: en, weight: 1.0 }
+  - { phrase: "fixed-term", lang: en, weight: 1.0 } # also matches "fixed term contract"
+  - { phrase: "FTC", lang: en, weight: 1.0 } # Fixed Term Contract ("12-month FTC")
   - { phrase: "term position", lang: en, weight: 0.8 }
   - { phrase: "term role", lang: en, weight: 0.8 }
   - { phrase: "temporary", lang: en, weight: 0.6 }
@@ -112,6 +113,16 @@ false_positives:
 # Values of a source's own employment-type field (compared case-insensitively,
 # with "_", "-" and spaces treated alike). The structured field wins over phrases.
 structured_types:
-  contract: [contract, contractor, freelance, fixed term, contrat, contractuel, cdd]
+  contract: [contract, contractor, freelance, fixed term, fixed term contract, ftc, contrat, contractuel, cdd]
   temporary: [temporary, temp, temporaire, seasonal, saisonnier, casual, occasionnel]
   permanent: [permanent, permanent full time, permanent part time, regular, régulier, indeterminate, cdi]
+
+# Commitment (hours), recorded separately from employment type: a contract can be
+# full-time or part-time, and full-/part-time wording never filters a posting out.
+# Read from the source's employment-type value, then the title, then the job text; the
+# first term seen wins ("full-time or part-time" -> full-time). Without a term, a stated
+# number of hours per week decides: at or above full_time_min_hours is full-time.
+commitment:
+  full_time: [full-time, full time, fulltime, temps plein, à temps plein, plein temps, temps complet]
+  part_time: [part-time, part time, parttime, temps partiel, à temps partiel, mi-temps, half-time, half time]
+  full_time_min_hours: 30 # GUESS: common Canadian full-time threshold

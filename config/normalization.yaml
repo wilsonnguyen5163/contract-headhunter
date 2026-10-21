@@ -1,160 +1,120 @@
-# Normalization rules, v1 (English and French). Header and word matching is
+# Normalization rules, v2 (English and French). Header and word matching is
 # case- and accent-insensitive.
-version: 1
+version: 2
 
-# Sections dropped from description_clean before embedding.
-boilerplate_headers:
-  en:
-    - about us
-    - about the company
-    - about the organization
-    - about the organisation
-    - who we are
-    - our company
-    - company overview
-    - benefits
-    - our benefits
-    - what we offer
-    - "what's in it for you"
-    - perks
-    - perks and benefits
-    - compensation and benefits
-    - why join us
-    - why work with us
-    - our culture
-    - equal opportunity
-    - equal opportunity employer
-    - equal employment opportunity
-    - diversity and inclusion
-    - "diversity, equity and inclusion"
-    - diversity equity and inclusion
-    - accessibility
-    - accommodation
-    - accommodations
-    - how to apply
-    - application process
-    - privacy notice
-    - disclaimer
-  fr:
-    - à propos de nous
-    - à propos de l'entreprise
-    - à propos de l'organisation
-    - qui sommes-nous
-    - qui nous sommes
-    - notre entreprise
-    - avantages
-    - nos avantages
-    - avantages sociaux
-    - ce que nous offrons
-    - ce que nous vous offrons
-    - pourquoi nous joindre
-    - pourquoi travailler chez nous
-    - notre culture
-    - équité en matière d'emploi
-    - égalité des chances
-    - diversité et inclusion
-    - "équité, diversité et inclusion"
-    - accessibilité
-    - mesures d'adaptation
-    - comment postuler
-    - pour postuler
-    - processus de candidature
-    - avis de confidentialité
-    - avis de non-responsabilité
+# ---------------------------------------------------------------------------
+# Sections. Every header line in a posting is given one of these kinds:
+#   headers  - exact header text (an optional trailing ":" or "?" is ignored; inline text
+#              after "Header:" belongs to that section)
+#   patterns - regexes tried on the folded header (lowercase, no accents) of a short
+#              header-like line: at most 6 words, no digits, no final period, not a bullet.
+#              Kinds are tried in the order listed, so put the more specific kind first.
+# Lines that are not headers stay in the section they appear in, so each employer's own
+# sub-headings need no entry here.
+# ---------------------------------------------------------------------------
+sections:
+  overview:
+    headers:
+      en: [about the job, about the role, about this role, about the position, job description, description, overview, position overview, role overview, the opportunity, job summary, summary, job purpose, purpose of the role, position summary]
+      fr: [à propos de l'emploi, à propos du poste, description du poste, description de l'emploi, aperçu, aperçu du poste, sommaire, sommaire du poste, raison d'être du poste, l'opportunité]
+    patterns:
+      - '^(job|position|role) (summary|purpose|overview|description)$'
+  responsibilities:
+    headers:
+      en: [responsibilities, duties, "what you'll do", what you will do, "what you'll be doing", your role, the role, in this role, key accountabilities]
+      fr: [responsabilités, principales responsabilités, tâches, principales tâches, votre rôle, le rôle, votre mandat, le mandat, mandat, description des tâches, fonctions]
+    patterns:
+      - '^(key |main |core |primary |major |your |the )?(responsibilit|duties|accountabilit|tasks)'
+      - '^what you(''ll| will) (do|be doing)'
+      - '^(principales? |vos |les )?(responsabilit|taches|fonctions)'
+  nice_to_have:
+    headers:
+      en: [nice to have, nice-to-have, assets, asset qualifications, preferred qualifications, bonus points, desired qualifications]
+      fr: [atouts, un atout, qualifications souhaitées, compétences souhaitées, constituent un atout]
+    patterns:
+      - '^(preferred|desired|desirable|bonus|additional|optional) (skills|qualifications|experience)'
+      - '^(nice|good) to have'
+      - '^(atouts?|competences souhaitees|qualifications souhaitees)'
+  requirements:
+    headers:
+      en: [requirements, job requirements, qualifications, required qualifications, minimum qualifications, must have, must-have, must haves, what you bring, "what you'll bring", "what we're looking for", skills and experience, skills and qualifications, required skills, experience, education and experience, who you are, your profile, about you]
+      fr: [exigences, exigences du poste, qualifications requises, profil recherché, profil, compétences, compétences requises, compétences recherchées, ce que vous apportez, ce que vous nous apportez, expérience, expérience et compétences, scolarité et expérience, formation et expérience, votre profil]
+    patterns:
+      - '^(minimum |required |essential |basic |key |core |your |job )?(qualifications?|requirements?|skills|experience|competenc|education)'
+      - '^what (you(''ll| will)? bring|we(''re| are) looking for)'
+      - '^(who you are|about you)'
+      - '^(exigences|qualifications|competences|profil|experience|formation|scolarite)'
+      - '^(ce que vous (nous )?apportez|ce que nous recherchons|votre profil)'
+  benefits:
+    headers:
+      en: [benefits, our benefits, what we offer, "what's in it for you", perks, perks and benefits, compensation and benefits, total rewards]
+      fr: [avantages, nos avantages, avantages sociaux, ce que nous offrons, ce que nous vous offrons, rémunération et avantages]
+    patterns:
+      - '^(our |the |employee )?(benefits|perks|rewards)'
+      - '^(what )?we (offer|provide)' # "We Offer", "What we offer", "We provide"
+      - '^(compensation|salary|remuneration) (and|&|et) (benefits|avantages)'
+      - '^(avantages|nos avantages|(ce que )?nous (vous )?offrons)'
+  pay:
+    headers:
+      en: [salary, compensation, pay, salary range, pay range, rate, hourly rate, rate of pay, wage]
+      fr: [salaire, rémunération, échelle salariale, taux horaire, fourchette salariale]
+    patterns:
+      - '^(base |annual |hourly |expected )?(salary|compensation|pay|wage|rate)'
+      - '^hiring (min|max|minimum|maximum)'
+      - '^(salaire|remuneration|taux horaire|echelle salariale|fourchette salariale)'
+  employer:
+    headers:
+      en: [about us, about the company, about the organization, about the organisation, who we are, our company, company overview, our culture, our mission, our story]
+      fr: [à propos de nous, à propos de l'entreprise, à propos de l'organisation, qui sommes-nous, qui nous sommes, notre entreprise, notre culture, notre mission]
+    patterns:
+      - '^about\b' # "About Example Insurance" (the job/role/you variants are listed above)
+      - '^why\b' # "Why Consider Us?", "Why join Example Co"
+      - '^life at\b'
+      - '^(who we are|our (company|culture|mission|story|values))'
+      - '^(a propos|qui sommes|qui nous sommes|notre (entreprise|culture|mission|histoire))'
+      - '^pourquoi\b' # "Pourquoi nous joindre ?"
+  equal_opportunity:
+    headers:
+      en: [equal opportunity, equal opportunity employer, equal employment opportunity, diversity and inclusion, "diversity, equity and inclusion", accessibility, accommodation, accommodations]
+      fr: [équité en matière d'emploi, égalité des chances, diversité et inclusion, "équité, diversité et inclusion", accessibilité, mesures d'adaptation]
+    patterns:
+      - '^(equal|diversity|inclusion|accessibility|accommodations?|eeo)\b'
+      - '^(equite|egalite|diversite|accessibilite|mesures d.adaptation)'
+  application:
+    headers:
+      en: [how to apply, application process, to apply, privacy notice, disclaimer]
+      fr: [comment postuler, pour postuler, processus de candidature, avis de confidentialité, avis de non-responsabilité]
+    patterns:
+      - '^(how to apply|to apply|application process|apply now)'
+      - '^(comment postuler|pour postuler|processus de candidature)'
+  other:
+    headers:
+      en: [job details, details, location, schedule, hours, contract details, duration, start date, work arrangement]
+      fr: [détails du poste, lieu de travail, horaire, durée, date de début, conditions, conditions de travail]
+    patterns: []
 
-# Sections whose bullet lines become Job.requirements (they stay in description_clean).
-requirement_headers:
-  en:
-    - requirements
-    - job requirements
-    - qualifications
-    - required qualifications
-    - minimum qualifications
-    - preferred qualifications
-    - must have
-    - must-have
-    - must haves
-    - nice to have
-    - assets
-    - asset qualifications
-    - what you bring
-    - "what you'll bring"
-    - "what we're looking for"
-    - skills and experience
-    - skills and qualifications
-    - required skills
-    - experience
-    - education and experience
-    - who you are
-    - your profile
-  fr:
-    - exigences
-    - exigences du poste
-    - qualifications requises
-    - profil recherché
-    - profil
-    - compétences
-    - compétences requises
-    - compétences recherchées
-    - ce que vous apportez
-    - ce que vous nous apportez
-    - atouts
-    - expérience
-    - expérience et compétences
-    - scolarité et expérience
-    - formation et expérience
-    - votre profil
+# Kinds whose text forms description_clean (what is embedded and searched for skills).
+# Employer pitch, benefits, pay, equal-opportunity and application text are left out.
+kept_sections: [overview, responsibilities, requirements, nice_to_have, other]
 
-# Other known headers: they end the previous section and are kept.
-section_headers:
-  en:
-    - about the job
-    - about the role
-    - about this role
-    - job description
-    - description
-    - overview
-    - position overview
-    - role overview
-    - responsibilities
-    - key responsibilities
-    - duties
-    - "what you'll do"
-    - what you will do
-    - your role
-    - the role
-    - the opportunity
-    - job details
-    - details
-    - location
-    - schedule
-    - salary
-    - compensation
-    - pay
-    - contract details
-    - duration
-    - start date
-  fr:
-    - à propos de l'emploi
-    - à propos du poste
-    - description du poste
-    - aperçu
-    - responsabilités
-    - principales responsabilités
-    - tâches
-    - principales tâches
-    - votre rôle
-    - le rôle
-    - le poste
-    - le mandat
-    - détails du poste
-    - lieu de travail
-    - horaire
-    - salaire
-    - rémunération
-    - durée
-    - date de début
-    - conditions
+# ---------------------------------------------------------------------------
+# Pay. Unit words are matched in the folded text; "min"/"max" give the amount range that
+# is plausible for each unit (CAD). If the wording and the amount disagree (e.g. "Hourly"
+# next to 70000), the amount decides: at or above year.min it is yearly, at or below
+# hour.max hourly. All ranges are GUESSES based on typical Canadian pay.
+# ---------------------------------------------------------------------------
+pay:
+  units:
+    hour: { terms: [per hour, an hour, /hour, /hr, /h, hourly, de l'heure, l'heure, /heure, taux horaire], min: 10, max: 500 }
+    day: { terms: [per day, a day, /day, daily, per diem, par jour, /jour, quotidien], min: 100, max: 3000 }
+    week: { terms: [per week, a week, /week, weekly, par semaine, /semaine, hebdomadaire], min: 400, max: 10000 }
+    month: { terms: [per month, a month, /month, monthly, par mois, /mois, mensuel], min: 1500, max: 40000 }
+    year: { terms: [per year, a year, /year, /yr, per annum, annually, annual, yearly, par an, par année, /an, annuel, annuelle], min: 15000, max: 1000000 }
+  # Outside a pay section, an amount counts only with a currency sign AND one of these words
+  # (or a unit word) on the same line, so "$250,000 budget" is not read as pay.
+  context_terms: [salary, pay, rate, compensation, wage, earn, salaire, rémunération, taux, traitement]
+  usd_markers: [usd, us$, us $, u.s. dollars]
+  cad_markers: [cad, c$, ca$, $ca, canadian dollars, dollars canadiens]
 
 # Regexes (case-insensitive) removed from titles, in order. Single-quoted so backslashes stay literal.
 title_noise_patterns:
@@ -168,9 +128,48 @@ title_noise_patterns:
   - '\b(?:req(?:uisition)?|job\s*id|r[ée]f(?:[ée]rence)?\.?|ref\.?)\s*(?:#|n°|no\.?|:)?\s*[a-z]{0,3}-?\d[\w-]*'
   - '#\s*[a-z]{0,3}-?\d[\w-]*'
   # employment-type parentheticals: "(Contract)", "(mandat de 6 mois / 6-month contract)", "(Permanent, Full-time)"
-  - '\([^)]*\b(?:contract|contractor|contrat|contractuel(?:le)?|temporary|temporaire|temp|fixed[- ]term|mandat|mandate|cdd|cdi|freelance|permanent|full[- ]time|part[- ]time|temps plein|temps partiel)\b[^)]*\)'
+  - '\([^)]*\b(?:contract|contractor|contrat|contractuel(?:le)?|temporary|temporaire|temp|fixed[- ]term|ftc|mandat|mandate|cdd|cdi|freelance|permanent|full[- ]time|part[- ]time|temps plein|temps partiel)\b[^)]*\)'
+  # work-mode parentheticals: "(Hybrid)", "(Remote - Canada)", "(Télétravail)" (the mode itself is kept in remote_type)
+  - '\([^)]*\b(?:hybrid|hybride|remote|t[ée]l[ée]travail|on-?site|sur place|en pr[ée]sentiel|work from home|wfh)\b[^)]*\)'
   # trailing employment-type segments: " - 12 Month Contract", " – contrat de 12 mois", " | Permanent"
-  - '\s[-–—|]\s*[^-–—|]*\b(?:contract|contrat|mandat|mandate|cdd|cdi|temporary|temporaire|fixed[- ]term|permanent|freelance)\b[^-–—|]*$'
+  - '\s[-–—|]\s*[^-–—|]*\b(?:contract|contrat|mandat|mandate|cdd|cdi|temporary|temporaire|fixed[- ]term|ftc|permanent|freelance)\b[^-–—|]*$'
+
+# Number words read as digits in years of experience and contract length
+# ("seven (7) years", "a one-year contract", "contrat d'un an", "six mois").
+# "a" is left out on purpose ("a year of experience" is not a requirement count).
+number_words:
+  one: 1
+  two: 2
+  three: 3
+  four: 4
+  five: 5
+  six: 6
+  seven: 7
+  eight: 8
+  nine: 9
+  ten: 10
+  eleven: 11
+  twelve: 12
+  fifteen: 15
+  eighteen: 18
+  twenty: 20
+  twenty-four: 24
+  un: 1
+  une: 1
+  deux: 2
+  trois: 3
+  quatre: 4
+  cinq: 5
+  sept: 7
+  huit: 8
+  neuf: 9
+  dix: 10
+  onze: 11
+  douze: 12
+  quinze: 15
+  dix-huit: 18
+  vingt: 20
+  vingt-quatre: 24
 
 # Seniority words looked up in the title. When several match, the highest level wins
 # (junior < intermediate < senior < lead < executive).

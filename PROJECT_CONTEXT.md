@@ -1,6 +1,6 @@
 # PROJECT_CONTEXT.md: jobmatch (preliminary context for Claude Code)
 
-Status: build phases 1 (skeleton) and 2 (normalization) done on 2026-10-19 and verified on the dev machine; not yet run on the client Mac. Other estimates and model choices below are starting assumptions, not verified facts. Decisions made since the first draft are logged in section 13. Rules for how you work are in `CLAUDE.md`; follow them.
+Status: build phases 1 (skeleton) and 2 (normalization) done on 2026-10-19; phase 3 manual intake (posting links plus paste files) done on 2026-10-20. All of it is verified on the dev machine only, not yet on the client Mac. Change summaries for teammates are in `LOG-UPDATE.md`. Other estimates and model choices below are starting assumptions, not verified facts. Decisions made since the first draft are logged in section 13. Rules for how you work are in `CLAUDE.md`; follow them.
 
 ## 1. Problem
 
@@ -58,6 +58,11 @@ Principles: favor recall in the prefilter (a false positive costs seconds of rev
 
 - **Job-board APIs:** Adzuna (free key, Canada endpoint), possibly Jooble; **Job Bank** (jobbank.gc.ca; no official search API known, so scraper or export, to be decided); optional public **ATS feeds** (Greenhouse, Lever, SmartRecruiters and similar) for a curated list of Canadian employers. Mind rate limits (a free Adzuna tier may be around 1,000 calls per month; verify) and each source's terms.
 - **Manual (LinkedIn):** a human pastes jobs through the intake modes below. No automated LinkedIn access.
+- **Built (2026-10-20): posting links.**
+  - A person adds posting URLs (any board, including LinkedIn) to `data/inbox/links/*.txt`.
+  - `ingest-links` fetches each new link once, reads the schema.org `JobPosting` block (falling back to the page's main text), and caches the result in `data/raw/`.
+  - Indeed is never fetched (CLAUDE.md rule 6). Paste files (`data/inbox/manual/`) remain the fallback for Indeed and for pages that cannot be fetched.
+  - This replaces the planned paste-page mode below as the main manual path.
 - Every source implements one `JobSource` interface and returns raw records; normalization is shared.
 
 ### Manual intake modes (no LLM)
@@ -165,3 +170,23 @@ If added later, behind an `LLMProvider` interface: input = posting + top-k facet
 - **Phase 2 (normalization):** `normalize/` turns a `RawJob` into a `Job` with pure, deterministic functions. Language detection is a built-in English/French function-word check (no lingua); words shared with Spanish and other Romance languages are excluded so other languages are not mistaken for French. Skill matching is exact whole-word, accent-insensitive; rapidfuzz (fuzzy dedupe) waits for phase 3. The skill taxonomy v1 covers diverse fields (about 200 skills in 15 categories), since the real contractor list is diverse and will be filled in by hand. New config files: `normalization.yaml`, `canada_locations.yaml`. New dependencies: beautifulsoup4, lxml, ftfy.
 - **Hard filters (recall first):** `not_canada` only when a foreign location is explicit, `not_contract` only on a clear permanent signal, `stale` past `normalize.freshness_days`, `unsupported_language` only for texts of 40+ words with no English/French signal. Unknowns stay `new`; postings with no description become `needs_details`.
 - **Score-scale finding:** raw E5 cosines are compressed (an unrelated profile scored 0.83 against a job, a related one 0.92), so the GUESS bands in `settings.yaml` (high 0.80, medium 0.65) cannot be used on raw cosine. Phase 4 must rescale scores (for example relative to each job's score distribution) before banding, then tune on reviewer data.
+
+**2026-10-20**
+- **Manual intake = posting links.**
+  - People add URLs to `data/inbox/links/`, and each pasted link counts as approval to fetch it (rules 4 and 6, as edited).
+  - Fetching is a polite plain GET: one at a time with a 2 s pause, robots.txt respected, no cookies, logins or JavaScript; Indeed is blocked.
+  - Pages are cached in `data/raw/`, so rebuilds re-normalize without fetching.
+  - Paste files stay as a fallback.
+- **Normalization v2 splits each posting into labeled parts.**
+  - Section kinds are recognized by exact headers or short leading-word patterns; employer pitch, benefits, EEO and application text are excluded.
+  - New `Job` fields: `responsibilities`, `nice_to_have`, `years_experience_min`, `commitment` (jobs schema v3).
+  - `description_clean` is composed as name → responsibilities → requirements → pay.
+  - Skill wording variants are left to embeddings (phase 4), not the taxonomy.
+- **Ending lists without over-reading.** In bulleted lists, the first plain sentence after the bullets ends the list; plain-text lists are bounded by headers and caps (20 each). Years of experience is read from all requirement lines, so a trailing "requires seven years" still counts.
+- **Rules added:**
+  - Work mode with precedence (hybrid + remote → remote; hybrid + on-site → on-site; remote + on-site → first seen).
+  - Commitment full-/part-time, never a filter.
+  - FTC = fixed-term contract.
+  - Number words (EN/FR) for experience and contract length.
+  - Pay parsing with unit sanity check; a single amount is stored as `pay_min` only.
+- **Freshness:** `freshness_days` was set to 999 by the user, so the stale filter is effectively off for now.
