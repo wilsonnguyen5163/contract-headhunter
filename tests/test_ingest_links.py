@@ -14,6 +14,8 @@ PAGES = Path(__file__).resolve().parent / "fixtures" / "pages"
 NOW = datetime(2026, 10, 20, 12, 0, tzinfo=UTC)
 FTC = "https://jobs.example.ca/job/senior-campaign-producer-6-month-ftc/?utm_source=alert"
 FR = "https://emplois.exemple.ca/postes/analyste-12-mois"
+GONE = "https://jobs.example.ca/job/gone"
+DOWN = "https://jobs.example.ca/job/down"
 
 
 class FakeFetcher:
@@ -28,8 +30,10 @@ class FakeFetcher:
 
     def fetch(self, url: str) -> FetchedPage:
         self.requested.append(url)
+        if url == DOWN:
+            raise FetchError("HTTP 503", status=503)  # temporary: retried next run
         if url not in self.pages:
-            raise FetchError("HTTP 404")
+            raise FetchError("HTTP 404", status=404)  # gone: dropped, never fetched again
         return FetchedPage(requested_url=url, final_url=url, status=200, html=self.pages[url])
 
 
@@ -52,7 +56,8 @@ def links_file(folder: Path) -> Path:
         "https://ca.indeed.com/viewjob?jk=123\n"
         "https://jobs.example.ca/job/gone\n"
         "not-a-link\n"
-        f"{FTC}\n",
+        f"{FTC}\n"
+        f"{DOWN}\n",
         encoding="utf-8",
     )
     return path
@@ -73,10 +78,12 @@ def test_links_are_fetched_normalized_and_stored(normalizer: Normalizer, tmp_pat
     assert by_line["links.txt:2"].outcome == "new"
     assert by_line["links.txt:3"].outcome == "new"
     assert by_line["links.txt:4"].outcome == "skipped"  # Indeed: paste by hand
-    assert by_line["links.txt:5"].outcome == "error"  # fetch failed
+    assert by_line["links.txt:5"].outcome == "skipped"  # HTTP 404: dropped, not an error
+    assert by_line["links.txt:5"].detail.startswith("page gone (HTTP 404)")
     assert by_line["links.txt:6"].outcome == "error"  # not a URL
     assert by_line["links.txt:7"].detail == "listed twice"
-    assert report.fetched == 3  # the two pages and the failed one; Indeed never requested
+    assert by_line["links.txt:8"].outcome == "error"  # HTTP 503: retried next run
+    assert report.fetched == 4  # two pages, the gone one and the down one; Indeed never
 
     jobs = {
         j.title_raw: j
@@ -107,7 +114,8 @@ def test_second_run_reads_the_cache_not_the_network(normalizer: Normalizer, tmp_
 
     again = FakeFetcher(pages())
     report = run(normalizer, tmp_path / "data", again, links)
-    assert again.requested == ["https://jobs.example.ca/job/gone"]  # only the one never stored
+    assert again.requested == [DOWN]  # cached pages and the 404 are not fetched again
+    assert "since 2026-10-20" in next(o.detail for o in report.outcomes if o.file == "links.txt:5")
     assert [o.outcome for o in report.outcomes if o.file in ("links.txt:2", "links.txt:3")] == [
         "already_stored",
         "already_stored",
@@ -115,7 +123,7 @@ def test_second_run_reads_the_cache_not_the_network(normalizer: Normalizer, tmp_
 
     refreshed = FakeFetcher(pages())
     run(normalizer, tmp_path / "data", refreshed, links, refresh=True)
-    assert len(refreshed.requested) == 3
+    assert len(refreshed.requested) == 4  # --refresh retries everything, the 404 included
 
 
 def test_reset_keeps_cache_so_rebuild_needs_no_network(
@@ -128,7 +136,7 @@ def test_reset_keeps_cache_so_rebuild_needs_no_network(
 
     rebuild = FakeFetcher(pages())
     report = run(normalizer, data_dir, rebuild, links)
-    assert rebuild.requested == ["https://jobs.example.ca/job/gone"]
+    assert rebuild.requested == [DOWN]
     assert report.count("new") == 2
 
 

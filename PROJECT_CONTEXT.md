@@ -149,6 +149,8 @@ If added later, behind an `LLMProvider` interface: input = posting + top-k facet
 
 ## 12. Assumptions and open questions
 
+- **Reminder, fix before real use:** `normalize.freshness_days` is 999 (the stale filter is off) so the matching algorithm can be tested on older postings. Set a real limit (30 was the starting guess). Also decide on an "expired" filter from the posting's `validThrough` date; it was deferred on 2026-10-21.
+
 - Known: the client machine is a 2019 13-inch MacBook Pro (Intel i5 1.4 GHz quad-core, 16 GB RAM, Intel graphics). Development machine (decided): Windows PC with AMD Ryzen 9 9950X3D, RTX 5070 Ti and 32 GB RAM, x86_64 like the client's Mac. Docker is the chosen runtime. Still to confirm: the client Mac's macOS version and Docker Desktop support, free disk space, whether it can stay on and plugged in, and Docker Desktop licensing for the client's organization size.
 - How many contractors, and what does a typical description look like (length, structure, number of distinct specialties)?
 - How many labeled examples or historical selections exist?
@@ -190,3 +192,10 @@ If added later, behind an `LLMProvider` interface: input = posting + top-k facet
   - Number words (EN/FR) for experience and contract length.
   - Pay parsing with unit sanity check; a single amount is stored as `pay_min` only.
 - **Freshness:** `freshness_days` was set to 999 by the user, so the stale filter is effectively off for now.
+
+**2026-10-21**
+- **Fuzzy dedupe (rapidfuzz).** Titles are compared after expanding common abbreviations (Sr., Mgr, Eng., & …, in `normalization.yaml`); the match uses the `fuzzy_title_threshold` of 92 (a guess). A similar title counts only with the same company, city and seniority, so "Data Analyst" and "Senior Data Analyst" stay separate. The trade-off: two real openings at one company with near-identical titles in the same city would be merged.
+- **Dead links are dropped.** A link answering 404 or 410 is recorded in `data/raw/` and never fetched again (`--refresh` retries); it no longer counts as an error. Other failures are retried each run.
+- **Page encoding:** the HTTP header's charset, else `<meta charset>`, else UTF-8 with a Windows-1252 fallback.
+- **Empty input files are skipped**, not reported as errors.
+- **Deferred:** the "expired" filter (`validThrough`) and the link-file check in `validate-data`. Freshness stays 999 for matching tests (see the reminder in section 12).
