@@ -38,6 +38,7 @@ class StrictModel(BaseModel):
 class PathSettings(StrictModel):
     data_dir: Path
     exports_dir: Path
+    contractors_csv: Path
 
 
 class StorageSettings(StrictModel):

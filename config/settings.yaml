@@ -5,34 +5,38 @@ paths:
   # Relative paths resolve against the project root (the parent of this config folder).
   data_dir: data
   exports_dir: exports
+  # Built by build-contractors from the master workbook; read by embed-contractors.
+  contractors_csv: data/contractors/contractors.csv
 
 storage:
   lock_timeout_seconds: 30 # GUESS: how long a run or the review UI waits for a CSV lock
 
 embedding:
-  model_name: intfloat/multilingual-e5-small # changing the model needs approval and a re-embed
-  # Exact Hugging Face commit of the model (verified by smoke-embed on 2026-10-19).
-  model_revision: 614241f622f53c4eeff9890bdc4f31cfecc418b3
-  batch_size: 16 # GUESS: small batches for the client's 1.4 GHz Intel CPU
-  max_seq_length: 512 # e5-small's input limit (tokens)
+  # Changing the model needs approval and a full re-embed (embed-jobs, embed-contractors).
+  # bge-m3: multilingual (EN/FR), 1024 dimensions, about 2.3 GB, approved on 2026-10-22.
+  # Previous: intfloat/multilingual-e5-small at 614241f622f53c4eeff9890bdc4f31cfecc418b3,
+  # with job_prefix "query: " and facet_prefix "passage: ".
+  model_name: BAAI/bge-m3
+  model_revision: 5617a9f61b028005a4858fdac845db406aefb181 # main commit at first download, 2026-10-22
+  batch_size: 8 # GUESS: a bigger model, so smaller batches on the client's 1.4 GHz CPU
+  max_seq_length: 512 # GUESS: bge-m3 reads up to 8192 tokens; 512 keeps CPU time down
   normalize_embeddings: true
-  # E5 models need "query: " / "passage: " prefixes (see the model card).
-  # Which side gets which prefix is a GUESS, to be evaluated in phase 4.
-  job_prefix: "query: "
-  facet_prefix: "passage: "
+  # bge-m3 dense vectors need no instruction prefix on either side.
+  job_prefix: ""
+  facet_prefix: ""
 
 normalize:
   # TODO (reminder): 999 effectively turns the stale filter off, on purpose, while the
   # matching algorithm is being tested. Set a real limit (30 was the starting GUESS) and
   # consider an "expired" filter from JobPosting.validThrough before real use.
   freshness_days: 999
-  fuzzy_title_threshold: 92 # GUESS: 0-100 title similarity (same company, city, seniority) for a duplicate
   contract_score_threshold: 0.8 # GUESS: net phrase score to call a posting contract (or, if negative, permanent)
   language_min_hits: 4 # GUESS: EN/FR function words needed before trusting language detection
   bilingual_min_share: 0.25 # GUESS: minority-language share of those words to call a text bilingual
   language_filter_min_words: 40 # GUESS: filter as unsupported language only for texts at least this long
   max_section_items: 20 # bullets kept per list (requirements, nice to have)
   max_responsibilities: 20 # bullets kept for responsibilities
+  fuzzy_title_threshold: 92 # GUESS: 0-100 title similarity (same company, city, seniority) for a duplicate
 
 matching: # used from phase 4
   top_k: 5

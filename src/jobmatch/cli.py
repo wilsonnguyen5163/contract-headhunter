@@ -22,6 +22,7 @@ from jobmatch.storage.csv_store import CsvStore
 from jobmatch.storage.vector_store import NpzVectorStore
 
 if TYPE_CHECKING:
+    from jobmatch.embed.build import EmbedReport
     from jobmatch.ingest import IngestReport
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
@@ -240,7 +241,145 @@ def _print_report(report: "IngestReport", *, dry_run: bool, unit: str) -> None:
         raise typer.Exit(1)
 
 
+@app.command("build-contractors")
+def build_contractors_command(
+    ctx: typer.Context,
+    workbook: Annotated[Path, typer.Argument(help="The contractors master workbook (.xlsx).")],
+    out: Annotated[
+        Path | None,
+        typer.Option("--out", help="Output CSV (default: contractors.csv next to the workbook)."),
+    ] = None,
+) -> None:
+    """Build contractors.csv from the master workbook: confirmed contractors only, tabs
+    joined on Talent ID. An existing output file is first copied to a backups/ folder
+    next to it."""
+    import shutil
+    from datetime import UTC, datetime
+
+    from jobmatch.sources.contractor_sheet import (
+        ContractorRow,
+        build_contractors,
+        default_output,
+        load_contractor_import,
+    )
+    from jobmatch.sources.xlsx import WorkbookError, read_sheets
+    from jobmatch.storage.csv_store import export_csv
+
+    settings: Settings = ctx.obj
+    try:
+        rows, report = build_contractors(
+            read_sheets(workbook), load_contractor_import(settings.config_dir)
+        )
+    except (WorkbookError, ValueError) as exc:
+        typer.echo(f"Cannot build contractors: {exc}")
+        raise typer.Exit(1) from exc
+    dest = out or default_output(workbook)
+    if dest.exists():
+        backups = dest.parent / "backups"
+        backups.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+        backup = backups / f"{dest.stem}.{stamp}{dest.suffix}"
+        shutil.copy2(dest, backup)
+        typer.echo(f"Previous file copied to {backup}")
+    export_csv(ContractorRow, rows, dest)
+    typer.echo(f"Wrote {report.exported} contractor(s) to {dest}")
+    typer.echo(
+        f"  with a profile: {report.with_profile} · without a profile: {report.without_profile}"
+    )
+    typer.echo(
+        f"  excluded: {report.not_contract} not confirmed as contract · "
+        f"{report.profile_without_talent} profile(s) with no Talent row"
+    )
+    typer.echo(
+        f"  rate: {report.rates_numeric} hourly figure(s) · "
+        f"{report.rates_default} set to the default"
+    )
+    log.info("build_contractors", extra={"fields": report.model_dump()})
+
+
+def _print_embed_report(report: "EmbedReport") -> None:
+    typer.echo(
+        f"{report.namespace}: {report.total} vector(s) · {report.embedded} embedded · "
+        f"{report.reused} unchanged · {report.dropped} dropped"
+    )
+    per_text = ""
+    if report.embedded:
+        per_text = f" ({1000 * report.seconds / report.embedded:.0f} ms/text)"
+    typer.echo(
+        f"  model {report.model_name} ({report.model_version}) · {report.dim} dimensions · "
+        f"{report.seconds} s{per_text}"
+    )
+
+
 @app.command("embed-contractors")
-def embed_contractors() -> None:
-    """(Re)build contractor facet vectors (phase 4)."""
-    _not_built(4)
+def embed_contractors(
+    ctx: typer.Context,
+    contractors_csv: Annotated[
+        Path | None,
+        typer.Option("--contractors", help="Contractor list (default: paths.contractors_csv)."),
+    ] = None,
+) -> None:
+    """Embed every contractor in the contractor list (only changed ones are re-embedded).
+    The first run downloads the embedding model."""
+    from jobmatch.config import load_skills_taxonomy
+    from jobmatch.embed.build import TextItem, embed_items
+    from jobmatch.embed.encoder import Encoder
+    from jobmatch.embed.texts import TEMPLATE_HASH, contractor_skills, contractor_text
+    from jobmatch.normalize.skills import SkillExtractor
+    from jobmatch.storage.csv_store import CsvContractorProfileRepository
+
+    settings: Settings = ctx.obj
+    path = contractors_csv or settings.paths.contractors_csv
+    if not path.exists():
+        typer.echo(f"Contractor list not found: {path}. Run build-contractors first.")
+        raise typer.Exit(1)
+    profiles = CsvContractorProfileRepository(
+        path, lock_timeout=settings.storage.lock_timeout_seconds
+    ).list_all()
+    extractor = SkillExtractor(load_skills_taxonomy(settings.config_dir))
+    items = [
+        TextItem(id=p.talent_id, text=contractor_text(p, contractor_skills(p, extractor)))
+        for p in profiles
+    ]
+    report = embed_items(
+        "contractors",
+        items,
+        kind="facet",
+        encoder=Encoder(settings.embedding),
+        store=NpzVectorStore(
+            settings.paths.data_dir / "embeddings",
+            lock_timeout=settings.storage.lock_timeout_seconds,
+        ),
+        template_hash=TEMPLATE_HASH,
+    )
+    _print_embed_report(report)
+    log.info("embed_contractors", extra={"fields": report.model_dump()})
+
+
+@app.command("embed-jobs")
+def embed_jobs(ctx: typer.Context) -> None:
+    """Embed active jobs in jobs.csv (new, matched, no_match); filtered-out jobs and stubs
+    without text are skipped. Only changed jobs are re-embedded."""
+    from jobmatch.embed.build import TextItem, embed_items
+    from jobmatch.embed.encoder import Encoder
+    from jobmatch.embed.texts import TEMPLATE_HASH, job_text
+    from jobmatch.schemas import JobStatus
+    from jobmatch.storage.csv_store import CsvJobRepository
+
+    settings: Settings = ctx.obj
+    store = CsvStore(settings.paths.data_dir, lock_timeout=settings.storage.lock_timeout_seconds)
+    active = {JobStatus.NEW, JobStatus.MATCHED, JobStatus.NO_MATCH}
+    jobs = [j for j in CsvJobRepository(store).list_all() if j.status in active]
+    report = embed_items(
+        "jobs",
+        [TextItem(id=j.job_id, text=job_text(j)) for j in jobs],
+        kind="job",
+        encoder=Encoder(settings.embedding),
+        store=NpzVectorStore(
+            settings.paths.data_dir / "embeddings",
+            lock_timeout=settings.storage.lock_timeout_seconds,
+        ),
+        template_hash=TEMPLATE_HASH,
+    )
+    _print_embed_report(report)
+    log.info("embed_jobs", extra={"fields": report.model_dump()})

@@ -1,6 +1,6 @@
 # PROJECT_CONTEXT.md: jobmatch (preliminary context for Claude Code)
 
-Status: build phases 1 (skeleton) and 2 (normalization) done on 2026-10-19; phase 3 manual intake (posting links plus paste files) done on 2026-10-20. All of it is verified on the dev machine only, not yet on the client Mac. Change summaries for teammates are in `LOG-UPDATE.md`. Other estimates and model choices below are starting assumptions, not verified facts. Decisions made since the first draft are logged in section 13. Rules for how you work are in `CLAUDE.md`; follow them.
+Status: build phases 1 (skeleton) and 2 (normalization) done on 2026-10-19; phase 3 manual intake (posting links plus paste files) done on 2026-10-20, with fuzzy dedupe on 2026-10-21; phase 4 started on 2026-10-22 (contractor list, job and contractor vectors with bge-m3). All of it is verified on the dev machine only, not yet on the client Mac. Change summaries for teammates are in `LOG-UPDATE.md`. Other estimates and model choices below are starting assumptions, not verified facts. Decisions made since the first draft are logged in section 13. Rules for how you work are in `CLAUDE.md`; follow them.
 
 ## 1. Problem
 
@@ -97,7 +97,7 @@ Technique: without an LLM, facets are built from a **human-fillable template** (
 ## 8. Matching (no LLM)
 
 - **Embedding text template (same for jobs and facets):** `Title: ... | Skills: ... | Domain: ... | Seniority: ... | Summary: <requirements-first cleaned text, truncated to the model's limit>`. E5-family models need `query:` / `passage:` prefixes; check the model card.
-- **Model (CPU-friendly, configurable):** start with `intfloat/multilingual-e5-small` (roughly 118M parameters, well under 1 GB in memory; the lightest sensible option for this laptop's 1.4 GHz Intel CPU, with roughly tens to a few hundred milliseconds per text as an estimate to measure). Consider `multilingual-e5-base` if recall is poor. `BAAI/bge-m3` (roughly 560M parameters, longer inputs) is heavier on CPU: benchmark it before adopting. Multilingual is required for French postings. A lighter ONNX runtime path is an optional later optimization, but on Intel macOS it needs `onnxruntime<1.24` and a model available in that runtime's catalog (verify first).
+- **Model in use since 2026-10-22: `BAAI/bge-m3`** (see section 13). The original reasoning follows. **Model (CPU-friendly, configurable):** start with `intfloat/multilingual-e5-small` (roughly 118M parameters, well under 1 GB in memory; the lightest sensible option for this laptop's 1.4 GHz Intel CPU, with roughly tens to a few hundred milliseconds per text as an estimate to measure). Consider `multilingual-e5-base` if recall is poor. `BAAI/bge-m3` (roughly 560M parameters, longer inputs) is heavier on CPU: benchmark it before adopting. Multilingual is required for French postings. A lighter ONNX runtime path is an optional later optimization, but on Intel macOS it needs `onnxruntime<1.24` and a model available in that runtime's catalog (verify first).
 - **Score:** weighted combination of cosine similarity and skill overlap. **Rule gates** (configurable): must-have skills present, seniority compatible, location/remote compatible, language compatible, contract signal present. Thresholds live in `settings.yaml` and are tuned on reviewer decisions. Top-k default 5.
 - **Explainability shown to the human (all data-derived):** similarity score, matched facet, matched skills, missing must-have skills, contract phrases found, which gates passed or failed, confidence band.
 - **Review queue ordering:** by confidence band then score; lower bands still shown (recall first).
@@ -150,7 +150,6 @@ If added later, behind an `LLMProvider` interface: input = posting + top-k facet
 ## 12. Assumptions and open questions
 
 - **Reminder, fix before real use:** `normalize.freshness_days` is 999 (the stale filter is off) so the matching algorithm can be tested on older postings. Set a real limit (30 was the starting guess). Also decide on an "expired" filter from the posting's `validThrough` date; it was deferred on 2026-10-21.
-
 - Known: the client machine is a 2019 13-inch MacBook Pro (Intel i5 1.4 GHz quad-core, 16 GB RAM, Intel graphics). Development machine (decided): Windows PC with AMD Ryzen 9 9950X3D, RTX 5070 Ti and 32 GB RAM, x86_64 like the client's Mac. Docker is the chosen runtime. Still to confirm: the client Mac's macOS version and Docker Desktop support, free disk space, whether it can stay on and plugged in, and Docker Desktop licensing for the client's organization size.
 - How many contractors, and what does a typical description look like (length, structure, number of distinct specialties)?
 - How many labeled examples or historical selections exist?
@@ -194,8 +193,14 @@ If added later, behind an `LLMProvider` interface: input = posting + top-k facet
 - **Freshness:** `freshness_days` was set to 999 by the user, so the stale filter is effectively off for now.
 
 **2026-10-21**
-- **Fuzzy dedupe (rapidfuzz).** Titles are compared after expanding common abbreviations (Sr., Mgr, Eng., & …, in `normalization.yaml`); the match uses the `fuzzy_title_threshold` of 92 (a guess). A similar title counts only with the same company, city and seniority, so "Data Analyst" and "Senior Data Analyst" stay separate. The trade-off: two real openings at one company with near-identical titles in the same city would be merged.
-- **Dead links are dropped.** A link answering 404 or 410 is recorded in `data/raw/` and never fetched again (`--refresh` retries); it no longer counts as an error. Other failures are retried each run.
-- **Page encoding:** the HTTP header's charset, else `<meta charset>`, else UTF-8 with a Windows-1252 fallback.
-- **Empty input files are skipped**, not reported as errors.
-- **Deferred:** the "expired" filter (`validThrough`) and the link-file check in `validate-data`. Freshness stays 999 for matching tests (see the reminder in section 12).
+- **Fuzzy dedupe (rapidfuzz):** a posting is a duplicate when company, city and seniority match and the titles are nearly identical after expanding abbreviations (`title_abbreviations` in `normalization.yaml`, `fuzzy_title_threshold: 92` in `settings.yaml`). The duplicate is kept with status `duplicate`.
+- **Dead links:** HTTP 404/410 are dropped and remembered in `data/raw/` (kind `gone`), not retried unless `--refresh`.
+- **Page encoding:** header charset, then `<meta charset>`, then UTF-8 with a Windows-1252 fallback.
+- **Empty inbox files** are skipped, not errors.
+- **Deferred:** an "expired" filter from `validThrough`; freshness stays 999 (section 12 reminder).
+
+**2026-10-22**
+- **Contractor list:** `build-contractors` builds `data/contractors/contractors.csv` from the master workbook (Talent + Talent Profiles joined on Talent ID; `Contract? = Yes` only; hourly rate, range averaged, else "Industry Standard"). 42 contractors, 15 without a profile. It is read directly for embedding; mapping it to the `Contractor`/facet schema of section 7 is still open.
+- **Embedding model changed to `BAAI/bge-m3`** (user decision), revision `5617a9f61b028005a4858fdac845db406aefb181`: 1024 dimensions, no prefixes, cut at 512 tokens (GUESS, keeps CPU time down), batch 8 (GUESS). About 4.5 GB in the model cache and roughly 2.5–3 GB of memory while loaded (estimate, within the 4 GB cap). Dev PC: 42 contractors in 11.4 s (270 ms each); expect several times slower on the client Mac, still to measure.
+- **One vector per contractor**, not per facet, for now. The embedding text uses shared labels in a fixed order (Title, Target titles, Seniority, Skills, Industries, then the job's lists or the contractor's summary and proof points); names, location, pay, hours, work mode and company are left out. Details in `DEVELOPMENT.md`; the template replaces the one sketched in section 8.
+- **First look at scores (2 jobs × 42 contractors):** top 5 were sensible creative/content/project profiles; best 0.68–0.79, median 0.54–0.61, lowest 0.43–0.48. Wider spread than E5, but the top 5 sit within about 0.05 of each other, so skill and rule scoring still has to separate them. Too small a sample to set thresholds.

@@ -1,0 +1,38 @@
+# How build-contractors turns the contractors master workbook into contractors.csv.
+# Column names are the workbook's own headers; change them here if the workbook changes.
+version: 1
+
+talent_sheet: Talent # tab 1: one row per person, with the Contract? flag
+profile_sheet: Talent Profiles # tab 2: the written profile
+id_column: Talent ID # joins the two tabs
+
+# Only people whose Contract? cell is one of these (case-insensitive) are exported.
+contract_column: Contract?
+contract_true_values: ["yes", "y", "true", "1", "oui"]
+
+# Profile locations that mean "unknown": the City, Province from tab 1 is used instead.
+location_placeholders: [location to confirm, to confirm, tbd, n/a, unknown]
+
+# Used when Rate Expectation has no clear hourly number ("Needs Confirming", "Confirm").
+rate_default: Industry Standard
+
+# Separators that split a cell into a list (core strengths, proof points, industries).
+list_separators: [";", "\n"]
+
+columns:
+  talent:
+    name: Talent Name
+    city: City
+    province: Province
+    primary_role: Primary Role
+    weekly_hours: Weekly Capacity
+  profile:
+    location: Location
+    headline: Standardized Headline
+    summary: Executive Summary
+    core_strengths: Core Strengths
+    proof_points: Proof Points
+    industries: Industry Fit
+    seniority: Seniority
+    rate: Rate Expectation
+    target_titles: [Target Title 1, Target Title 2, Target Title 3, Target Title 4, Target Title 5]

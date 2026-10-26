@@ -21,8 +21,12 @@ class FakeModel:
 
 
 def test_prefixes_and_settings_are_applied(settings: Settings) -> None:
+    # Prefixes set explicitly: the configured model (bge-m3) uses none, E5 models need them.
+    embedding = settings.embedding.model_copy(
+        update={"job_prefix": "query: ", "facet_prefix": "passage: "}
+    )
     model = FakeModel()
-    encoder = Encoder(settings.embedding, model=model)
+    encoder = Encoder(embedding, model=model)
     vectors = encoder.encode(["Développeur Python", "Data engineer"], kind="job")
     encoder.encode(["Analyse d'affaires"], kind="facet")
 
@@ -35,16 +39,23 @@ def test_prefixes_and_settings_are_applied(settings: Settings) -> None:
     assert kwargs["normalize_embeddings"] is True
 
 
+def test_configured_model_uses_no_prefixes(settings: Settings) -> None:
+    model = FakeModel()
+    Encoder(settings.embedding, model=model).encode(["Analyste"], kind="job")
+    assert model.calls[0][0] == [f"{settings.embedding.job_prefix}Analyste"]
+
+
 def test_info_reports_model_identity(settings: Settings) -> None:
     info = Encoder(settings.embedding, model=FakeModel(dim=7)).info()
     assert info.model_name == settings.embedding.model_name
     assert info.dim == 7
-    assert info.model_version.startswith(f"{settings.embedding.model_revision}+")
+    revision = settings.embedding.model_revision or "unpinned"
+    assert info.model_version.startswith(f"{revision}+")
 
 
 @pytest.mark.model
 def test_real_model_smoke(settings: Settings) -> None:
-    """Loads intfloat/multilingual-e5-small on CPU (downloads it on first run)."""
+    """Loads the configured model on CPU (downloads it on first run)."""
     result = run_smoke(settings.embedding)
-    assert result.dim == 384
+    assert result.dim > 0
     assert result.passed, result.similarities

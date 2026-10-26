@@ -70,9 +70,8 @@ class TitleSimilarity:
         return (fold(job.company_norm), fold(job.city or ""), job.seniority or "")
 
     def similar(self, a: Job, b: Job) -> bool:
-        return fuzz.ratio(self.title_key(a.title_norm), self.title_key(b.title_norm)) >= (
-            self.threshold
-        )
+        score = fuzz.ratio(self.title_key(a.title_norm), self.title_key(b.title_norm))
+        return score >= self.threshold
 
 
 def duplicate_reason(original_job_id: str) -> str:
