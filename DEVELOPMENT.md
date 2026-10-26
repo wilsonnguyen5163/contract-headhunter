@@ -17,8 +17,13 @@ Technical companion to the plain-language [README.md](README.md). Goals and arch
   - **posting links** (`ingest-links`): fetch each link a person adds and read its schema.org `JobPosting` block, falling back to the page's main text
   - **paste files** (`ingest-manual`) as the fallback
   - an append-only raw store / page cache in `data/raw/`
-  - dedupe: same source and ID, fingerprint, stub completion
-- **Not built yet:** Adzuna/API sources, fuzzy dedupe, matching (phase 4), review UI (phase 5), the scheduler (phase 6).
+  - dedupe: same source and ID; same fingerprint; or a similar title (rapidfuzz, after expanding "Sr."/"Mgr"…) at the same company, city and seniority; stub completion
+  - dead links (HTTP 404/410) are dropped and remembered; empty input files are skipped
+- **Phase 4 (started):**
+  - contractor list built from the master workbook (`build-contractors`)
+  - job and contractor vectors (`embed-jobs`, `embed-contractors`) with `BAAI/bge-m3`
+- **Not built yet:** Adzuna/API sources, the matcher and evaluation script (rest of phase 4), review UI (phase 5), the scheduler (phase 6).
+- **Reminder, fix before real use:** `freshness_days` is 999 in `settings.yaml`, so the stale filter is off while matching is tested. There's also no "expired" filter from `JobPosting.validThrough` yet.
 
 ## Layout
 
@@ -34,7 +39,8 @@ src/jobmatch/
                    paste.py (paste files, URL canonicalization)
   normalize/       pipeline.py plus one module per step (sections, pay, work_mode, contract...)
   storage/         repository interfaces, CSV store, raw store, NumPy vector store
-  embed/           local sentence-transformers encoder and smoke check
+  embed/           local sentence-transformers encoder, smoke check, embedding texts
+                   (texts.py) and incremental vector building (build.py)
   match/ review/ llm/   placeholders for later phases (llm/ stays empty in v0)
 scripts/           fetch_and_import.sh, reset_reimport.sh
 data/              runtime data (git-ignored, mounted into the container)
@@ -62,7 +68,40 @@ tests/             unit and end-to-end tests; fixtures are synthetic, network is
 - plain GET only: no cookies, logins or JavaScript
 - 2 s between requests; robots.txt respected; timeout, size and redirect limits
 - Indeed is never fetched (CLAUDE.md rule 6); LinkedIn links a person pastes are allowed
-- a failed fetch is reported and retried on the next run
+- **a page that's gone** (HTTP 404/410) is dropped. It's recorded in `data/raw/`, never fetched again (`--refresh` retries), and doesn't count as an error
+- **other failures** (timeouts, 429, 5xx) are reported as errors and retried on the next run
+- **page encoding:** the HTTP header's charset, else the page's `<meta charset>`, else UTF-8 with a Windows-1252 fallback
+
+## Contractor list
+
+`python -m jobmatch build-contractors data/contractors/contractors_master_list.xlsx` builds `data/contractors/contractors.csv`:
+- It joins the Talent and Talent Profiles tabs on Talent ID, keeping only rows with `Contract? = Yes`.
+- The rules and column names are in `config/contractor_import.yaml`.
+- `.xlsx` is read with the standard library (`sources/xlsx.py`), with no openpyxl or pandas.
+- An existing output is copied to `data/contractors/backups/` first.
+- Only counts are printed or logged, never names.
+
+This file isn't yet the pipeline's `data/contractors.csv` (the `Contractor` schema); mapping it is part of phase 4. For now, `embed-contractors` reads it directly (`paths.contractors_csv`).
+
+## Embeddings
+
+`embed-contractors` and `embed-jobs` turn each contractor and each active job (`new`, `matched`, `no_match`) into one 1024-dimension vector with `BAAI/bge-m3` (pinned revision in `settings.yaml`, CPU only, no prefixes, normalized, cut at 512 tokens).
+
+The text embedded for each row is built in `embed/texts.py`. Both sides use the same labels in the same order, most useful first, because the tail is cut:
+
+| Label | Contractor | Job |
+|---|---|---|
+| `Title` | `standardized_headline` | `title_norm` |
+| `Target titles` | `target_titles` | — |
+| `Seniority` | `seniority` | `seniority` |
+| `Skills` | taxonomy skills found in the profile, then remaining `core_strengths` | `skills` |
+| `Industries` | `main_industry` | — |
+| `Responsibilities` / `Requirements` / `Nice to have` | — | section lists (else `Description` from `description_clean`) |
+| `Summary` / `Proof points` | `executive_summary`, `proof_points` | — |
+
+Names, IDs, location, pay or rate, hours, work mode, contract type and company are left out: they are gates in matching, not meaning, and names are personal data.
+
+Re-runs are incremental (`embed/build.py`): a vector is reused when the row's text hash, model, model version and template are unchanged; rows that are gone are dropped. Editing a template means bumping `TEMPLATE_VERSION` in `texts.py`, which re-embeds everything. The exact texts are written to `data/embeddings/<namespace>_texts.jsonl` for checking.
 
 ## Running (Docker)
 
@@ -74,13 +113,16 @@ docker compose run --rm app python -m jobmatch ingest-links data/inbox/links [--
 docker compose run --rm app python -m jobmatch ingest-manual data/inbox/manual [--dry-run]
 docker compose run --rm app python -m jobmatch validate-data
 docker compose run --rm app python -m jobmatch validate-data --data-dir data/samples
-docker compose run --rm app python -m jobmatch smoke-embed   # downloads the model on first run (about 470 MB)
+docker compose run --rm app python -m jobmatch build-contractors data/contractors/contractors_master_list.xlsx
+docker compose run --rm app python -m jobmatch embed-contractors
+docker compose run --rm app python -m jobmatch embed-jobs
+docker compose run --rm -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 app python -m jobmatch smoke-embed   # first run only: downloads the model (about 4.5 GB)
 docker compose run --rm app pytest
 docker compose run --rm app pytest -m model                    # real-model smoke test
 docker compose run --rm app ruff check .
 ```
 
-The embedding model is cached in the `hf-cache` Docker volume. After the first download, set `HF_HUB_OFFLINE=1` in `.env` so the container never contacts Hugging Face.
+The embedding model is cached in the `hf-cache` Docker volume. After the first download, set `HF_HUB_OFFLINE=1` in `.env` so the container never contacts Hugging Face; the download command above overrides it for that one run. bge-m3's pinned revision ships `pytorch_model.bin`, and the library also fetches a converted `model.safetensors`, so the cache holds about 4.5 GB for it.
 
 Dependencies are pinned in `uv.lock`, resolved for linux/amd64 only and limited to releases at least about 2 weeks old (`exclude-newer` in `pyproject.toml`). torch comes from the PyTorch CPU index, so no CUDA packages are installed. After changing dependencies, re-lock and run `docker compose build`.
 

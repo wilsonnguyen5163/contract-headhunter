@@ -31,6 +31,7 @@ from jobmatch.schemas import (
     SCHEMA_VERSION,
     Contractor,
     ContractorFacet,
+    ContractorProfile,
     Job,
     JobStatus,
     Match,
@@ -123,7 +124,7 @@ def to_cell(value: Any) -> str:
     if isinstance(value, list | tuple):
         return join_multi(to_cell(v) for v in value)
     if isinstance(value, float):
-        return repr(value)
+        return str(int(value)) if value.is_integer() else repr(value)  # 40, not 40.0
     return str(value)
 
 
@@ -604,3 +605,24 @@ class CsvReviewRepository:
             if current is None or review.reviewed_at >= current.reviewed_at:
                 latest[review.match_id] = review
         return latest
+
+
+class CsvContractorProfileRepository:
+    """Read-only access to data/contractors/contractors.csv (built by build-contractors)."""
+
+    def __init__(self, path: Path, *, lock_timeout: float) -> None:
+        self._table = CsvTable(
+            path,
+            ContractorProfile,
+            TableMode.READ_ONLY,
+            backups_dir=path.parent / "backups",
+            lock_timeout=lock_timeout,
+            unique_key=("talent_id",),
+        )
+
+    @property
+    def path(self) -> Path:
+        return self._table.path
+
+    def list_all(self) -> list[ContractorProfile]:
+        return self._table.read_all()

@@ -38,6 +38,7 @@ class StrictModel(BaseModel):
 class PathSettings(StrictModel):
     data_dir: Path
     exports_dir: Path
+    contractors_csv: Path
 
 
 class StorageSettings(StrictModel):
@@ -62,6 +63,7 @@ class NormalizeSettings(StrictModel):
     language_filter_min_words: int = Field(ge=1)
     max_section_items: int = Field(ge=1)
     max_responsibilities: int = Field(ge=1)
+    fuzzy_title_threshold: float = Field(gt=0, le=100)
 
 
 class MatchingWeights(StrictModel):
@@ -257,6 +259,7 @@ class NormalizationRules(StrictModel):
     kept_sections: list[SectionName]
     pay: PayRules
     title_noise_patterns: list[str]
+    title_abbreviations: dict[str, str] = {}
     number_words: dict[str, int] = {}
     seniority: SeniorityLevels
     language_words: BilingualList

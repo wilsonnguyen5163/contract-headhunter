@@ -24,6 +24,7 @@ from jobmatch.config import (
 from jobmatch.normalize.commitment import CommitmentDetector
 from jobmatch.normalize.company import CompanyNormalizer
 from jobmatch.normalize.contract import ContractAssessment, ContractDetector
+from jobmatch.normalize.dedupe import TitleSimilarity
 from jobmatch.normalize.description import compose_description
 from jobmatch.normalize.experience import ExperienceReader
 from jobmatch.normalize.fingerprint import job_fingerprint
@@ -78,6 +79,10 @@ class Normalizer:
             phrases, settings.contract_score_threshold, rules.number_words
         )
         self._experience = ExperienceReader(rules.number_words)
+        # Used by dedupe (ingest) to spot the same job under a slightly different title.
+        self.title_similarity = TitleSimilarity(
+            settings.fuzzy_title_threshold, rules.title_abbreviations
+        )
         self._skills = SkillExtractor(taxonomy)
         self._seniority = SeniorityDetector(rules.seniority)
         self._pay = PayParser(rules.pay)

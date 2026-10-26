@@ -38,6 +38,8 @@ log = logging.getLogger("jobmatch.ingest")
 RUN_LOCK_FILE = ".run.lock"
 PASTE_SUFFIX = ".txt"
 LINK_KIND = "link"
+GONE_KIND = "gone"  # a link that answered 404/410: dropped, not fetched again
+GONE_STATUSES = (404, 410)
 
 Outcome = Literal[
     "new", "needs_details", "filtered", "duplicate", "filled_stub", "already_stored", "error",
@@ -105,6 +107,9 @@ def ingest_paste_files(
     files, outcomes = collect_paste_files(paths)
     items: list[_Item] = []
     for path in files:
+        if _is_empty(path):
+            outcomes.append(FileOutcome(file=str(path), outcome="skipped", detail="empty file"))
+            continue
         try:
             raw_job, record = read_paste_file(path, fetched_at=now)
         except (PasteFormatError, OSError) as exc:
@@ -137,6 +142,8 @@ def ingest_links(
     outcomes = [FileOutcome(file=str(p), outcome="error", detail="not found") for p in missing]
     raw_store = RawStore(data_dir / "raw", lock_timeout=lock_timeout)
     cache: dict[str, dict[str, RawRecord]] = {}
+    gone: dict[str, dict[str, RawRecord]] = {}
+    gone_records: list[RawRecord] = []
     seen: set[tuple[str, str]] = set()
     items: list[_Item] = []
     fetched = 0
@@ -161,8 +168,20 @@ def ingest_links(
 
             if source not in cache:
                 cache[source] = raw_store.latest(source, kind=LINK_KIND)
-            known = cache[source]
-            stored = None if refresh else known.get(source_id)
+                gone[source] = raw_store.latest(source, kind=GONE_KIND)
+            stored = None if refresh else cache[source].get(source_id)
+            dead = None if refresh else gone[source].get(source_id)
+            if dead is not None and (stored is None or dead.fetched_at >= stored.fetched_at):
+                status = dead.payload.get("http_status")
+                outcomes.append(
+                    FileOutcome(
+                        file=entry.label,
+                        outcome="skipped",
+                        detail=f"page gone (HTTP {status}) since {dead.fetched_at:%Y-%m-%d}; "
+                        "not fetched again (--refresh retries)",
+                    )
+                )
+                continue
             if stored is not None:
                 payload, fetched_at, record = stored.payload, stored.fetched_at, None
             else:
@@ -170,9 +189,30 @@ def ingest_links(
                     page = fetcher.fetch(url)
                 except FetchError as exc:
                     fetched += 1
-                    outcomes.append(
-                        FileOutcome(file=entry.label, outcome="error", detail=f"fetch: {exc}")
-                    )
+                    if exc.status in GONE_STATUSES:
+                        gone_records.append(
+                            _record(
+                                source,
+                                source_id,
+                                now,
+                                {
+                                    "kind": GONE_KIND,
+                                    "requested_url": entry.url,
+                                    "http_status": exc.status,
+                                },  # fmt: skip
+                            )
+                        )
+                        outcomes.append(
+                            FileOutcome(
+                                file=entry.label,
+                                outcome="skipped",
+                                detail=f"page gone (HTTP {exc.status}): dropped, not fetched again",
+                            )
+                        )
+                    else:
+                        outcomes.append(
+                            FileOutcome(file=entry.label, outcome="error", detail=f"fetch: {exc}")
+                        )
                     continue
                 fetched += 1
                 data = extract_page(page.html)
@@ -195,6 +235,7 @@ def ingest_links(
     return _store(
         items, outcomes, data_dir=data_dir, lock_timeout=lock_timeout, normalizer=normalizer,
         now=now, dry_run=dry_run, started=started, source_name="links", fetched=fetched,
+        extra_records=gone_records,
     )  # fmt: skip
 
 
@@ -217,6 +258,13 @@ def _record(source: str, source_id: str, now: datetime, payload: dict[str, Any])
     )
 
 
+def _is_empty(path: Path) -> bool:
+    try:
+        return not path.read_text(encoding="utf-8-sig", errors="replace").strip()
+    except OSError:
+        return False  # reported as an error by the reader
+
+
 # ---- shared: normalize, dedupe, store ----
 
 
@@ -232,6 +280,7 @@ def _store(
     started: float,
     source_name: str,
     fetched: int,
+    extra_records: list[RawRecord] | None = None,
 ) -> IngestReport:
     run_id = f"ingest-{now:%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex[:6]}"
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -239,7 +288,7 @@ def _store(
         store = CsvStore(data_dir, lock_timeout=lock_timeout)
         jobs_repo = CsvJobRepository(store)
         jobs = [normalizer.normalize(item.raw_job, now=now) for item in items]
-        result = dedupe(jobs_repo.list_all(), jobs)
+        result = dedupe(jobs_repo.list_all(), jobs, similarity=normalizer.title_similarity)
 
         for item, job, decision in zip(items, jobs, result.outcomes, strict=True):
             outcomes.append(_file_outcome(item.label, job.status, job.filter_reason, decision))
@@ -247,7 +296,10 @@ def _store(
 
         if not dry_run:
             raw_store = RawStore(data_dir / "raw", lock_timeout=lock_timeout)
-            raw_store.append(item.record for item in items if item.record is not None)
+            raw_store.append(
+                [item.record for item in items if item.record is not None]
+                + list(extra_records or [])
+            )
             jobs_repo.add_new(result.to_add)
             jobs_repo.replace(result.to_replace)
             CsvRunRepository(store).append(
@@ -275,7 +327,8 @@ def _file_outcome(
                 file=label,
                 outcome="duplicate",
                 job_id=decision.job_id,
-                detail=f"same job as {decision.other_job_id}",
+                detail=f"same job as {decision.other_job_id}"
+                + (" (similar title)" if decision.similar_title else ""),
             )
         case DedupeDecision.SUPERSEDES_STUB:
             return FileOutcome(

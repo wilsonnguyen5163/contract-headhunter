@@ -306,6 +306,28 @@ class Run(Record):
     model_version: str | None = None
 
 
+class ContractorProfile(BaseModel):
+    """One contractor in data/contractors/contractors.csv (built from the master workbook by
+    build-contractors). Lists are "|"-joined cells. Name and profile text are personal data:
+    never log them."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    talent_id: NonEmptyStr
+    talent_name: NonEmptyStr = Field(repr=False)
+    location: str | None = None
+    standardized_headline: str | None = None
+    executive_summary: str | None = Field(default=None, repr=False)
+    core_strengths: list[str] = []
+    proof_points: list[str] = Field(default=[], repr=False)
+    main_industry: list[str] = []
+    seniority: str | None = None
+    weekly_hours: float | None = Field(default=None, ge=0)
+    rate_expectation: NonEmptyStr  # hourly figure ("150", "52.5") or the default text
+    target_titles: list[str] = []
+    contract: bool = True
+
+
 # ---- embeddings (stored as .npz plus meta.json, never in CSV) ----
 
 

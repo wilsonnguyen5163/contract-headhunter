@@ -19,6 +19,8 @@ dependencies = [
     "beautifulsoup4>=4.12",
     "lxml>=5.0",
     "ftfy>=6.2",
+    # Fuzzy title dedupe (phase 3).
+    "rapidfuzz>=3.6",
 ]
 
 [project.scripts]

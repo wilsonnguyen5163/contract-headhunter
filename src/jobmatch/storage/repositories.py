@@ -7,6 +7,7 @@ from typing import Protocol
 from jobmatch.schemas import (
     Contractor,
     ContractorFacet,
+    ContractorProfile,
     EmbeddingMeta,
     Job,
     JobStatus,
@@ -47,6 +48,12 @@ class ContractorRepository(Protocol):
     def list_contractors(self) -> list[Contractor]: ...
 
     def list_facets(self) -> list[ContractorFacet]: ...
+
+
+class ContractorProfileRepository(Protocol):
+    """Read-only: the contractor list built from the master workbook."""
+
+    def list_all(self) -> list[ContractorProfile]: ...
 
 
 class MatchRepository(Protocol):

@@ -134,6 +134,28 @@ title_noise_patterns:
   # trailing employment-type segments: " - 12 Month Contract", " – contrat de 12 mois", " | Permanent"
   - '\s[-–—|]\s*[^-–—|]*\b(?:contract|contrat|mandat|mandate|cdd|cdi|temporary|temporaire|fixed[- ]term|ftc|permanent|freelance)\b[^-–—|]*$'
 
+# Title abbreviations expanded before fuzzy duplicate checks, so "Sr. Data Eng." and
+# "Senior Data Engineer" compare as the same title. Whole words, case/accent-insensitive.
+title_abbreviations:
+  sr: senior
+  snr: senior
+  jr: junior
+  mgr: manager
+  mngr: manager
+  eng: engineer
+  dev: developer
+  admin: administrator
+  coord: coordinator
+  asst: assistant
+  assoc: associate
+  mktg: marketing
+  ops: operations
+  dir: director
+  spec: specialist
+  tech: technician
+  "&": and
+  et: and
+
 # Number words read as digits in years of experience and contract length
 # ("seven (7) years", "a one-year contract", "contrat d'un an", "six mois").
 # "a" is left out on purpose ("a year of experience" is not a requirement count).
