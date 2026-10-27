@@ -14,6 +14,7 @@ from jobmatch.schemas import CountryCode, Province
 CONFIG_DIR_ENV = "JOBMATCH_CONFIG_DIR"
 DEFAULT_CONFIG_DIR = Path("config")
 SETTINGS_FILE = "settings.yaml"
+INDUSTRIES_FILE = "industries.yaml"
 SKILLS_TAXONOMY_FILE = "skills_taxonomy.yaml"
 CONTRACT_PHRASES_FILE = "contract_phrases.yaml"
 COMPANY_ALIASES_FILE = "company_aliases.yaml"
@@ -39,6 +40,7 @@ class PathSettings(StrictModel):
     data_dir: Path
     exports_dir: Path
     contractors_csv: Path
+    learned_skills: Path
 
 
 class StorageSettings(StrictModel):
@@ -68,11 +70,13 @@ class NormalizeSettings(StrictModel):
 
 class MatchingWeights(StrictModel):
     cosine: float = Field(ge=0)
+    title: float = Field(default=0, ge=0)
     skill_overlap: float = Field(ge=0)
+    field: float = Field(default=0, ge=0)
 
     @model_validator(mode="after")
     def _not_all_zero(self) -> "MatchingWeights":
-        if self.cosine + self.skill_overlap <= 0:
+        if self.cosine + self.title + self.skill_overlap + self.field <= 0:
             raise ValueError("at least one matching weight must be positive")
         return self
 
@@ -90,8 +94,29 @@ class ConfidenceBands(StrictModel):
 
 class MatchingSettings(StrictModel):
     top_k: int = Field(gt=0)
+    min_score: float = Field(ge=0, le=1)
+    cosine_floor: float = Field(ge=-1, le=1)
+    cosine_ceiling: float = Field(ge=-1, le=1)
+    title_floor: float = Field(ge=-1, le=1)
+    title_ceiling: float = Field(ge=-1, le=1)
     weights: MatchingWeights
     bands: ConfidenceBands
+    missing_must_have_lowers_band: bool
+    skill_overlap_cap: int = Field(ge=1)
+    field_ignore_categories: list[str] = []
+    thin_profiles_skip_text: bool
+    seniority_max_gap: int = Field(ge=0)
+    assume_all_remote: bool
+    hours_per_year: float = Field(gt=0)
+    rate_tolerance: float = Field(gt=0)
+
+    @model_validator(mode="after")
+    def _cosine_range(self) -> "MatchingSettings":
+        if self.cosine_floor >= self.cosine_ceiling:
+            raise ValueError("matching.cosine_floor must be below cosine_ceiling")
+        if self.title_floor >= self.title_ceiling:
+            raise ValueError("matching.title_floor must be below title_ceiling")
+        return self
 
 
 class LoggingSettings(StrictModel):
@@ -263,6 +288,7 @@ class NormalizationRules(StrictModel):
     number_words: dict[str, int] = {}
     seniority: SeniorityLevels
     language_words: BilingualList
+    must_have_soft_markers: BilingualList = BilingualList(en=[], fr=[])
 
     @field_validator("number_words")
     @classmethod
@@ -354,8 +380,23 @@ def load_settings(config_dir: Path | None = None) -> Settings:
     return Settings.model_validate(raw)
 
 
-def load_skills_taxonomy(config_dir: Path) -> SkillsTaxonomy:
-    return SkillsTaxonomy.model_validate(_read_yaml(config_dir / SKILLS_TAXONOMY_FILE))
+def load_skills_taxonomy(config_dir: Path, learned: Path | None = None) -> SkillsTaxonomy:
+    """The curated taxonomy, plus the skills learned from the contractor list when `learned`
+    exists. A learned skill whose name or alias is already a curated term is dropped:
+    curated always wins."""
+    curated = SkillsTaxonomy.model_validate(_read_yaml(config_dir / SKILLS_TAXONOMY_FILE))
+    if learned is None or not learned.exists():
+        return curated
+    extra = SkillsTaxonomy.model_validate(_read_yaml(learned))
+    taken = {_fold(t) for name, entry in curated.skills.items() for t in (name, *entry.aliases)}
+    merged = dict(curated.skills)
+    for name, entry in extra.skills.items():
+        terms = {_fold(t) for t in (name, *entry.aliases)}
+        if name in merged or terms & taken:
+            continue
+        merged[name] = entry
+        taken |= terms
+    return SkillsTaxonomy(version=curated.version, skills=merged)
 
 
 def load_contract_phrases(config_dir: Path) -> ContractPhrases:
@@ -368,6 +409,30 @@ def load_company_aliases(config_dir: Path) -> CompanyAliases:
 
 def load_normalization_rules(config_dir: Path) -> NormalizationRules:
     return NormalizationRules.model_validate(_read_yaml(config_dir / NORMALIZATION_FILE))
+
+
+class IndustryEntry(StrictModel):
+    aliases: list[str] = []
+    contractor_aliases: list[str] = []  # matched in contractor industry lists only
+
+
+class Industries(StrictModel):
+    version: int
+    industries: dict[str, IndustryEntry]
+
+    @model_validator(mode="after")
+    def _no_collisions(self) -> "Industries":
+        owners: dict[str, str] = {}
+        for name, entry in self.industries.items():
+            for term in (name, *entry.aliases, *entry.contractor_aliases):
+                owner = owners.setdefault(_fold(term), name)
+                if owner != name:
+                    raise ValueError(f"{term!r} is listed under both {owner!r} and {name!r}")
+        return self
+
+
+def load_industries(config_dir: Path) -> Industries:
+    return Industries.model_validate(_read_yaml(config_dir / INDUSTRIES_FILE))
 
 
 def load_canada_locations(config_dir: Path) -> CanadaLocations:

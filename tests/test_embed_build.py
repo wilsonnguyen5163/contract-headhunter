@@ -8,10 +8,19 @@ import numpy as np
 import pytest
 
 from conftest import CONFIG_DIR
-from jobmatch.config import EmbeddingSettings, load_skills_taxonomy
+from jobmatch.config import EmbeddingSettings, load_normalization_rules, load_skills_taxonomy
 from jobmatch.embed.build import TextItem, embed_items
 from jobmatch.embed.encoder import Encoder
-from jobmatch.embed.texts import TEMPLATE_HASH, contractor_skills, contractor_text, job_text
+from jobmatch.embed.texts import (
+    TEMPLATE_HASH,
+    TitleCleaner,
+    contractor_skills,
+    contractor_text,
+    contractor_title_items,
+    job_text,
+    job_title_text,
+    title_owner,
+)
 from jobmatch.normalize.skills import SkillExtractor
 from jobmatch.schemas import ContractorProfile, Job
 from jobmatch.storage.vector_store import NpzVectorStore
@@ -181,3 +190,49 @@ def test_empty_list_writes_an_empty_store(tmp_path: Path, settings_embedding) ->
     assert report.total == 0
     loaded = store.load("contractors")
     assert loaded is not None and loaded.vectors.shape == (0, 3)
+
+
+# ---- titles ----
+
+CLEANER = TitleCleaner(load_normalization_rules(CONFIG_DIR).seniority)
+
+
+@pytest.mark.parametrize(
+    ("title", "brackets", "cleaned"),
+    [
+        ("senior producer, cbc life (english services)", True, "producer, cbc life"),
+        ("Sr. Art Director/Designer", False, "art director/designer"),
+        ("Senior Creative Director & Copywriter", False, "creative director & copywriter"),
+        ("Mid-level Social Media Strategist", False, "social media strategist"),
+        ("Rédactrice sénior (contrat)", True, "redactrice"),
+        ("Project Manager (PMP)", False, "project manager (pmp)"),  # contractor brackets kept
+        ("Team Lead, Data", False, "team lead, data"),  # lead and executive words stay
+        ("Senior", True, ""),
+    ],
+)
+def test_title_cleaning(title: str, brackets: bool, cleaned: str) -> None:
+    assert CLEANER.clean(title, drop_brackets=brackets) == cleaned
+
+
+def test_contractor_titles_are_headline_then_targets_without_duplicates() -> None:
+    profile = make_profile()  # headline "Senior Digital & Technical Project Manager"
+    profile = profile.model_copy(
+        update={
+            "target_titles": [
+                "Sr. Digital Project Manager",
+                "Digital Project Manager",
+                "Program Manager",
+            ]
+        }
+    )
+    assert contractor_title_items(profile, CLEANER) == [
+        ("TAL-1#0", "digital & technical project manager"),
+        ("TAL-1#1", "digital project manager"),
+        ("TAL-1#2", "program manager"),
+    ]
+    assert title_owner("TAL-1#2") == "TAL-1"
+
+
+def test_job_title_text_drops_brackets_and_seniority() -> None:
+    job = make_job(title_norm="senior producer, cbc life (english services)")
+    assert job_title_text(job, CLEANER) == "producer, cbc life"

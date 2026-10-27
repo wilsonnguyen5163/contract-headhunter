@@ -13,5 +13,10 @@ class SeniorityDetector:
         )
 
     def detect(self, title: str | None) -> str | None:
-        found = self._matcher.values(title) if title else []
-        return max(found, key=LEVELS.index) if found else None
+        found = self.levels(title)
+        return found[-1] if found else None
+
+    def levels(self, text: str | None) -> list[str]:
+        """Every level named in the text, lowest first ("Senior / Director" gives both)."""
+        found = set(self._matcher.values(text)) if text else set()
+        return sorted(found, key=LEVELS.index)

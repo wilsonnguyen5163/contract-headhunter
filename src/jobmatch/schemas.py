@@ -13,6 +13,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validato
 SCHEMA_VERSION = 3  # 2: responsibilities, nice_to_have, years_experience_min; 3: commitment
 
 _PROVINCES = "AB|BC|MB|NB|NL|NS|NT|NU|ON|PE|QC|SK|YT"
+PROVINCE_CODES = frozenset(_PROVINCES.split("|"))
 
 NonEmptyStr = Annotated[str, Field(min_length=1)]
 NocCode = Annotated[str, Field(pattern=r"^\d{5}$")]  # NOC 2021 codes, e.g. "00012"
@@ -252,19 +253,29 @@ class ContractorFacet(Record):
 
 
 class Match(Record):
-    """One shortlisted (job, contractor, facet) pair (data/matches.csv)."""
+    """One shortlisted (job, contractor, facet) pair. Append-only: data/matches.csv when every
+    rule check passed, data/matches_flagged.csv when one failed (reasons in gates_failed).
+    A new scoring_version (model, template or matching settings) adds new rows; the newest
+    row per (job, contractor) is current, and reviews keep pointing at the row they saw."""
 
     match_id: NonEmptyStr
     job_id: NonEmptyStr
     contractor_id: NonEmptyStr
     facet: NonEmptyStr
     cosine: float
-    skill_overlap: float = Field(ge=0, le=1)
+    title_cosine: float | None = None  # job title vs the contractor's closest title
+    matched_title: str | None = None  # that title, cleaned (lowercase, no seniority words)
+    skill_overlap: float | None = Field(default=None, ge=0, le=1)  # None: job lists no skills
     score: float
     band: Band
+    rank: int = Field(ge=1)  # 1 = closest contractor for this job (passed and flagged together)
     matched_skills: list[str] = []
     missing_must_have: list[str] = []
-    gates_failed: list[str] = []
+    gates_failed: list[
+        str
+    ] = []  # e.g. "seniority: under-qualified (job senior, contractor junior)"
+    flags: list[str] = []  # information only, never filters, e.g. "rate above posted pay"
+    scoring_version: NonEmptyStr
     created_at: AwareDatetime
 
 
@@ -326,6 +337,35 @@ class ContractorProfile(BaseModel):
     rate_expectation: NonEmptyStr  # hourly figure ("150", "52.5") or the default text
     target_titles: list[str] = []
     contract: bool = True
+
+
+class ReviewedMatch(BaseModel):
+    """One human-reviewed (posting, talent) pair in data/eval/reviewed_matches.csv, imported
+    from a reviewed-match sheet (import-reviewed-matches). Contract-type engagements only.
+    The reviewers' 100-point score is the sum of the six sub-scores. Free text may mention
+    the talent by first name: keep the file local and never log it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    match_id: NonEmptyStr
+    talent_id: NonEmptyStr
+    company: str | None = None
+    role: str | None = None
+    work_setting: str | None = None
+    engagement: NonEmptyStr
+    posting_url: str | None = None
+    posting_status: str | None = None
+    match_score: float | None = None
+    match_tier: str | None = None  # A, B, C or reject
+    skills: float | None = None  # out of 30
+    availability: float | None = None  # out of 15
+    location: float | None = None  # out of 15
+    contract_likelihood: float | None = None  # out of 20
+    posting_age: float | None = None  # out of 10
+    buyer_urgency: float | None = None  # out of 10
+    rationale: str | None = Field(default=None, repr=False)
+    gaps: str | None = Field(default=None, repr=False)
+    notes: str | None = Field(default=None, repr=False)
 
 
 # ---- embeddings (stored as .npz plus meta.json, never in CSV) ----

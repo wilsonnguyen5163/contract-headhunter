@@ -1,0 +1,37 @@
+# How to read a reviewed-match sheet export (CSV) into data/eval/reviewed_matches.csv,
+# the human labels the matcher is evaluated against (import-reviewed-matches).
+# Edit the column names here if the sheet's headers change.
+version: 1
+
+columns:
+  match_id: Match ID
+  talent_id: Talent ID
+  company: Company
+  role: Role
+  work_setting: Work Setting
+  engagement: Engagement Type
+  posting_url: Posting URL
+  posting_status: Posting Status
+  match_score: Match Score
+  match_tier: Match Tier
+  rationale: Match Rationale
+  gaps: Gaps / Risks
+  notes: Notes
+  skills: Skills Match (30)
+  availability: Availability Match (15)
+  location: Location Match (15)
+  contract_likelihood: Contract Likelihood (20)
+  posting_age: Posting Age (10)
+  buyer_urgency: Buyer Urgency (10)
+
+# Only contract-type engagements are in scope. A row whose engagement starts with one of
+# these words (case-insensitive) is left out; so is a row with no engagement at all.
+# "Permanent - contract-conversion target" counts as permanent.
+out_of_scope_prefixes: [permanent]
+
+# Sheet tier text -> short label ("A - Strong" -> "A").
+tiers:
+  A: [a - strong, a]
+  B: [b - good, b]
+  C: [c - stretch, c]
+  reject: [reject]

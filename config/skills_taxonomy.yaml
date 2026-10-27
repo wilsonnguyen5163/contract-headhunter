@@ -35,7 +35,7 @@ skills:
   microservices: { category: software, aliases: [microservice, micro-services, architecture microservices] }
   git: { category: software, aliases: [github, gitlab, bitbucket] }
   qa testing: { category: software, aliases: [software testing, tests logiciels, quality assurance testing, test automation, automatisation des tests, selenium, cypress, playwright] }
-  ui/ux design: { category: software, aliases: [ux design, ui design, user experience design, expérience utilisateur, figma] }
+  ui/ux design: { category: software, aliases: [ux design, ui design, ux, ui, ux/ui, ui/ux, user experience design, expérience utilisateur, user-centred design, user-centered design, conception centrée sur l'utilisateur, figma, prototyping, prototypage, wireframing] }
   mainframe: { category: software, aliases: [cobol, z/os] }
   salesforce: { category: software, aliases: [sfdc, salesforce crm, apex] }
   sap: { category: software, aliases: [sap s/4hana, s/4hana, sap erp, sap fico] }
@@ -84,7 +84,7 @@ skills:
   kubernetes: { category: cloud, aliases: [k8s, aks, eks, openshift] }
   terraform: { category: cloud, aliases: [infrastructure as code, ansible] }
   ci/cd: { category: cloud, aliases: [cicd, continuous integration, intégration continue, jenkins, github actions, azure devops] }
-  devops: { category: cloud, aliases: [] }
+  devops: { category: cloud, aliases: [development operations] }
   linux: { category: cloud, aliases: [unix, red hat, rhel, ubuntu] }
   windows server: { category: cloud, aliases: [] }
   active directory: { category: cloud, aliases: [entra id, azure ad, azure active directory] }
@@ -107,12 +107,12 @@ skills:
   security clearance: { category: security, aliases: [secret clearance, reliability status, enhanced reliability, top secret clearance, cote de fiabilité, cote de sécurité, cote secret] }
 
   # ---------------- project, program, product, business analysis ----------------
-  project management: { category: management, aliases: [project manager, gestion de projet, gestion de projets, chargé de projet, chargée de projet, chef de projet, gestionnaire de projet, pmp] }
-  program management: { category: management, aliases: [program manager, gestion de programme, gestionnaire de programme] }
+  project management: { category: management, aliases: [project manager, gestion de projet, gestion de projets, chargé de projet, chargée de projet, chef de projet, gestionnaire de projet, pmp, project coordination, project coordinator, coordination de projets, coordonnateur de projet, coordonnatrice de projet] }
+  program management: { category: management, aliases: [program manager, gestion de programme, gestionnaire de programme, digital program delivery, program delivery, livraison de programmes] }
   business analysis: { category: business, aliases: [business analyst, analyse d'affaires, analyste d'affaires, analyste fonctionnel, analyste fonctionnelle, requirements gathering, collecte des exigences] }
   process mapping: { category: business, aliases: [cartographie des processus, process modelling, process modeling, bpmn, modélisation des processus] }
   agile: { category: management, aliases: [scrum, agilité, kanban, scrum master, scaled agile] }
-  product management: { category: management, aliases: [product manager, product owner, gestion de produit, propriétaire de produit, responsable de produit] }
+  product management: { category: management, aliases: [product manager, product owner, gestion de produit, propriétaire de produit, responsable de produit, product strategy, stratégie de produit] }
   change management: { category: management, aliases: [gestion du changement, organizational change management, prosci] }
   budgeting: { category: management, aliases: [budget management, gestion budgétaire, budget planning, planification budgétaire] }
   vendor management: { category: management, aliases: [gestion des fournisseurs, supplier management] }
@@ -146,7 +146,7 @@ skills:
 
   # ---------------- human resources ----------------
   recruitment: { category: hr, aliases: [recruiting, talent acquisition, recrutement, acquisition de talents, recruiter, recruteur, recruteuse] }
-  human resources: { category: hr, aliases: [hr generalist, ressources humaines, conseiller en ressources humaines, conseillère en ressources humaines, hr business partner, hrbp, partenaire d'affaires rh] }
+  human resources: { category: hr, aliases: [hr, rh, hr generalist, hr strategy, stratégie rh, people operations, people and culture, talent strategy, ressources humaines, conseiller en ressources humaines, conseillère en ressources humaines, hr business partner, hrbp, partenaire d'affaires rh] }
   labour relations: { category: hr, aliases: [labor relations, relations de travail, collective agreement, convention collective] }
   compensation: { category: hr, aliases: [total rewards, rémunération globale, compensation analyst] }
   hris: { category: hr, aliases: [workday, successfactors, sirh] }
@@ -155,8 +155,8 @@ skills:
 
   # ---------------- marketing, communications, translation ----------------
   digital marketing: { category: marketing, aliases: [marketing numérique, online marketing, google ads, paid media, sem] }
-  seo: { category: marketing, aliases: [search engine optimization, référencement, référencement naturel] }
-  social media: { category: marketing, aliases: [social media marketing, médias sociaux, réseaux sociaux, community management, gestion de communauté] }
+  seo: { category: marketing, aliases: [search engine optimization, référencement, référencement naturel, keyword research, recherche de mots-clés, recherche de mots clés] }
+  social media: { category: marketing, aliases: [social media marketing, médias sociaux, réseaux sociaux, community management, gestion de communauté, social strategy, social media strategy, social execution, stratégie sociale] }
   copywriting: { category: marketing, aliases: [content writing, rédaction web, rédaction publicitaire, content creation, création de contenu] }
   corporate communications: { category: marketing, aliases: [internal communications, communications internes, communications d'entreprise, public relations, relations publiques] }
   graphic design: { category: marketing, aliases: [design graphique, infographie, adobe creative suite, photoshop, illustrator, indesign] }
@@ -165,6 +165,92 @@ skills:
   crm: { category: marketing, aliases: [customer relationship management, gestion de la relation client, hubspot] }
   market research: { category: marketing, aliases: [étude de marché, études de marché] }
   event planning: { category: marketing, aliases: [event management, planification d'événements, gestion d'événements] }
+
+  # ---------------- marketing, go-to-market and growth (added 2026-10-26 from the contractor list) ----------------
+  # Bare "ai", "design", "operations", "writing", "editing", "analytics", "automation",
+  # "reporting", "governance", "partnerships" and "coaching" are left out on purpose: too
+  # generic for job text ("ai" also matches French "j'ai").
+  product marketing: { category: marketing, aliases: [product marketer, product marketing manager, marketing produit, marketing de produit] }
+  go-to-market: { category: marketing, aliases: [go to market, gtm, gtm strategy, go-to-market strategy, gtm advisory, market expansion, mise en marché, stratégie de mise en marché, expansion de marché] }
+  positioning: { category: marketing, aliases: [brand positioning, product positioning, market positioning, messaging and positioning, positionnement, positionnement de marque] }
+  brand strategy: { category: marketing, aliases: [brand identity, brand storytelling, brand development, stratégie de marque, identité de marque] }
+  account-based marketing: { category: marketing, aliases: [abm, account based marketing, marketing basé sur les comptes] }
+  growth marketing: { category: marketing, aliases: [growth marketer, growth strategy, growth experimentation, growth hacking, marketing de croissance, stratégie de croissance] }
+  conversion rate optimization: { category: marketing, aliases: [cro, conversion optimization, a/b testing, optimisation du taux de conversion, optimisation des conversions] }
+  marketing operations: { category: marketing, aliases: [marketing ops, mops, opérations marketing] }
+  integrated marketing: { category: marketing, aliases: [integrated campaigns, integrated communications, integrated marketing campaigns, marketing intégré, communications intégrées, campagnes intégrées] }
+  experiential marketing: { category: marketing, aliases: [marketing expérientiel] }
+  marketing leadership: { category: marketing, aliases: [global marketing leadership, head of marketing, chief marketing officer, cmo, fractional cmo, directeur marketing, directrice marketing, vice-président marketing] }
+  sales enablement: { category: marketing, aliases: [habilitation des ventes, soutien aux ventes] }
+  customer journey: { category: marketing, aliases: [customer journey mapping, parcours client] }
+  creative strategy: { category: marketing, aliases: [campaign concepts, creative concepts, stratégie créative, concepts de campagne] }
+  demand generation: { category: marketing, aliases: [demand gen, demand generation marketing, génération de la demande] }
+  lead generation: { category: marketing, aliases: [lead gen, génération de prospects, génération de leads] }
+  event marketing: { category: marketing, aliases: [field marketing, trade shows, salons professionnels, marketing événementiel] }
+  marketing automation: { category: marketing, aliases: [marketo, pardot, hubspot marketing hub, automatisation du marketing, automatisation marketing] }
+  performance marketing: { category: marketing, aliases: [paid acquisition, paid social, marketing de performance] }
+  content marketing: { category: marketing, aliases: [content marketer, content marketing manager, marketing de contenu] }
+  email marketing: { category: marketing, aliases: [email campaigns, lifecycle marketing, lifecycle and crm, courriel marketing, marketing par courriel, infolettre] }
+  marketing analytics: { category: marketing, aliases: [marketing analyst, analytique marketing, analyse marketing] }
+
+  # ---------------- sales and business development (added 2026-10-26) ----------------
+  business development: { category: sales, aliases: [business development manager, développement des affaires, développement commercial] }
+  sales leadership: { category: sales, aliases: [sales director, head of sales, sales management, directeur des ventes, directrice des ventes, gestion des ventes] }
+  consultative selling: { category: sales, aliases: [full-cycle sales, full cycle sales, value-based selling, consultative and value-based selling, outbound prospecting, pipeline management, sales process optimization, vente consultative, prospection] }
+  account management: { category: sales, aliases: [account manager, account expansion, strategic accounts, key account management, relationship management, gestion de comptes, gestionnaire de comptes, comptes clés] }
+  media sales: { category: sales, aliases: [advertising sales, ad sales, ventes publicitaires, vente média] }
+  partnership development: { category: sales, aliases: [strategic partnerships, partner programs, partner program management, channel partnerships, développement de partenariats, partenariats stratégiques] }
+
+  # ---------------- design and creative (added 2026-10-26) ----------------
+  typography: { category: media, aliases: [typographie, type design] }
+  editorial design: { category: media, aliases: [editorial and layout, layout design, mise en page, conception éditoriale] }
+  print production: { category: media, aliases: [digital and print production, prepress, production imprimée, prépresse] }
+  ux research: { category: media, aliases: [user research, usability testing, recherche utilisateur, tests d'utilisabilité] }
+  studio management: { category: media, aliases: [creative operations, gestion de studio] }
+  information architecture: { category: media, aliases: [architecture de l'information] }
+  technical writing: { category: media, aliases: [technical content, technical writer, rédaction technique, rédacteur technique, rédactrice technique] }
+
+  # ---------------- operations and leadership (added 2026-10-26) ----------------
+  operations management: { category: management, aliases: [operations manager, director of operations, operating model design, startup operations, business operations, gestion des opérations, directeur des opérations, directrice des opérations] }
+  process improvement: { category: management, aliases: [workflow optimization, process optimization, amélioration des processus] }
+  organizational transformation: { category: management, aliases: [organizational diagnostics, organizational design, organizational development, transformation organisationnelle, développement organisationnel] }
+  board governance: { category: management, aliases: [board partnership, board relations, governance and board relations, gouvernance, conseil d'administration] }
+  executive leadership: { category: management, aliases: [cross-functional team leadership, executive advisory, fractional executive, leadership exécutif, direction générale] }
+  executive communications: { category: management, aliases: [communications de la direction] }
+  resource planning: { category: management, aliases: [resource management, capacity planning, planification des ressources] }
+  leadership coaching: { category: management, aliases: [executive coaching, coaching de gestion, coaching de leadership] }
+
+  # ---------------- finance, funding and growth (added 2026-10-26) ----------------
+  financial strategy: { category: finance, aliases: [finance operations, finance strategy, stratégie financière] }
+  revenue growth: { category: finance, aliases: [commercial revenue, revenue strategy, revenue operations, revops, croissance des revenus] }
+  fundraising: { category: finance, aliases: [seed funding, funding readiness, fund development, collecte de fonds, financement par capital de risque] }
+  investor relations: { category: finance, aliases: [fundraising & investor relations, relations avec les investisseurs] }
+  venture capital: { category: finance, aliases: [capital de risque] }
+
+  # ---------------- technology leadership (added 2026-10-26) ----------------
+  software development: { category: software, aliases: [software engineering, développement logiciel, génie logiciel] }
+  engineering leadership: { category: software, aliases: [engineering management, director of engineering, head of engineering, vp engineering, fractional cto, directeur de l'ingénierie] }
+  technology strategy: { category: software, aliases: [it strategy, digital strategy, stratégie technologique, stratégie numérique] }
+  ai strategy: { category: data, aliases: [ai transformation, ai commercialization, ai adoption, artificial intelligence, intelligence artificielle, stratégie ia] }
+
+  # ---------------- media, content and creative production (added 2026-10-26) ----------------
+  # Bare "producer", "editor", "analytics" and "dam" are left out on purpose: too ambiguous
+  # ("Managing Editor" is a boss, not a skill). Job titles are compared separately.
+  editorial planning: { category: media, aliases: [editorial calendar, editorial calendars, editorial plan, editorial plans, editorial schedule, editorial schedules, content calendar, content calendars, calendrier éditorial, calendriers éditoriaux, planification éditoriale] }
+  copy editing: { category: media, aliases: [copyediting, copy-editing, copy editor, proofreading, line editing, révision de textes, correction d'épreuves] }
+  journalism: { category: media, aliases: [journalist, journalists, journalisme, journaliste, journalistes, newsroom, salle de nouvelles, salle des nouvelles] }
+  content strategy: { category: media, aliases: [content strategist, stratégie de contenu, stratège de contenu] }
+  content production: { category: media, aliases: [content producer, production de contenu] }
+  digital production: { category: media, aliases: [digital producer, integrated producer, interactive producer, campaign producer, web producer, producteur numérique, productrice numérique, chargé de production, chargée de production] }
+  video production: { category: media, aliases: [video producer, video editing, video editor, videography, videographer, production vidéo, montage vidéo, vidéaste] }
+  motion graphics: { category: media, aliases: [motion design, motion designer, after effects, graphisme animé] }
+  web design: { category: media, aliases: [web designer, webdesign, conception web, design web] }
+  art direction: { category: media, aliases: [art director, direction artistique, directeur artistique, directrice artistique] }
+  creative direction: { category: media, aliases: [creative director, direction de création, directeur de création, directrice de création] }
+  content management systems: { category: media, aliases: [cms, content management system, wordpress, drupal, système de gestion de contenu] }
+  web analytics: { category: media, aliases: [google analytics, adobe analytics, analytique web] }
+  media planning: { category: media, aliases: [media planner, media buying, planification média, achat média] }
+  digital asset management: { category: media, aliases: [gestion des actifs numériques] }
 
   # ---------------- legal and compliance ----------------
   legal counsel: { category: legal, aliases: [lawyer, avocat, avocate, legal advisor, conseiller juridique, conseillère juridique] }

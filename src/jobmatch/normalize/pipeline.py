@@ -94,7 +94,7 @@ class Normalizer:
         return cls(
             settings.normalize,
             rules=load_normalization_rules(config_dir),
-            taxonomy=load_skills_taxonomy(config_dir),
+            taxonomy=load_skills_taxonomy(config_dir, settings.paths.learned_skills),
             phrases=load_contract_phrases(config_dir),
             aliases=load_company_aliases(config_dir),
             locations=load_canada_locations(config_dir),

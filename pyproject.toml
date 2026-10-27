@@ -21,6 +21,8 @@ dependencies = [
     "ftfy>=6.2",
     # Fuzzy title dedupe (phase 3).
     "rapidfuzz>=3.6",
+    # Postings saved as PDF in data/inbox/manual/ (text extraction, pure Python).
+    "pypdf>=5.0",
 ]
 
 [project.scripts]

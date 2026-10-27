@@ -1,6 +1,6 @@
 # PROJECT_CONTEXT.md: jobmatch (preliminary context for Claude Code)
 
-Status: build phases 1 (skeleton) and 2 (normalization) done on 2026-10-19; phase 3 manual intake (posting links plus paste files) done on 2026-10-20, with fuzzy dedupe on 2026-10-21; phase 4 started on 2026-10-22 (contractor list, job and contractor vectors with bge-m3). All of it is verified on the dev machine only, not yet on the client Mac. Change summaries for teammates are in `LOG-UPDATE.md`. Other estimates and model choices below are starting assumptions, not verified facts. Decisions made since the first draft are logged in section 13. Rules for how you work are in `CLAUDE.md`; follow them.
+Status: build phases 1 (skeleton) and 2 (normalization) done on 2026-10-19; phase 3 manual intake (posting links plus paste files) done on 2026-10-20, with fuzzy dedupe on 2026-10-21; phase 4 started on 2026-10-22 (contractor list, job and contractor vectors with bge-m3), and the matcher was built on 2026-10-26 (evaluation script waits for reviewer data). All of it is verified on the dev machine only, not yet on the client Mac. Change summaries for teammates are in `LOG-UPDATE.md`. Other estimates and model choices below are starting assumptions, not verified facts. Decisions made since the first draft are logged in section 13. Rules for how you work are in `CLAUDE.md`; follow them.
 
 ## 1. Problem
 
@@ -98,6 +98,7 @@ Technique: without an LLM, facets are built from a **human-fillable template** (
 
 - **Embedding text template (same for jobs and facets):** `Title: ... | Skills: ... | Domain: ... | Seniority: ... | Summary: <requirements-first cleaned text, truncated to the model's limit>`. E5-family models need `query:` / `passage:` prefixes; check the model card.
 - **Model in use since 2026-10-22: `BAAI/bge-m3`** (see section 13). The original reasoning follows. **Model (CPU-friendly, configurable):** start with `intfloat/multilingual-e5-small` (roughly 118M parameters, well under 1 GB in memory; the lightest sensible option for this laptop's 1.4 GHz Intel CPU, with roughly tens to a few hundred milliseconds per text as an estimate to measure). Consider `multilingual-e5-base` if recall is poor. `BAAI/bge-m3` (roughly 560M parameters, longer inputs) is heavier on CPU: benchmark it before adopting. Multilingual is required for French postings. A lighter ONNX runtime path is an optional later optimization, but on Intel macOS it needs `onnxruntime<1.24` and a model available in that runtime's catalog (verify first).
+- **As built (2026-10-26):** see section 13 and `DEVELOPMENT.md` (Matching). The original sketch follows.
 - **Score:** weighted combination of cosine similarity and skill overlap. **Rule gates** (configurable): must-have skills present, seniority compatible, location/remote compatible, language compatible, contract signal present. Thresholds live in `settings.yaml` and are tuned on reviewer decisions. Top-k default 5.
 - **Explainability shown to the human (all data-derived):** similarity score, matched facet, matched skills, missing must-have skills, contract phrases found, which gates passed or failed, confidence band.
 - **Review queue ordering:** by confidence band then score; lower bands still shown (recall first).
@@ -204,3 +205,61 @@ If added later, behind an `LLMProvider` interface: input = posting + top-k facet
 - **Embedding model changed to `BAAI/bge-m3`** (user decision), revision `5617a9f61b028005a4858fdac845db406aefb181`: 1024 dimensions, no prefixes, cut at 512 tokens (GUESS, keeps CPU time down), batch 8 (GUESS). About 4.5 GB in the model cache and roughly 2.5–3 GB of memory while loaded (estimate, within the 4 GB cap). Dev PC: 42 contractors in 11.4 s (270 ms each); expect several times slower on the client Mac, still to measure.
 - **One vector per contractor**, not per facet, for now. The embedding text uses shared labels in a fixed order (Title, Target titles, Seniority, Skills, Industries, then the job's lists or the contractor's summary and proof points); names, location, pay, hours, work mode and company are left out. Details in `DEVELOPMENT.md`; the template replaces the one sketched in section 8.
 - **First look at scores (2 jobs × 42 contractors):** top 5 were sensible creative/content/project profiles; best 0.68–0.79, median 0.54–0.61, lowest 0.43–0.48. Wider spread than E5, but the top 5 sit within about 0.05 of each other, so skill and rule scoring still has to separate them. Too small a sample to set thresholds.
+
+**2026-10-26**
+- **Matcher built** (`match`, `export-matches`).
+  - Score = weighted average of full-text cosine, title cosine and skill overlap, each stretched to 0–1. Weights 0.45 / 0.30 / 0.25 (GUESSES).
+  - One fixed scale for all jobs, so a job nobody fits still looks weak.
+  - Job-centric shortlist of up to 5, with `min_score` 0.30 (GUESS).
+- **User decisions:**
+  - **Seniority:** flag under- and over-qualified, with both levels in the reason.
+  - **Location:** treat all contract work as remote for now (`assume_all_remote: true`). The province check is built but off, and the user will revisit the logic.
+  - **Failed checks:** go to a separate `matches_flagged.csv` for review instead of being dropped.
+  - **Rate is never a filter.** A strict rate filter would make it too hard to match jobs to contractors. "Rate above posted pay" stays an information flag.
+  - **Commitment and hours:** never filter (unchanged).
+- **Must-have skills:**
+  - Requirements lines with soft wording ("familiarity", "an asset", "un atout"…) no longer count.
+  - Missing must-haves are shown but no longer lower the band (`missing_must_have_lowers_band: false`). With free-text contractor profiles, nearly every contractor missed some, and bands stopped separating anyone.
+- **Title similarity added.**
+  - Titles are cleaned of junior, intermediate and senior words, and job titles also lose bracketed text.
+  - Each contractor's closest title counts.
+  - Thin profiles (no summary or strengths) are scored on title and skills only.
+- **Skill overlap** = shared ÷ min(job skill count, 4) (GUESS). Long tag lists made one shared skill worth almost nothing.
+- **Taxonomy:** 15 media, content and production skills added (editorial planning, journalism, copy editing, digital production, video production, motion graphics, CMS…). Bare "producer", "editor", "analytics" and "dam" are left out as ambiguous.
+- **Results on 3 jobs × 42 contractors:**
+  - The social media and campaign producer shortlists look right. The CBC editorial role has no strong match, which is correct: nobody shows journalism or CMS experience.
+  - Every contractor with a stated rate is 2–4× the posted pay. These postings are salaried fixed-term roles.
+  - The Integrated Producer (thin profile) still misses: bge-m3 rates "campaign producer" closer to "creative director" than to "integrated producer". A shared role-word bonus is an option to test once more postings are in.
+  - Weights are to be tuned on more postings and reviewer decisions.
+- **Open:**
+  - how new skills enter the taxonomy (suggested: a local `suggest-skills` report plus human approval; an LLM only later, posting text only, behind a disabled-by-default provider);
+  - the link-clearing commit must not break `reset_reimport.sh`, which rebuilds only from the inbox.
+- **Human-reviewed matches imported as labels** (`import-reviewed-matches`, `evaluate-matches`).
+  - The sheet has 85 filled-in rows; 33 are contract-type and become labels.
+  - The 11 active contract postings among them were added to the links file. All 11 failed to import: 4 removed (404), 4 blocked (HTTP 403: jobs.ca, CareerBeacon), 1 LinkedIn page disallowed by robots.txt, 2 Workday pages that need JavaScript.
+  - So only 1 reviewed pair is currently comparable. Talents TAL-BC-005 and TAL-BC-008 appear in the reviews but not in the contractor list (not marked "Contract? = Yes").
+- **What the reviewers' scoring shows** (all 85 rows, permanent ones included, used for insight only):
+  - The reviewers' skills sub-score barely separates the tiers: 21–30 everywhere, including rejects. Tiers are decided by contract likelihood (20 contract, 12 conversion, 8 permanent), availability and location.
+  - Rejects are about logistics, not skills. Of 17: 5 Ontario outreach blocked until recruiter licensing is confirmed, 4 relocation or scope, 3 talent unavailable until a date, 2 posting gone, 2 level mismatch, 1 full-time vs part-time, 1 foreign employer.
+  - Location is a business rule: Ontario hybrid/on-site roles score 4/15 for licensing reasons, remote roles 15/15. This is evidence for when `assume_all_remote` is revisited.
+  - Availability is scored, not filtered, including "unavailable until <date>". We have hours but no availability date.
+  - Canadian-employer eligibility is its own gate (US/EU employers with remote postings were excluded), and our location filter doesn't catch it.
+  - Rate gaps are noted as risks and never reject, which matches the team decision. Level mismatch is noted but rarely rejected, so our seniority flag may be stricter than reviewers. Industry fit shows up in gaps.
+- **Candidate improvements, not built:**
+  - an Ontario hybrid/on-site flag;
+  - an availability score (hours plus an availability date);
+  - a Canadian-employer check from the posting's hiring organization or applicant location;
+  - a job industry field;
+  - Workday's public job JSON for Workday postings (a new feed, needs approval).
+- **Skill taxonomy widened from the contractor list** (user request).
+  - About 60 curated skills were added (marketing and go-to-market, sales, design and UX research, operations and leadership, HR, finance and funding, technology leadership), with English and French aliases and synonyms merged. Generic single words are kept out (ai, design, operations, writing…).
+  - Contractor strength phrases recognized: from about 28% to 80% (118 of 143 after a few synonym aliases).
+  - `build-contractors` now learns the remaining phrases automatically into `data/contractors/skills_learned.yaml`, a generated layer loaded with the curated file (curated wins). Merge hints use a token-sort ratio; a token-set ratio gave false pairs such as "social strategy" with "hr strategy".
+- **Job titles:** the site suffix after " | " and "Expired" markers are removed (config patterns).
+- **Effect on the reviewed Ross Video pair** (TAL-BC-006, reviewers A/90): our rank went from #10 to #3, score 0.277 to 0.532, now shortlisted. Still only 2 comparable pairs.
+- **Type of work and industry** (user request, following the user's judgment that the Ross Video ranking with a marketing director first was right and a sales director at #2 was not).
+  - **Type of work** is a light score part (`weights.field` 0.10, GUESS): the share of the job's skill categories the contractor covers, ignoring `management`, `business` and learned skills. A note appears when the job's main type of work isn't the contractor's.
+  - **Industry** is a note only, never scored, from `config/industries.yaml` (about 22 sectors, English and French). Reviewers rated a cleantech B2B marketer A for a sports-industry role, so industry must not filter.
+  - No schema change: the field part is folded into the score and both notes go in `flags`.
+  - **Ross Video:** the sales and business development director dropped from #2 to #4 (note "field: job marketing · contractor admin, sales"); the reviewers' A pick rose to #2.
+

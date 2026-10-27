@@ -7,6 +7,9 @@ paths:
   exports_dir: exports
   # Built by build-contractors from the master workbook; read by embed-contractors.
   contractors_csv: data/contractors/contractors.csv
+  # Skills learned from the contractor list by build-contractors (generated; rules in
+  # config/skill_learning.yaml). Loaded together with config/skills_taxonomy.yaml.
+  learned_skills: data/contractors/skills_learned.yaml
 
 storage:
   lock_timeout_seconds: 30 # GUESS: how long a run or the review UI waits for a CSV lock
@@ -38,14 +41,39 @@ normalize:
   max_responsibilities: 20 # bullets kept for responsibilities
   fuzzy_title_threshold: 92 # GUESS: 0-100 title similarity (same company, city, seniority) for a duplicate
 
-matching: # used from phase 4
-  top_k: 5
-  weights:
-    cosine: 0.7 # GUESS
-    skill_overlap: 0.3 # GUESS
-  bands:
-    high: 0.80 # GUESS
-    medium: 0.65 # GUESS
+matching: # phase 4. Every number here is a hyperparameter, to be tuned on reviewer data.
+  top_k: 5 # shortlist size per job
+  min_score: 0.30 # GUESS: contractors scoring below this are not shortlisted
+  # Raw bge-m3 cosines sit in a narrow range; they are stretched to 0-1 between floor and
+  # ceiling. Full texts and short titles score differently, so each has its own pair.
+  cosine_floor: 0.45 # GUESS: about the least related pair seen on 2026-10-22
+  cosine_ceiling: 0.80 # GUESS: about the closest pair seen on 2026-10-22
+  title_floor: 0.50 # GUESS: job title vs the contractor's closest title
+  title_ceiling: 0.85 # GUESS
+  weights: # a part with nothing to compare (no skills, no titles) is left out of the average
+    cosine: 0.45 # GUESS: full job text vs full profile
+    title: 0.30 # GUESS: job title vs the contractor's closest title
+    skill_overlap: 0.25 # GUESS: share of the job's skills the contractor has
+    field: 0.10 # GUESS: share of the job's type of work (skill categories) the contractor covers
+  # Skill categories used across every type of work, so they say nothing about it.
+  field_ignore_categories: [management, business, learned]
+  bands: # on the final score
+    high: 0.70 # GUESS
+    medium: 0.50 # GUESS
+  # A posting's skill tags can run to a dozen; sharing 3 of 12 should still count. The skill
+  # part is shared skills / min(job's skill count, this cap), so at most 1.
+  skill_overlap_cap: 4 # GUESS
+  # A thin profile (no summary, no core strengths) has too little text for the full-text
+  # comparison to be fair; true scores it on title and skills only.
+  thin_profiles_skip_text: true
+  missing_must_have_lowers_band: false # always shown; true also lowers the band one step
+  seniority_max_gap: 1 # GUESS: levels apart (junior..executive) before a seniority check fails
+  # User decision 2026-10-26: treat all contract work as remote for now, so the location
+  # check always passes. false turns on the province check (on-site/hybrid job vs the
+  # contractor's province).
+  assume_all_remote: true
+  hours_per_year: 2080 # converts yearly/monthly/weekly/daily job pay to hourly (40 h weeks)
+  rate_tolerance: 1.25 # GUESS: note when a contractor's rate is above the job's top hourly pay times this
 
 logging:
   level: INFO

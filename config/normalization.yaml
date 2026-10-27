@@ -118,6 +118,12 @@ pay:
 
 # Regexes (case-insensitive) removed from titles, in order. Single-quoted so backslashes stay literal.
 title_noise_patterns:
+  # site or company suffix after a pipe, as job boards write page titles:
+  # "Marketing Manager - Expired | Ross Video" (the company is kept in its own field)
+  - '\s+\|\s+.*$'
+  # expired markers job boards add to titles: " - Expired", "(Expired)", " – Expirée"
+  - '\s[-–—]\s*(?:expired|expir[ée]e?)\s*$'
+  - '\(\s*(?:expired|expir[ée]e?)\s*\)'
   # gender markers: (m/f/d), (H/F), (f/h/x), H/F
   - '\(\s*[mhfwdx]\s*/\s*[mhfwdx](?:\s*/\s*[mhfwdx])?\s*\)'
   - '\b[hf]\s*/\s*[hf]\b'
@@ -201,6 +207,13 @@ seniority:
   senior: [senior, sr, sénior, principal, principale, expert, experte, chevronné, chevronnée, iii, iv]
   lead: [lead, team lead, tech lead, technical lead, chef d'équipe, responsable d'équipe, architect, architecte]
   executive: [director, directeur, directrice, head of, vice president, vice-president, vice-président, vice-présidente, vp, chief, cto, cio, cfo, ciso]
+
+# Must-have skills (matching): every skill in a Requirements line is a must-have, unless the
+# line uses one of these softer phrases. Bare "asset" is left out on purpose: it would also
+# match "digital asset management".
+must_have_soft_markers:
+  en: [familiarity, familiar with, preferred, an asset, considered an asset, a plus, nice to have, nice-to-have, willing to learn, exposure to, a bonus, ideally, desirable, an advantage, advantageous, optional, not required]
+  fr: [atout, un plus, souhaité, souhaitée, souhaitable, connaissance de base, connaissances de base, idéalement, un avantage, apprécié, appréciée, facultatif, facultative]
 
 # Function words used to tell English from French (must not overlap after accent folding).
 # Words shared with Spanish/Italian/Portuguese (de, en, un, la, que...) are left out on purpose,

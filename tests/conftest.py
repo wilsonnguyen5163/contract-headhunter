@@ -21,14 +21,24 @@ def posting(name: str) -> str:
     return (POSTINGS_DIR / name).read_text(encoding="utf-8")
 
 
+def repo_settings() -> Settings:
+    """Repo settings, but never the skills learned from the live contractor list in data/,
+    so tests do not depend on runtime data."""
+    settings = load_settings(CONFIG_DIR)
+    paths = settings.paths.model_copy(
+        update={"learned_skills": PROJECT_ROOT / "tests" / "no-learned-skills.yaml"}
+    )
+    return settings.model_copy(update={"paths": paths})
+
+
 @pytest.fixture(scope="session")
 def normalizer() -> Normalizer:
-    return Normalizer.from_settings(load_settings(CONFIG_DIR))
+    return Normalizer.from_settings(repo_settings())
 
 
 @pytest.fixture
 def settings() -> Settings:
-    return load_settings(CONFIG_DIR)
+    return repo_settings()
 
 
 @pytest.fixture
