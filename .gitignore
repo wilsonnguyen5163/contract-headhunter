@@ -14,6 +14,10 @@ exports/
 *.csv.lock
 *.lock.tmp
 *.tmp
+*.csv
+
+# ---- Local helper scripts (not shared) ----
+scripts/rename_manual_templates.sh
 
 # ---- Secrets and local configuration ----
 .env
@@ -71,6 +75,7 @@ htmlcov/
 # ---- Notebooks ----
 .ipynb_checkpoints/
 *.ipynb_checkpoints
+.*ipynb
 
 # ---- Model and download caches (large, re-downloadable) ----
 models/

@@ -4,6 +4,95 @@ What each change solves, for the team. Newest first. Add an entry with every com
 
 ---
 
+## 2026-10-27 · Cleaner skill tags, a stricter shortlist and a first labeled check on 33 new jobs
+
+### What this solves
+- **Fewer wrong skill tags.**
+  - New `not_when` option in `config/skills_taxonomy.yaml`: phrases that contain a skill word but mean something else. "you excel at…" is no longer Excel. Hiring-process text ("an accessible recruitment experience") is no longer the recruitment skill. French "animation d'ateliers" is not animation.
+  - Removed aliases that tagged the wrong jobs: bare "ui", "figma" and "prototyping" (no longer UI/UX), "continuous improvement" (now process improvement, not Six Sigma), "trainer", bare "purchasing", and "mergers and acquisitions" (now a finance skill, not corporate law).
+- **Missing skills added:**
+  - "graphic designer" and "graphiste" (these postings had no tags before);
+  - event coordination;
+  - animation;
+  - Webflow (as a CMS);
+  - PeopleSoft and Workday Financials (as ERP);
+  - email design;
+  - industrial design;
+  - Figma, as a tool with no type of work.
+- **Twine job titles:** "I8IS INC. - Senior Full Stack Developer freelance job | Twine" was cut to "i8is inc."; it now reads "senior full stack developer".
+- **Job text no longer lost under "About the …" headers:** "About the Opportunity" and "About the Requirements" were read as the employer's "About us" pitch. All the duties and requirements after them were dropped (Tucows Graphic Designer, Copywriter). They are now job headers in `config/normalization.yaml`, along with "Job Duties" and "Qualifications Required".
+- **Stricter shortlist:** `min_score` went from 0.30 to 0.40. Jobs with no real fit in our pool (payroll, tax, data engineering, animation…) now more often show no shortlist instead of five weak names.
+- **First labeled check on new jobs:** `data/eval/llm_judge_labels.csv` holds fit / partial / no labels for each of the 33 new jobs' shortlists, plus fits the matcher missed.
+
+### How to use it
+- After pulling, run `bash scripts/reset_reimport.sh -y`, `embed-contractors`, `embed-jobs` and `match`. This re-tags the jobs that are already stored.
+- To exclude a phrase from a skill, add it under that skill's `not_when` in `config/skills_taxonomy.yaml`.
+- `scripts/rename_manual_templates.sh [--dry-run]` renames filled-in `_TEMPLATE copy*.txt` files to their title. It's a local helper and is git-ignored.
+
+### Known limits
+- **The labels are Claude's, not a reviewer's,** and they are not blind. Treat the 0.40 threshold as a guess until reviewers label more pairs.
+- **Thin contractor profiles get missed.** TAL-ON-023, -027, -028, -029 and -030 have no strengths or industries on file. They were the fits most often left out of the top 5.
+- **Some pages can't be read:** Zoho Recruit, BambooHR and similar pages need JavaScript, and macommunaute.ca only gives a short teaser. Paste such postings into `data/inbox/manual/`. The 5 Zoho postings are now pasted; the BambooHR link is commented out until someone pastes it.
+- **Animation job vs art directors:** with the wrong recruitment tag gone, the Senior Animation Artist posting counts as media work, like the art directors. Five art directors now reach the medium band. Each one shows "missing must-have: animation".
+- **"technical support" and "GTM" as department names** still tag skills.
+
+### Checks run
+- **Tests:** 594 automated tests pass (new English and French cases for every rule above); lint is clean.
+- **Real data:** 48 jobs × 42 contractors. Against the labels:
+  - high band 91% fit;
+  - medium 38% fit and 44% partial;
+  - low 10% fit.
+  Shortlist precision went from 0.33 to 0.47 with the new threshold.
+- **After the reset re-tagged stored jobs (2026-10-28), header fix included:** 80 listed pairs, precision 0.45 (0.59 counting half of partials). High band 90% fit, medium 38% fit, low 6% fit. 10 fits missed. 602 tests pass.
+
+---
+
+## 2026-10-26 · One-line postings get their sections back; over-qualified is a note
+
+### What this solves
+- **One-line postings are now split up.** Some sources, including every Workday posting (Clio, BCAA) and Safe Software's page, deliver the posting as one long run of text, with headings and list items running together. jobmatch now puts known headings on their own line, splits responsibilities and requirements into separate items, and moves the pay sentence out of the benefits text. Those postings now have real responsibilities and requirements, cleaner skills, and correct pay. Clio was showing a $2,000 benefit as the minimum salary; it now shows $110,300–149,300.
+- **Over-qualified no longer moves someone to the flagged list.** Our reviewers note a level mismatch but rarely reject for it, so it's now a note on the match. Under-qualified still moves someone to the flagged list.
+- **Type of work counts more:** its weight went from 0.10 to 0.20, so people from a different type of work rank lower.
+
+### How to use it
+Nothing new to run. After pulling, run `bash scripts/reset_reimport.sh -y`, `embed-jobs` and `match`. The rules are in `config/normalization.yaml` under `flattened_text`. That section holds:
+- when text counts as flattened;
+- which words start a new list item;
+- which "-ing" words are nouns, not new items.
+
+### Known limits
+- **It's still keyword matching:** words used in a different sense are tagged as skills. Examples: "GTM leaders" (a department), "you excel at" (not the spreadsheet), "positioning yourself".
+- **Type of work at 0.20** also pushes designers up for producer jobs whose skill tags are mostly design. The weight is a first guess to tune on more reviews.
+
+### Checks run
+- **Tests:** 568 automated tests pass, English and French; lint is clean.
+- **Real data:** 12 jobs re-imported, re-embedded, matched and evaluated. The reviewers' A/B pick is still shortlisted on 4 of 5 jobs.
+
+---
+
+## 2026-10-26 · Fixes found while checking against reviewed jobs
+
+### What this solves
+Running the matcher on the reviewed postings you saved (Create Music ×2, Safe Software, Maneva) showed six problems, now fixed:
+- **Postings whose headings run into the paragraphs** (Safe Software) lost almost all their text and skills. Now, if no responsibilities or requirements are found, the whole job text is used for skills and the description.
+- **New skills:** webinars and virtual events (Livestorm, GoToWebinar, ON24), and marketing qualified leads (MQL).
+- **Industry note:** "university degree" or "minimum education" in requirements no longer tags a job as the education industry.
+- **LinkedIn pages saved while signed in** had no web address; the posting number in the page is now used.
+- **Paste files are read before saved pages,** so when the same posting is both pasted and saved, the hand-made paste wins. A signed-in LinkedIn page mostly holds the job list, not the posting.
+- **Stale rows:** after a change to skills, industries, rules or a posting or profile, `match` kept the old rows. It now stores fresh ones, and the export shows only each job's latest run.
+
+### How to use it
+Nothing new to run. After pulling, run `bash scripts/reset_reimport.sh -y`, then `embed-jobs`, `match` and `export-matches`.
+
+### Known limits
+- **Unsplit headings:** for postings like Safe Software, the whole-text fallback also picks up a few unrelated skills from the surrounding text (logistics, help desk, privacy). Properly splitting inline headings is still to do.
+
+### Checks run
+- **Tests:** 560 automated tests pass; lint is clean.
+- **Real data:** 8 jobs re-imported, re-embedded, matched and evaluated. The reviewers' A/B pick is in our shortlist on 4 of 5 jobs (the miss is Maneva).
+
+---
+
 ## 2026-10-26 · Type of work and industry in matching
 
 ### What this solves

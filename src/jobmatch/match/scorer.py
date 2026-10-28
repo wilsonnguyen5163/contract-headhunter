@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict
 
 from jobmatch.config import ConfidenceBands, MatchingSettings
 from jobmatch.match.fields import field_note, field_overlap, industry_note
-from jobmatch.match.gates import flags, is_thin, location_check, seniority_check
+from jobmatch.match.gates import flags, is_thin, location_check, seniority_check, seniority_note
 from jobmatch.schemas import Band, ContractorProfile, Job
 
 
@@ -148,6 +148,9 @@ def score_pair(
             *(
                 note
                 for note in (
+                    seniority_note(
+                        job.job.seniority, list(contractor.levels), settings.seniority_max_gap
+                    ),
                     field_note(job.categories, contractor.categories),
                     industry_note(job.industries, contractor.industries),
                 )

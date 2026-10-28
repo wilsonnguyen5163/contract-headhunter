@@ -14,6 +14,7 @@ from jobmatch.match.gates import (
     hourly_pay_max,
     location_check,
     seniority_check,
+    seniority_note,
 )
 from jobmatch.normalize.seniority import SeniorityDetector
 from jobmatch.schemas import ContractorProfile, Job, Language, PayUnit, RemoteType
@@ -65,9 +66,12 @@ def test_under_qualified_names_both_levels() -> None:
     assert reason == "seniority: under-qualified (job senior, contractor junior)"
 
 
-def test_over_qualified_is_flagged_too() -> None:
-    reason = seniority_check("intermediate", ["executive"], max_gap=1)
-    assert reason == "seniority: over-qualified (job intermediate, contractor executive)"
+def test_over_qualified_is_a_note_not_a_failed_check() -> None:
+    # Over-qualified is a note, not a failed check (reviewers rarely reject for it).
+    assert seniority_check("intermediate", ["executive"], max_gap=1) is None
+    note = seniority_note("intermediate", ["executive"], max_gap=1)
+    assert note == "seniority: over-qualified (job intermediate, contractor executive)"
+    assert seniority_note("senior", ["lead"], max_gap=1) is None
 
 
 def test_any_held_level_close_enough_passes() -> None:

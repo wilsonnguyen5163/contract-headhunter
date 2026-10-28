@@ -140,6 +140,9 @@ class Settings(StrictModel):
 class SkillEntry(StrictModel):
     category: str | None = None
     aliases: list[str] = []
+    # Longer phrases holding a term that do not mean the skill ("excel at"): where one
+    # matches, that text yields no skill.
+    not_when: list[str] = []
 
 
 class SkillsTaxonomy(StrictModel):
@@ -152,7 +155,7 @@ class SkillsTaxonomy(StrictModel):
         for canonical, entry in self.skills.items():
             if canonical != canonical.strip().casefold():
                 raise ValueError(f"skill key {canonical!r} must be lowercase and trimmed")
-            for term in (canonical, *entry.aliases):
+            for term in (canonical, *entry.aliases, *entry.not_when):
                 key = _fold(term)
                 owner = owners.setdefault(key, canonical)
                 if owner != canonical:
@@ -278,6 +281,13 @@ class PayRules(StrictModel):
         return self
 
 
+class FlattenedTextRules(StrictModel):
+    min_chars: int = Field(ge=0)
+    min_chars_per_line: int = Field(gt=0)
+    item_starters: BilingualList
+    ing_nouns: list[str] = []
+
+
 class NormalizationRules(StrictModel):
     version: int
     sections: dict[SectionName, SectionRule]  # tried in this order
@@ -289,6 +299,7 @@ class NormalizationRules(StrictModel):
     seniority: SeniorityLevels
     language_words: BilingualList
     must_have_soft_markers: BilingualList = BilingualList(en=[], fr=[])
+    flattened_text: FlattenedTextRules | None = None
 
     @field_validator("number_words")
     @classmethod

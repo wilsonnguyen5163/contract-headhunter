@@ -65,7 +65,9 @@ def compose_description(
         if nice_to_have:
             block += ["Assets", *(f"- {n}" for n in nice_to_have)]
         parts.append("\n".join(block))
-    if not responsibilities and not requirements and not nice_to_have and fallback:
+    # No responsibilities or requirements found: keep the role prose too (a lone "nice to
+    # have" list does not describe the job).
+    if not responsibilities and not requirements and fallback:
         parts.append("Description\n" + "\n".join(fallback))
     if pay:
         parts.append(f"Pay\n{format_pay(pay)}")

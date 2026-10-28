@@ -263,3 +263,48 @@ def test_missing_title_vectors_are_refused(setup: Settings) -> None:
         MatchError, match="Title vectors are missing or out of date. Run embed-contractors"
     ):
         run_matching(setup)
+
+
+def test_an_edited_profile_gets_fresh_rows(setup: Settings, store: CsvStore) -> None:
+    run_matching(setup)
+    before = {m.match_id for m in CsvMatchRepository(store).list_all()}
+    # Same scoring settings, but TAL-A's profile text changes (and is re-embedded).
+    path = setup.paths.contractors_csv
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("Runs website and campaign projects", "Edited"),
+        encoding="utf-8",
+    )
+    extractor = SkillExtractor(load_skills_taxonomy(setup.config_dir))
+    vectors = NpzVectorStore(setup.paths.data_dir / "embeddings", lock_timeout=5)
+    old = vectors.load("contractors")
+    assert old is not None
+    edited = [
+        p.model_copy(update={"executive_summary": "SYNTHETIC. Edited."})
+        if p.talent_id == "TAL-A"
+        else p
+        for p in PROFILES
+    ]
+    texts = [contractor_text(p, contractor_skills(p, extractor)) for p in edited]
+    vectors.save(
+        "contractors", old.model_copy(update={"content_hashes": [content_hash(t) for t in texts]})
+    )
+    report, _, _ = run_matching(setup)
+    after = {m.match_id for m in CsvMatchRepository(store).list_all()}
+    assert report.stored == 1 and len(after - before) == 1  # only TAL-A's row is new
+
+
+def test_export_shows_only_each_jobs_latest_run(setup: Settings, store: CsvStore) -> None:
+    run_matching(setup)
+    # A stricter run: TAL-B (flagged) and others drop out; the export must not keep them.
+    strict = setup.matching.model_copy(update={"min_score": 0.99, "top_k": 1})
+    run_matching(setup.model_copy(update={"matching": strict}))
+    rows = build_rows(
+        CsvMatchRepository(store).list_all(),
+        CsvMatchRepository(store, flagged=True).list_all(),
+        {j.job_id: j for j in CsvJobRepository(store).list_all()},
+        {p.talent_id: p for p in PROFILES},
+    )
+    assert {(r.contractor_id, r.list) for r in rows} == {
+        ("TAL-A", "shortlist"),
+        ("TAL-C", "shortlist"),
+    }

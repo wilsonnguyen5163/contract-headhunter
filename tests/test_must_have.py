@@ -31,7 +31,7 @@ def test_soft_lines_are_not_must_haves(line: str) -> None:
 
 def test_firm_lines_give_must_haves_in_order() -> None:
     lines = [
-        "Experience and deep understanding with graphic design, web design, prototyping",
+        "Experience and deep understanding with graphic design, web design, wireframing",
         "Good understanding of project management and strong organizational skills",
         "Familiarity with HTML5 and mobile",  # soft: html is not a must-have
         "Expérience en gestion de projet",  # repeats project management

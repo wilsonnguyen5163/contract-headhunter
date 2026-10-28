@@ -13,21 +13,31 @@ from jobmatch.schemas import PROVINCE_CODES, ContractorProfile, Job, Language, P
 def seniority_check(
     job_level: str | None, contractor_levels: list[str], max_gap: int
 ) -> str | None:
-    """Fails when the job's level is more than max_gap levels from every level the
-    contractor holds, in either direction. The reason names both sides."""
+    """Fails when no level the contractor holds is within max_gap of the job's and they
+    are not all above it: under-qualified, or levels far apart on both sides. Over-qualified
+    is only a note (seniority_note): reviewers note it but rarely reject for it. The reason
+    names both sides."""
     if job_level is None or not contractor_levels:
         return None
     job_index = LEVELS.index(job_level)
     held = [LEVELS.index(level) for level in contractor_levels]
     if min(abs(job_index - i) for i in held) <= max_gap:
         return None
-    if max(held) < job_index:
-        kind = "under-qualified"
-    elif min(held) > job_index:
-        kind = "over-qualified"
-    else:
-        kind = "levels far apart"
+    if min(held) > job_index:
+        return None  # over-qualified: a note, see seniority_note
+    kind = "under-qualified" if max(held) < job_index else "levels far apart"
     return f"seniority: {kind} (job {job_level}, contractor {'/'.join(contractor_levels)})"
+
+
+def seniority_note(job_level: str | None, contractor_levels: list[str], max_gap: int) -> str | None:
+    """Information only: every level the contractor holds is more than max_gap above the
+    job's."""
+    if job_level is None or not contractor_levels:
+        return None
+    lowest = min(LEVELS.index(level) for level in contractor_levels)
+    if lowest - LEVELS.index(job_level) <= max_gap:
+        return None
+    return f"seniority: over-qualified (job {job_level}, contractor {'/'.join(contractor_levels)})"
 
 
 def contractor_province(location: str | None) -> str | None:

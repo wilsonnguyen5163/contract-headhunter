@@ -37,6 +37,7 @@ SAVED_HTML_KIND = "saved_html"
 SAVED_PDF_KIND = "saved_pdf"
 
 _SAVED_FROM = re.compile(r"<!--\s*saved from url=\(\d+\)(\S+?)\s*-->", re.IGNORECASE)
+_LINKEDIN_JOB = re.compile(r"(?:/jobs/view/|currentJobId=)(\d{6,})")
 _URL = re.compile(r"https?://[^\s<>\"']+")
 _PAGE_NUMBER = re.compile(r"^\s*\d+\s*/\s*\d+\s*$")
 _ELLIPSIS = ("…", "...")
@@ -57,7 +58,7 @@ def read_saved_file(path: Path, *, fetched_at: datetime) -> tuple[RawJob, RawRec
 
 def saved_page_url(page_html: str) -> str | None:
     """The posting URL of a saved page: canonical link, then og:url, then the browser's
-    "saved from url" comment."""
+    "saved from url" comment, then (LinkedIn, signed in) the posting number in its links."""
     soup = BeautifulSoup(page_html[:300_000], "lxml")
     canonical = soup.find("link", rel=lambda r: bool(r) and "canonical" in r)
     if canonical and str(canonical.get("href", "")).startswith("http"):
@@ -66,7 +67,20 @@ def saved_page_url(page_html: str) -> str | None:
     if og and str(og.get("content", "")).startswith("http"):
         return str(og["content"]).strip()
     saved = _SAVED_FROM.search(page_html[:2000])
-    return saved.group(1) if saved else None
+    if saved:
+        return saved.group(1)
+    return _linkedin_posting(page_html)
+
+
+def _linkedin_posting(page_html: str) -> str | None:
+    """A LinkedIn page saved while signed in has no canonical link, but the posting number
+    appears in its links; the most frequent one is the posting shown."""
+    if "linkedin.com" not in page_html:
+        return None
+    numbers = Counter(_LINKEDIN_JOB.findall(page_html))
+    if not numbers:
+        return None
+    return f"https://www.linkedin.com/jobs/view/{numbers.most_common(1)[0][0]}/"
 
 
 def _read_html(path: Path, fetched_at: datetime) -> tuple[RawJob, RawRecord]:

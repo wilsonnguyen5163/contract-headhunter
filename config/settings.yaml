@@ -43,7 +43,10 @@ normalize:
 
 matching: # phase 4. Every number here is a hyperparameter, to be tuned on reviewer data.
   top_k: 5 # shortlist size per job
-  min_score: 0.30 # GUESS: contractors scoring below this are not shortlisted
+  # GUESS: contractors scoring below this are not shortlisted. Raised from 0.30 on 2026-10-27:
+  # on 111 judged pairs (data/eval/llm_judge_labels.csv, not blind) it removes 27 non-fits,
+  # 6 partial fits and 1 fit; no reviewer A/B pair in data/eval scores below 0.40.
+  min_score: 0.40
   # Raw bge-m3 cosines sit in a narrow range; they are stretched to 0-1 between floor and
   # ceiling. Full texts and short titles score differently, so each has its own pair.
   cosine_floor: 0.45 # GUESS: about the least related pair seen on 2026-10-22
@@ -54,7 +57,7 @@ matching: # phase 4. Every number here is a hyperparameter, to be tuned on revie
     cosine: 0.45 # GUESS: full job text vs full profile
     title: 0.30 # GUESS: job title vs the contractor's closest title
     skill_overlap: 0.25 # GUESS: share of the job's skills the contractor has
-    field: 0.10 # GUESS: share of the job's type of work (skill categories) the contractor covers
+    field: 0.20 # GUESS (0.10 until 2026-10-26: too light to keep sales profiles off an HR role)
   # Skill categories used across every type of work, so they say nothing about it.
   field_ignore_categories: [management, business, learned]
   bands: # on the final score

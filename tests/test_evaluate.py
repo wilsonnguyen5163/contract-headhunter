@@ -77,7 +77,9 @@ def scored(make_job: Callable[..., Job]) -> ScoredJobs:
         candidate("C", 0.55, 3),
         candidate("D", 0.20, 4),
     ]
-    return ScoredJobs(jobs=[job], profiles=profiles, ranked={job.job_id: ranked}, version="v")
+    return ScoredJobs(
+        jobs=[job], profiles=profiles, ranked={job.job_id: ranked}, version="v", fingerprints={}
+    )
 
 
 def test_spearman() -> None:

@@ -122,11 +122,56 @@ def test_posting_with_pitch_and_ats_metadata_is_split_by_kind() -> None:
         ("About Example Insurance", SectionKind.EMPLOYER),
         ("Pourquoi se joindre à nous ?", SectionKind.EMPLOYER),
         ("About the role", SectionKind.OVERVIEW),
+        ("About the Opportunity", SectionKind.OVERVIEW),
+        ("À propos de l'opportunité", SectionKind.OVERVIEW),
+        ("About the Requirements", SectionKind.REQUIREMENTS),
+        ("Qualifications Required", SectionKind.REQUIREMENTS),
+        ("Qualifications requises", SectionKind.REQUIREMENTS),
+        ("Job Duties", SectionKind.RESPONSIBILITIES),
         ("Diversity & Inclusion", SectionKind.EQUAL_OPPORTUNITY),
     ],
 )
 def test_header_kinds_en_fr(text: str, kind: SectionKind) -> None:
     assert SECTIONS.classify(text) == (kind, "")
+
+
+def test_about_the_opportunity_is_the_job_not_the_employer() -> None:
+    """Tucows-style paste with blank lines gone: "About the Opportunity" was read as the
+    employer pitch and swallowed the duties and requirements after it."""
+    text = (
+        "Job description\n"
+        "Example Domains is the world's largest wholesale domain registrar.\n"
+        "About the Opportunity\n"
+        "We are looking for a graphic designer to join our in-house agency.\n"
+        "Job Duties\n"
+        "Design event collateral (banners, booth kits, conference signage).\n"
+        "Develop video content, including sizzle reels and tutorials.\n"
+        "Qualifications Required\n"
+        "3-5 years of experience as a graphic or visual designer.\n"
+        "Experience with Adobe Creative Suite, Figma and After Effects."
+    )
+    parsed = SECTIONS.parse(text)
+    assert parsed.items(SectionKind.RESPONSIBILITIES, 10) == [
+        "Design event collateral (banners, booth kits, conference signage).",
+        "Develop video content, including sizzle reels and tutorials.",
+    ]
+    assert parsed.items(SectionKind.REQUIREMENTS, 10) == [
+        "3-5 years of experience as a graphic or visual designer.",
+        "Experience with Adobe Creative Suite, Figma and After Effects.",
+    ]
+    assert "looking for a graphic designer" in parsed.clean_text()
+
+
+def test_french_about_the_opportunity_is_kept() -> None:
+    text = (
+        "À propos de l'opportunité\n"
+        "Nous cherchons un graphiste pour notre agence interne.\n"
+        "Qualifications requises\n"
+        "Maîtrise de la suite Adobe."
+    )
+    parsed = SECTIONS.parse(text)
+    assert "Nous cherchons un graphiste" in parsed.clean_text()
+    assert parsed.items(SectionKind.REQUIREMENTS, 10) == ["Maîtrise de la suite Adobe."]
 
 
 @pytest.mark.parametrize(
@@ -284,6 +329,16 @@ def test_years_written_as_words(line: str, years: float | None) -> None:
         ),
         ("IT Project Manager - Ontario Health", "it project manager - ontario health"),
         ("Contract Manager", "contract manager"),
+        # Twine page titles: company first, " freelance job | Twine" last
+        (
+            "I8IS INC. - Senior Full Stack Developer freelance job | Twine",
+            "senior full stack developer",
+        ),
+        (
+            "Upstaff - Senior Full Stack Software Developer – Java / Angular freelance job | Twine",
+            "senior full stack software developer - java / angular",
+        ),
+        ("Freelance Product Developer", "freelance product developer"),
     ],
 )
 def test_title_normalization(raw: str, expected: str) -> None:
@@ -571,6 +626,31 @@ def test_asides_are_never_bullets() -> None:
         ("Génie civil, AutoCAD Civil 3D", ["civil engineering", "autocad"]),
         ("Cote de fiabilité requise; reliability status", ["security clearance"]),
         ("Soins infirmiers en santé mentale", ["patient care"]),
+        # not_when phrases hide a term that does not mean the skill
+        ("You excel at building relationships; advanced Excel", ["excel"]),
+        ("You excel in fast-paced teams", []),
+        ("As part of our recruitment process, candidates complete a test", []),
+        ("Processus de recrutement accessible", []),
+        ("Full-cycle recruitment for sales roles", ["recruitment"]),
+        ("Animation d'ateliers et animation 3D", ["animation"]),
+        ("Senior Animator: character animation in Maya", ["animation"]),
+        # generic words no longer tag the wrong skill
+        ("Fluid UI, event mapping; website/UI copy", []),
+        ("UX designers, UI design and wireframing", ["ui/ux design"]),
+        ("Daily tools: monday.com, Zoom, Figma", ["figma"]),
+        ("Experience with prototyping and manufacturing", []),
+        ("Passion for continuous improvement", ["process improvement"]),
+        ("AI data trainer for coding models", []),
+        ("Reporting impacts of mergers and acquisitions", ["mergers and acquisitions"]),
+        ("Helps readers navigate purchasing decisions", []),
+        ("Purchasing agent, approvisionnement", ["procurement"]),
+        # titles written as people, in both languages
+        ("Graphic Designer (InDesign, Adobe Illustrator)", ["graphic design"]),
+        ("Graphiste junior", ["graphic design"]),
+        ("Corporate Conference and Event Coordinator", ["event planning"]),
+        ("Coordination d'événements corporatifs", ["event planning"]),
+        ("PeopleSoft FSCM and Workday Financials", ["erp implementation"]),
+        ("Senior Webflow Digital Producer", ["content management systems", "digital production"]),
         ("", []),
     ],
 )

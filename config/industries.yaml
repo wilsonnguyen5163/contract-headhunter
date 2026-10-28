@@ -3,8 +3,9 @@
 # its title, company and cleaned description; a contractor's in their main_industry list.
 #
 # aliases: matched in job text and in contractor lists (whole words, case- and
-#   accent-insensitive). Keep them specific: job text is long, so a word like "energy" or
-#   "culture" ("company culture") would tag the wrong jobs.
+#   accent-insensitive). Keep them specific: job text is long, so a word like "energy",
+#   "culture" ("company culture") or "university" ("university degree") would tag the wrong
+#   jobs. The industry's own name is matched in contractor lists only.
 # contractor_aliases: matched in contractor industry lists only, where short generic
 #   labels ("technology", "media", "health") are safe.
 version: 1
@@ -25,8 +26,8 @@ industries:
     aliases: [nonprofit, non-profit, not-for-profit, charity, charitable organization, ngo, organisme à but non lucratif, obnl, osbl, organisme de bienfaisance]
     contractor_aliases: [nonprofit and foundations, associations, social services, mission-driven organizations, purpose-driven organizations, community-led organizations]
   education:
-    aliases: [edtech, education technology, university, school board, post-secondary, enseignement supérieur, université, cégep, conseil scolaire]
-    contractor_aliases: [education]
+    aliases: [edtech, education technology, school board, educational institution, conseil scolaire, établissement d'enseignement]
+    contractor_aliases: [university, université, higher education]
   government and public sector:
     aliases: [public sector, government of canada, municipality, crown corporation, secteur public, gouvernement du canada, municipalité, société d'état]
     contractor_aliases: [government, government and smb]
@@ -54,8 +55,9 @@ industries:
     aliases: [advertising agency, marketing agency, creative agency, digital agency, ad agency, agence de publicité, agence de marketing, agence créative, agence numérique]
     contractor_aliases: [agencies, creative agencies, digital agencies, marketing agencies, advertising, experiential marketing, integrated campaigns, digital campaigns]
   transportation and logistics:
-    aliases: [transportation, public transit, logistics, airline, supply chain company, transport en commun, logistique]
-    contractor_aliases: [transit]
+    # Bare "logistics" / "transportation" are everyday words in postings ("event logistics").
+    aliases: [public transit, transportation company, logistics company, third-party logistics, 3pl, freight, airline, transport en commun, entreprise de logistique]
+    contractor_aliases: [transit, transportation, logistics]
   automotive:
     aliases: [automotive, automobile industry, industrie automobile]
   hospitality and tourism:

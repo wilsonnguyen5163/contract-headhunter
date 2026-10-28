@@ -86,8 +86,9 @@ class MatchReport(BaseModel):
     dry_run: bool
 
 
-def scoring_version(vectors: VectorSet, settings: MatchingSettings) -> str:
-    """Changes whenever the model, the text template, the matcher or a matching setting does."""
+def scoring_version(vectors: VectorSet, settings: MatchingSettings, *config: str) -> str:
+    """Changes whenever the model, a text template, the matcher, a matching setting or a
+    scoring config (skills, industries, normalization rules, passed as `config`) does."""
     parts = (
         MATCHER_VERSION,
         vectors.model_name,
@@ -95,12 +96,17 @@ def scoring_version(vectors: VectorSet, settings: MatchingSettings) -> str:
         vectors.text_template_hash,
         TITLE_TEMPLATE_HASH,
         settings.model_dump_json(),
+        *config,
     )
     return hashlib.sha256("\x00".join(parts).encode("utf-8")).hexdigest()[:12]
 
 
-def match_id(job_id: str, contractor_id: str, version: str) -> str:
-    key = f"{job_id}\x00{contractor_id}\x00{FACET}\x00{version}"
+def match_id(
+    job_id: str, contractor_id: str, version: str, job_hash: str = "", contractor_hash: str = ""
+) -> str:
+    """Stable for the same scoring and the same job and contractor texts, so re-running adds
+    nothing; a changed posting or profile gets a fresh row."""
+    key = f"{job_id}\x00{contractor_id}\x00{FACET}\x00{version}\x00{job_hash}\x00{contractor_hash}"
     return "m-" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
 
@@ -192,9 +198,13 @@ def _unit(matrix: np.ndarray) -> np.ndarray:
     return matrix / np.where(norms == 0, 1, norms)
 
 
-def _to_match(job_id: str, c: Candidate, version: str, now: datetime) -> Match:
+def _to_match(
+    job_id: str, c: Candidate, version: str, now: datetime, fingerprints: dict[str, str]
+) -> Match:
     return Match(
-        match_id=match_id(job_id, c.contractor_id, version),
+        match_id=match_id(
+            job_id, c.contractor_id, version, fingerprints[job_id], fingerprints[c.contractor_id]
+        ),
         job_id=job_id,
         contractor_id=c.contractor_id,
         facet=FACET,
@@ -224,6 +234,7 @@ class ScoredJobs(BaseModel):
     profiles: list[ContractorProfile]
     ranked: dict[str, list[Candidate]]  # job_id -> all contractors, best first
     version: str
+    fingerprints: dict[str, str]  # job_id or talent_id -> hash of its embedded text
 
 
 def _score_all(settings: Settings, store: CsvStore) -> ScoredJobs:
@@ -298,7 +309,17 @@ def _score_all(settings: Settings, store: CsvStore) -> ScoredJobs:
         jobs=jobs,
         profiles=profiles,
         ranked=ranked,
-        version=scoring_version(con_vs, settings.matching),
+        version=scoring_version(
+            con_vs,
+            settings.matching,
+            taxonomy.model_dump_json(),
+            load_industries(settings.config_dir).model_dump_json(),
+            rules.model_dump_json(),
+        ),
+        fingerprints={
+            **{talent: content_hash(text) for talent, text in texts.items()},
+            **{j.job_id: content_hash(job_text(j)) for j in jobs},
+        },
     )
 
 
@@ -335,7 +356,9 @@ def run_matching(
                 )
             )
             for c in picked:
-                (flagged if c.flagged else passed).append(_to_match(job.job_id, c, version, now))
+                (flagged if c.flagged else passed).append(
+                    _to_match(job.job_id, c, version, now, scored.fingerprints)
+                )
             status = JobStatus.MATCHED if any(not c.flagged for c in picked) else JobStatus.NO_MATCH
             if status != job.status:
                 statuses[job.job_id] = (status, None)

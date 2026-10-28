@@ -1,7 +1,8 @@
 """A spreadsheet of the current matches, for people to judge the matcher before the review UI.
 
-One row per (job, contractor): shortlisted ("shortlist") and flagged ("flagged") together,
-the newest row of each pair only. It holds contractor names, so it is a local file for
+Each job's latest matching run only: its shortlisted ("shortlist") and flagged ("flagged")
+rows together. Older runs, and contractors who have since dropped out of the shortlist,
+are left out. It holds contractor names, so it is a local file for
 people: never attach it to logs or send it anywhere. Formula-like cells are neutralized
 by export_csv, because posting text is untrusted.
 """
@@ -44,13 +45,13 @@ class MatchExportRow(BaseModel):
 
 
 def latest(matches: Iterable[Match]) -> list[Match]:
-    """The newest row per (job, contractor)."""
-    newest: dict[tuple[str, str], Match] = {}
-    for m in matches:
-        key = (m.job_id, m.contractor_id)
-        if key not in newest or m.created_at > newest[key].created_at:
-            newest[key] = m
-    return list(newest.values())
+    """The rows of each job's latest run (one run stamps all its rows with one time)."""
+    rows = list(matches)
+    newest: dict[str, datetime] = {}
+    for m in rows:
+        if m.job_id not in newest or m.created_at > newest[m.job_id]:
+            newest[m.job_id] = m.created_at
+    return [m for m in rows if m.created_at == newest[m.job_id]]
 
 
 def build_rows(

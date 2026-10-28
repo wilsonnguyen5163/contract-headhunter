@@ -82,8 +82,13 @@ def collect_paste_files(paths: Iterable[Path]) -> tuple[list[Path], list[FileOut
     files: list[Path] = []
     skipped: list[FileOutcome] = []
     for path in paths:
+        # Paste files first: when a posting is both pasted and saved as a page, the
+        # hand-made paste is the better source and the saved page becomes the duplicate.
         candidates = (
-            sorted(p for p in path.iterdir() if p.is_file() and p.suffix.lower() in suffixes)
+            sorted(
+                (p for p in path.iterdir() if p.is_file() and p.suffix.lower() in suffixes),
+                key=lambda p: (p.suffix.lower() != PASTE_SUFFIX, p.name),
+            )
             if path.is_dir()
             else [path]
         )

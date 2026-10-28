@@ -36,6 +36,7 @@ from jobmatch.normalize.seniority import SeniorityDetector
 from jobmatch.normalize.skills import SkillExtractor
 from jobmatch.normalize.text import clean_text, to_plain_text
 from jobmatch.normalize.title import TitleNormalizer
+from jobmatch.normalize.unflatten import Unflattener
 from jobmatch.normalize.work_mode import resolve
 from jobmatch.schemas import (
     EmploymentType,
@@ -70,6 +71,7 @@ class Normalizer:
         self._settings = settings
         self._locations = LocationParser(locations)
         self._sections = SectionSplitter(rules)
+        self._unflatten = Unflattener(rules)
         self._titles = TitleNormalizer(rules, self._locations.looks_like_location)
         self._companies = CompanyNormalizer(aliases)
         self._language = LanguageDetector(
@@ -103,7 +105,9 @@ class Normalizer:
     def normalize(self, raw: RawJob, *, now: datetime) -> Job:
         title = clean_text(raw.title).replace("\n", " ")
         description = to_plain_text(raw.description) if raw.description else ""
-        sections = self._sections.parse(description)
+        # One-line postings (Workday's structured data) get their headers and list items
+        # back first; normally formatted text is unchanged.
+        sections = self._sections.parse(self._unflatten.unflatten(description))
         # job_text: the job itself (intro and kept sections, metadata included). Skills,
         # language, contract wording and work mode are read from it, never from the employer
         # pitch, benefits or pay notes.
@@ -191,14 +195,16 @@ class Normalizer:
     def _skills_text(title: str, sections: PostingSections, body: str) -> str:
         """Skills come from the job itself. When the posting has lists, that is the title,
         the overview and the bullets, so a company-intro sentence ("...Commerce, CRM, and
-        Data") adds nothing; a posting without lists falls back to all of its job text."""
-        lists = [
+        Data") adds nothing. A posting without responsibilities or requirements (its headings
+        were not found, e.g. run into the paragraphs) falls back to all of its job text: a
+        lone "nice to have" list does not describe the job."""
+        core = [
             *sections.items(SectionKind.RESPONSIBILITIES, None),
             *sections.items(SectionKind.REQUIREMENTS, None),
-            *sections.items(SectionKind.NICE_TO_HAVE, None),
         ]
-        if not lists:
+        if not core:
             return body
+        lists = [*core, *sections.items(SectionKind.NICE_TO_HAVE, None)]
         return "\n".join([title, sections.text({SectionKind.OVERVIEW}), *lists])
 
     def _work_mode(self, location: str | None, title: str, sections: PostingSections) -> RemoteType:

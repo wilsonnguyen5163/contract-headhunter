@@ -133,3 +133,17 @@ def test_field_part_and_notes_in_the_score(
 def test_repo_settings_weight_field_lightly(settings: Settings) -> None:
     assert 0 < settings.matching.weights.field <= settings.matching.weights.skill_overlap
     assert "management" in settings.matching.field_ignore_categories
+
+
+def test_degree_requirements_are_not_the_education_industry() -> None:
+    text = "Minimum education: Bachelor's degree. A university degree in marketing is required."
+    assert FINDER.in_job(text) == ()
+    assert FINDER.in_contractor(["Education", "University"]) == ("education",)
+
+
+def test_event_logistics_is_not_the_logistics_industry() -> None:
+    assert (
+        FINDER.in_job("Align on objectives, audiences, logistics, deadlines and deliverables.")
+        == ()
+    )
+    assert FINDER.in_contractor(["Logistics"]) == ("transportation and logistics",)

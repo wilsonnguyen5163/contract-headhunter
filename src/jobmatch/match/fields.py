@@ -54,8 +54,10 @@ def field_note(job: Counter[str], contractor: frozenset[str]) -> str | None:
 
 class IndustryFinder:
     def __init__(self, industries: Industries) -> None:
+        # Job text: aliases only. A name like "education" also appears in requirements
+        # ("Minimum education: Bachelor's degree").
         self._job = PhraseMatcher(
-            {a: name for name, e in industries.industries.items() for a in (name, *e.aliases)}
+            {a: name for name, e in industries.industries.items() for a in e.aliases}
         )
         self._contractor = PhraseMatcher(
             {

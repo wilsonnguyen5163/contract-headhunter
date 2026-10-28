@@ -173,3 +173,41 @@ def test_board_suffixes_and_expired_markers_leave_titles(
     }
     job = normalizer.normalize(RawJob(**fields), now=datetime(2026, 10, 26, tzinfo=UTC))
     assert job.title_norm == norm
+
+
+@pytest.mark.parametrize(
+    ("text", "skills"),
+    [
+        ("Prepare Marketing Qualified Lead (MQL) reports", ["lead generation"]),
+        (
+            "Experience with webinar platforms such as Livestorm or GoToWebinar",
+            ["webinar marketing"],
+        ),
+        ("Organiser des webinaires et des événements virtuels", ["webinar marketing"]),
+    ],
+)
+def test_webinar_and_mql_skills(text: str, skills: list[str]) -> None:
+    assert SKILLS.extract(text) == skills
+
+
+def test_posting_without_found_headings_keeps_its_text_and_skills(normalizer: Normalizer) -> None:
+    text = (
+        "As a Marketing Specialist, Webinars, you will lead the planning of live webinars. "
+        "What You'll Be Doing: Develop the webinar calendar. Prepare Marketing Qualified Lead "
+        "(MQL) reports. What We're Looking For: Strong project management skills. Willingness "
+        "to learn HubSpot and Jira.\n\nNice to Have:\n- Public speaking experience"
+    )
+    raw = RawJob(
+        source="manual",
+        source_id="url-2",
+        url="https://jobs.example.org/2",
+        title="Marketing Specialist, Webinars (14-Month Contract)",
+        description=text,
+        fetched_at=datetime(2026, 10, 26, tzinfo=UTC),
+    )
+    job = normalizer.normalize(raw, now=datetime(2026, 10, 26, tzinfo=UTC))
+    assert {"webinar marketing", "lead generation", "project management", "crm", "jira"} <= set(
+        job.skills
+    )
+    assert "Develop the webinar calendar" in (job.description_clean or "")
+    assert job.nice_to_have == ["Public speaking experience"]

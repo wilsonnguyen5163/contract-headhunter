@@ -15,14 +15,14 @@ version: 2
 sections:
   overview:
     headers:
-      en: [about the job, about the role, about this role, about the position, job description, description, overview, position overview, role overview, the opportunity, job summary, summary, job purpose, purpose of the role, position summary]
-      fr: [à propos de l'emploi, à propos du poste, description du poste, description de l'emploi, aperçu, aperçu du poste, sommaire, sommaire du poste, raison d'être du poste, l'opportunité]
+      en: [about the job, about the role, about this role, about the position, job description, description, overview, position overview, role overview, the opportunity, about the opportunity, job summary, summary, job purpose, purpose of the role, position summary, what your team does, about the team]
+      fr: [à propos de l'emploi, à propos du poste, description du poste, description de l'emploi, aperçu, aperçu du poste, sommaire, sommaire du poste, raison d'être du poste, l'opportunité, à propos de l'opportunité]
     patterns:
       - '^(job|position|role) (summary|purpose|overview|description)$'
   responsibilities:
     headers:
-      en: [responsibilities, duties, "what you'll do", what you will do, "what you'll be doing", your role, the role, in this role, key accountabilities]
-      fr: [responsabilités, principales responsabilités, tâches, principales tâches, votre rôle, le rôle, votre mandat, le mandat, mandat, description des tâches, fonctions]
+      en: [responsibilities, duties, job duties, "what you'll do", what you will do, "what you'll be doing", what you will be doing, "what you'll work on", what you will work on, your role, the role, in this role, key accountabilities]
+      fr: [responsabilités, principales responsabilités, vos responsabilités, tâches, principales tâches, votre rôle, le rôle, votre mandat, le mandat, mandat, description des tâches, fonctions, ce que vous ferez, ce que vous allez faire]
     patterns:
       - '^(key |main |core |primary |major |your |the )?(responsibilit|duties|accountabilit|tasks)'
       - '^what you(''ll| will) (do|be doing)'
@@ -37,7 +37,7 @@ sections:
       - '^(atouts?|competences souhaitees|qualifications souhaitees)'
   requirements:
     headers:
-      en: [requirements, job requirements, qualifications, required qualifications, minimum qualifications, must have, must-have, must haves, what you bring, "what you'll bring", "what we're looking for", skills and experience, skills and qualifications, required skills, experience, education and experience, who you are, your profile, about you]
+      en: [requirements, job requirements, about the requirements, qualifications, required qualifications, qualifications required, minimum qualifications, must have, must-have, must haves, what you bring, "what you'll bring", "what we're looking for", skills and experience, skills and qualifications, required skills, experience, education and experience, who you are, your profile, about you]
       fr: [exigences, exigences du poste, qualifications requises, profil recherché, profil, compétences, compétences requises, compétences recherchées, ce que vous apportez, ce que vous nous apportez, expérience, expérience et compétences, scolarité et expérience, formation et expérience, votre profil]
     patterns:
       - '^(minimum |required |essential |basic |key |core |your |job )?(qualifications?|requirements?|skills|experience|competenc|education)'
@@ -47,7 +47,7 @@ sections:
       - '^(ce que vous (nous )?apportez|ce que nous recherchons|votre profil)'
   benefits:
     headers:
-      en: [benefits, our benefits, what we offer, "what's in it for you", perks, perks and benefits, compensation and benefits, total rewards]
+      en: [benefits, our benefits, what we offer, "what's in it for you", perks, perks and benefits, compensation and benefits, total rewards, what you will find here, "what you'll find here", what you can expect]
       fr: [avantages, nos avantages, avantages sociaux, ce que nous offrons, ce que nous vous offrons, rémunération et avantages]
     patterns:
       - '^(our |the |employee )?(benefits|perks|rewards)'
@@ -67,7 +67,8 @@ sections:
       en: [about us, about the company, about the organization, about the organisation, who we are, our company, company overview, our culture, our mission, our story]
       fr: [à propos de nous, à propos de l'entreprise, à propos de l'organisation, qui sommes-nous, qui nous sommes, notre entreprise, notre culture, notre mission]
     patterns:
-      - '^about\b' # "About Example Insurance" (the job/role/you variants are listed above)
+      - '^about\b' # "About Example Insurance". Job-side "About the ..." headers (role, opportunity,
+        # requirements, you) are listed as exact headers above, which win over this pattern.
       - '^why\b' # "Why Consider Us?", "Why join Example Co"
       - '^life at\b'
       - '^(who we are|our (company|culture|mission|story|values))'
@@ -92,6 +93,22 @@ sections:
       en: [job details, details, location, schedule, hours, contract details, duration, start date, work arrangement]
       fr: [détails du poste, lieu de travail, horaire, durée, date de début, conditions, conditions de travail]
     patterns: []
+
+# Postings whose text arrives flattened (one long line, e.g. Workday's structured data):
+# before sections are found, known headers are put on their own lines and list sections are
+# split into one item per line. Only applied when the text has at least min_chars characters
+# and its lines average at least min_chars_per_line (flattened text runs ~1000+ per line;
+# normally formatted postings average well under 200), so those are untouched.
+flattened_text:
+  min_chars: 600
+  min_chars_per_line: 400 # GUESS
+  # A capitalized word from this list, right after a lowercase word, starts a new list item
+  # ("...next Defining and tracking..." -> two items). Capitalized -ing words do too, except
+  # the nouns below ("across Marketing, Sales" is not a new item).
+  item_starters:
+    en: [create, develop, lead, manage, coordinate, support, plan, own, drive, partner, collaborate, prepare, analyze, analyse, edit, write, design, build, maintain, monitor, track, execute, deliver, oversee, ensure, identify, conduct, assist, organize, organise, produce, implement, establish, engage, represent, capture, help, experience, proven, strong, excellent, ability, knowledge, familiarity, proficiency, demonstrated, bachelor, degree, comfort, willingness]
+    fr: [créer, développer, gérer, coordonner, soutenir, planifier, collaborer, préparer, analyser, rédiger, concevoir, assurer, participer, organiser, produire, effectuer, réaliser, superviser, animer, contribuer, expérience, excellente, capacité, connaissance, maîtrise, diplôme, baccalauréat]
+  ing_nouns: [marketing, engineering, accounting, banking, consulting, publishing, manufacturing, advertising, learning, pricing, licensing, recruiting, staffing, gaming, streaming, computing, networking, branding, housing, funding, catering, clothing, lodging]
 
 # Kinds whose text forms description_clean (what is embedded and searched for skills).
 # Employer pitch, benefits, pay, equal-opportunity and application text are left out.
@@ -121,6 +138,11 @@ title_noise_patterns:
   # site or company suffix after a pipe, as job boards write page titles:
   # "Marketing Manager - Expired | Ross Video" (the company is kept in its own field)
   - '\s+\|\s+.*$'
+  # Twine page titles, "I8IS INC. - Senior Full Stack Developer freelance job | Twine": drop the
+  # company before the first dash and the " freelance job" suffix (before the employment-type
+  # rule below, which would otherwise cut everything after the dash)
+  - '^[^-–—]*?\s[-–—]\s(?=.*\bfreelance\s+job\s*$)'
+  - '\s+freelance\s+job\s*$'
   # expired markers job boards add to titles: " - Expired", "(Expired)", " – Expirée"
   - '\s[-–—]\s*(?:expired|expir[ée]e?)\s*$'
   - '\(\s*(?:expired|expir[ée]e?)\s*\)'

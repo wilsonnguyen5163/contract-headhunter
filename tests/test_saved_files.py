@@ -228,3 +228,39 @@ def test_manual_intake_reads_txt_html_and_pdf(normalizer: Normalizer, tmp_path: 
         [inbox], data_dir=data_dir, lock_timeout=5, normalizer=normalizer, now=NOW
     )
     assert {o.outcome for o in again.outcomes if not o.file.endswith(".txt")} == {"already_stored"}
+
+
+def test_signed_in_linkedin_page_uses_the_posting_number() -> None:
+    page = saved_page(
+        '<a href="https://www.linkedin.com/feed/">Home</a>'
+        '<a href="/jobs/view/4433050568/">Content Producer</a>'
+        '<a href="https://www.linkedin.com/jobs/view/4433050568/?trk=x">Apply</a>'
+        '<a href="/jobs/search/?currentJobId=4433050568">Back</a>'
+        '<a href="/jobs/view/4999999999/">Similar job</a>',
+        saved_from=None,
+    )
+    assert saved_page_url(page) == "https://www.linkedin.com/jobs/view/4433050568/"
+    assert canonical_url(saved_page_url(page) or "")[1] == "4433050568"
+    assert (
+        saved_page_url(saved_page('<a href="/jobs/view/4433050568/">x</a>', saved_from=None))
+        is None
+    )
+
+
+def test_a_paste_wins_over_a_saved_page_of_the_same_posting(
+    normalizer: Normalizer, tmp_path: Path
+) -> None:
+    inbox, data_dir = tmp_path / "manual", tmp_path / "data"
+    inbox.mkdir()
+    head = "<title>Content Producer (12-Month Contract)</title>"
+    (inbox / "A saved page.html").write_text(saved_page(MAIN, head), encoding="utf-8")
+    (inbox / "b-paste.txt").write_text(
+        f"url: {URL}\ntitle: Content Producer\ncompany: Example Co\n---\n"
+        "Produce short-form video. 3+ years of content production experience.\n",
+        encoding="utf-8",
+    )
+    report = ingest_paste_files(
+        [inbox], data_dir=data_dir, lock_timeout=5, normalizer=normalizer, now=NOW
+    )
+    outcomes = {Path(o.file).name: o.outcome for o in report.outcomes}
+    assert outcomes == {"b-paste.txt": "new", "A saved page.html": "already_stored"}
