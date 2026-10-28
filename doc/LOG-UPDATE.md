@@ -4,6 +4,30 @@ What each change solves, for the team. Newest first. Add an entry with every com
 
 ---
 
+## 2026-10-28 · Trial-run export in the pipeline, quick start guide and new README
+
+### What this solves
+- **The notebook's input is now made by a command.** `data_visualizer.ipynb` reads `exports/trial-run-<time>.csv`. Until now, that file was written by hand outside the code. `export-trial-run` now writes it from the latest matching run:
+  - the best shortlisted contractors per active job (2 by default; flagged matches are left out);
+  - one "no match" row for a job with no shortlist;
+  - the same columns as before, so the notebook needs no change.
+- **[quick_start.md](quick_start.md):** every command in one place, plus the steps to import jobs, reset and re-import, run the model, find the results and read them in the notebook.
+- **README.md** is now a standard project README: what the repo does, how it works, setup, usage, structure and a map of the docs.
+- **Docs moved to `doc/`:** `DEVELOPMENT.md`, `LOG-UPDATE.md` (this file), `PROJECT_CONTEXT.md`, `quick_start.md`, the pipeline diagram PNG and the project PDF. `README.md` and `CLAUDE.md` stay at the root (Claude Code only loads `CLAUDE.md` from there), as does `data/samples/README.md`. File names mentioned in older entries below refer to the old root paths.
+
+### How to use it
+- After `match`, run `docker compose run --rm app python -m jobmatch export-trial-run`. Then open `data_visualizer.ipynb` and run `view_trial_run()`.
+- To change the number of contractors per job, set `exports.trial_run_per_job` in `config/settings.yaml`. It sits outside `matching:` on purpose, so changing it doesn't change the scoring version or add match rows.
+
+### Known limits
+- The file holds contractor names: keep it local.
+- The notebook still uses absolute paths (`/home/wilson/...`). Change them on another machine.
+
+### Checks run
+- New tests in `tests/test_match_run.py`: best-per-job selection, flagged matches left out, the "no match" row, the `per_job` limit and the column order. (Not run yet: waiting for approval.)
+
+---
+
 ## 2026-10-27 · Cleaner skill tags, a stricter shortlist and a first labeled check on 33 new jobs
 
 ### What this solves

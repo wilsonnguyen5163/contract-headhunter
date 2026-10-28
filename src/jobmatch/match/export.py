@@ -102,3 +102,75 @@ def build_rows(
 
 def write_export(rows: list[MatchExportRow], dest: Path) -> int:
     return export_csv(MatchExportRow, rows, dest)
+
+
+NO_MATCH = "no match"
+
+
+class TrialRunRow(BaseModel):
+    """One option for one job in the trial-run sheet (read by data_visualizer.ipynb)."""
+
+    job_title: str
+    company: str | None
+    option: int | None
+    score: float | None
+    band: str  # high, medium, low, or "no match" for a job with no shortlist
+    talent_id: str | None
+    talent_name: str | None
+    talent_title: str | None
+    shared_skills: list[str]
+    job_url: str
+
+
+def build_trial_rows(
+    shortlisted: Iterable[Match],
+    jobs: Iterable[Job],
+    profiles: dict[str, ContractorProfile],
+    per_job: int,
+) -> list[TrialRunRow]:
+    """The best `per_job` shortlisted contractors of each job's latest run, one row each.
+    A job with no shortlist gets one "no match" row, so every job is listed. Flagged
+    matches are left out."""
+    by_job: dict[str, list[Match]] = {}
+    for m in latest(shortlisted):
+        by_job.setdefault(m.job_id, []).append(m)
+    rows: list[TrialRunRow] = []
+    for job in jobs:
+        best = sorted(by_job.get(job.job_id, []), key=lambda m: m.rank)[:per_job]
+        if not best:
+            rows.append(
+                TrialRunRow(
+                    job_title=job.title_raw,
+                    company=job.company_raw,
+                    option=None,
+                    score=None,
+                    band=NO_MATCH,
+                    talent_id=None,
+                    talent_name=None,
+                    talent_title=None,
+                    shared_skills=[],
+                    job_url=job.url,
+                )
+            )
+        for option, m in enumerate(best, start=1):
+            p = profiles.get(m.contractor_id)
+            rows.append(
+                TrialRunRow(
+                    job_title=job.title_raw,
+                    company=job.company_raw,
+                    option=option,
+                    score=round(m.score, 3),
+                    band=m.band.value,
+                    talent_id=m.contractor_id,
+                    talent_name=p.talent_name if p else None,
+                    talent_title=p.standardized_headline if p else None,
+                    shared_skills=m.matched_skills,
+                    job_url=job.url,
+                )
+            )
+    rows.sort(key=lambda r: (r.job_title.casefold(), r.job_url, r.option or 0))
+    return rows
+
+
+def write_trial_run(rows: list[TrialRunRow], dest: Path) -> int:
+    return export_csv(TrialRunRow, rows, dest)

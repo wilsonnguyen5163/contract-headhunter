@@ -1,6 +1,6 @@
 """CSV storage: typed tables, CSV-backed repositories and human-facing exports.
 
-Conventions (PROJECT_CONTEXT.md section 8a):
+Conventions (doc/PROJECT_CONTEXT.md section 8a):
 - read with utf-8-sig (tolerates Excel's BOM) and newline=""; write UTF-8 with LF.
 - headers and every row are validated against a pydantic model; errors name file and row.
 - multi-value cells are joined with "|" (a literal "|" or "\\" inside an item is backslash-escaped).

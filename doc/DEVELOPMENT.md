@@ -1,6 +1,6 @@
 # Development notes (jobmatch)
 
-Technical companion to the plain-language [README.md](README.md). Goals and architecture: [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md). Working rules: [CLAUDE.md](CLAUDE.md). What each change solved: [LOG-UPDATE.md](LOG-UPDATE.md).
+Technical companion to the plain-language [README.md](../README.md). Goals and architecture: [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md). Working rules: [CLAUDE.md](../CLAUDE.md). What each change solved: [LOG-UPDATE.md](LOG-UPDATE.md).
 
 ## Status
 
@@ -203,6 +203,7 @@ docker compose run --rm app python -m jobmatch embed-contractors
 docker compose run --rm app python -m jobmatch embed-jobs
 docker compose run --rm app python -m jobmatch match [--dry-run]
 docker compose run --rm app python -m jobmatch export-matches
+docker compose run --rm app python -m jobmatch export-trial-run    # best exports.trial_run_per_job per job, for data_visualizer.ipynb
 docker compose run --rm app python -m jobmatch import-reviewed-matches data/test_data_matches/raw.csv
 docker compose run --rm app python -m jobmatch evaluate-matches
 docker compose run --rm -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 app python -m jobmatch smoke-embed   # first run only: downloads the model (about 4.5 GB)
