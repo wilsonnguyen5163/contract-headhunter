@@ -13,6 +13,7 @@ What each change solves, for the team. Newest first. Add an entry with every com
   - the same columns as before, so the notebook needs no change.
 - **[quick_start.md](quick_start.md):** every command in one place, plus the steps to import jobs, reset and re-import, run the model, find the results and read them in the notebook.
 - **README.md** is now a standard project README: what the repo does, how it works, setup, usage, structure and a map of the docs.
+- **Docs moved to `doc/`:** `DEVELOPMENT.md`, `LOG-UPDATE.md` (this file), `PROJECT_CONTEXT.md`, `quick_start.md`, the pipeline diagram PNG and the project PDF. `README.md` and `CLAUDE.md` stay at the root (Claude Code only loads `CLAUDE.md` from there), as does `data/samples/README.md`. File names mentioned in older entries below refer to the old root paths.
 
 ### How to use it
 - After `match`, run `docker compose run --rm app python -m jobmatch export-trial-run`. Then open `data_visualizer.ipynb` and run `view_trial_run()`.

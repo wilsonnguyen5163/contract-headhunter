@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Project: **jobmatch**, a local pipeline that finds Canadian contract job postings, matches them to a fixed list of contractors using local AI, and queues the best matches for a human to approve or reject. Read `PROJECT_CONTEXT.md` first for goals, architecture and decisions.
+Project: **jobmatch**, a local pipeline that finds Canadian contract job postings, matches them to a fixed list of contractors using local AI, and queues the best matches for a human to approve or reject. Read `doc/PROJECT_CONTEXT.md` first for goals, architecture and decisions.
 
 ## Hard rules (never break these)
 

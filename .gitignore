@@ -103,7 +103,7 @@ compose.override.yml
 launchd/*.local.plist
 
 # ---- Claude Code local files ----
-# CLAUDE.md and PROJECT_CONTEXT.md SHOULD be committed.
+# CLAUDE.md and doc/PROJECT_CONTEXT.md SHOULD be committed.
 CLAUDE.local.md
 .claude/settings.local.json
 .claude/cache/

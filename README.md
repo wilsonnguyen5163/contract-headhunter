@@ -64,11 +64,12 @@ docker compose run --rm app python -m jobmatch match
 docker compose run --rm app python -m jobmatch export-trial-run      # then open data_visualizer.ipynb
 ```
 
-**See [quick_start.md](quick_start.md)** for every command, how to add jobs, reset and re-import, where results are stored, and how to read them.
+**See [doc/quick_start.md](doc/quick_start.md)** for every command, how to add jobs, reset and re-import, where results are stored, and how to read them.
 
 ## Project structure
 
 ```
+doc/                 project documentation (quick start, development notes, context, change log)
 config/              settings.yaml and YAML rules (skills, contract phrases, locations, normalization…)
 src/jobmatch/
   cli.py             command line (python -m jobmatch <command>)
@@ -89,11 +90,13 @@ data_visualizer.ipynb   notebook for reading trial-run results
 
 | File | For |
 |---|---|
-| [quick_start.md](quick_start.md) | Day-to-day use: commands, importing, running, reading results |
-| [DEVELOPMENT.md](DEVELOPMENT.md) | Technical details: layout, normalization, embeddings, matching, storage |
-| [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) | Goals, architecture and decisions |
-| [LOG-UPDATE.md](LOG-UPDATE.md) | What each change solved, newest first |
-| [CLAUDE.md](CLAUDE.md) | Working rules for AI-assisted development |
+| [doc/quick_start.md](doc/quick_start.md) | Day-to-day use: commands, importing, running, reading results |
+| [doc/DEVELOPMENT.md](doc/DEVELOPMENT.md) | Technical details: layout, normalization, embeddings, matching, storage |
+| [doc/PROJECT_CONTEXT.md](doc/PROJECT_CONTEXT.md) | Goals, architecture and decisions |
+| [doc/LOG-UPDATE.md](doc/LOG-UPDATE.md) | What each change solved, newest first |
+| [doc/JTBD2-Full_pipeline.png](doc/JTBD2-Full_pipeline.png) | General pipeline template (not a v0 spec) |
+| [doc/Project_repo_artifact.pdf](doc/Project_repo_artifact.pdf) | Project repo artifact (PDF) |
+| [CLAUDE.md](CLAUDE.md) | Working rules for AI-assisted development (kept at the root so Claude Code loads it) |
 
 ## What it does not do (v0)
 

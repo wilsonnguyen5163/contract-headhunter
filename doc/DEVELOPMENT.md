@@ -1,6 +1,6 @@
 # Development notes (jobmatch)
 
-Technical companion to the plain-language [README.md](README.md). Goals and architecture: [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md). Working rules: [CLAUDE.md](CLAUDE.md). What each change solved: [LOG-UPDATE.md](LOG-UPDATE.md).
+Technical companion to the plain-language [README.md](../README.md). Goals and architecture: [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md). Working rules: [CLAUDE.md](../CLAUDE.md). What each change solved: [LOG-UPDATE.md](LOG-UPDATE.md).
 
 ## Status
 

@@ -1,6 +1,6 @@
 # Quick start
 
-How to import jobs, run the matcher and read the results. For background, see [README.md](README.md). Technical details are in [DEVELOPMENT.md](DEVELOPMENT.md).
+How to import jobs, run the matcher and read the results. For background, see [README.md](../README.md). Technical details are in [DEVELOPMENT.md](DEVELOPMENT.md).
 
 Every `jobmatch` command runs inside the Docker container:
 
