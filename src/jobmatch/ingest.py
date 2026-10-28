@@ -1,7 +1,8 @@
 """Ingest postings from posting links or paste files, through one shared path:
 
     links (data/inbox/links/*.txt) --fetch or cache--> RawJob ┐
-    paste files (data/inbox/manual/*.txt) -------------> RawJob ┴-> raw store -> normalize
+    paste files and saved pages (data/inbox/manual/*.txt, *.html, *.pdf) -> RawJob ┴-> raw store
+                                                     -> normalize
                                                      -> dedupe -> jobs.csv -> runs.csv
 
 One run holds data/.run.lock so two runs never overlap. Re-running is safe: identical raw
@@ -28,6 +29,7 @@ from jobmatch.normalize.pipeline import Normalizer
 from jobmatch.schemas import JobStatus, RawJob, RawRecord, Run, RunStatus
 from jobmatch.sources.links import collect_link_files, read_links
 from jobmatch.sources.paste import PasteFormatError, canonical_url, read_paste_file
+from jobmatch.sources.saved_files import SAVED_SUFFIXES, read_saved_file
 from jobmatch.sources.web import FetchError, PageFetcher
 from jobmatch.sources.web_page import PageData, PageError, extract_page, raw_job_from_page
 from jobmatch.storage.csv_store import CsvJobRepository, CsvRunRepository, CsvStore
@@ -74,11 +76,22 @@ class _Item(BaseModel):
 
 
 def collect_paste_files(paths: Iterable[Path]) -> tuple[list[Path], list[FileOutcome]]:
-    """Expand folders to their *.txt files; skip names starting with "_" (templates)."""
+    """Expand folders to their paste files (*.txt) and saved postings (*.html, *.htm, *.pdf);
+    skip names starting with "_" (templates)."""
+    suffixes = (PASTE_SUFFIX, *SAVED_SUFFIXES)
     files: list[Path] = []
     skipped: list[FileOutcome] = []
     for path in paths:
-        candidates = sorted(path.glob(f"*{PASTE_SUFFIX}")) if path.is_dir() else [path]
+        # Paste files first: when a posting is both pasted and saved as a page, the
+        # hand-made paste is the better source and the saved page becomes the duplicate.
+        candidates = (
+            sorted(
+                (p for p in path.iterdir() if p.is_file() and p.suffix.lower() in suffixes),
+                key=lambda p: (p.suffix.lower() != PASTE_SUFFIX, p.name),
+            )
+            if path.is_dir()
+            else [path]
+        )
         for candidate in candidates:
             if candidate.name.startswith("_"):
                 skipped.append(
@@ -111,7 +124,10 @@ def ingest_paste_files(
             outcomes.append(FileOutcome(file=str(path), outcome="skipped", detail="empty file"))
             continue
         try:
-            raw_job, record = read_paste_file(path, fetched_at=now)
+            if path.suffix.lower() in SAVED_SUFFIXES:
+                raw_job, record = read_saved_file(path, fetched_at=now)
+            else:
+                raw_job, record = read_paste_file(path, fetched_at=now)
         except (PasteFormatError, OSError) as exc:
             outcomes.append(FileOutcome(file=str(path), outcome="error", detail=str(exc)))
             continue
@@ -260,6 +276,8 @@ def _record(source: str, source_id: str, now: datetime, payload: dict[str, Any])
 
 def _is_empty(path: Path) -> bool:
     try:
+        if path.suffix.lower() in SAVED_SUFFIXES:
+            return path.stat().st_size == 0
         return not path.read_text(encoding="utf-8-sig", errors="replace").strip()
     except OSError:
         return False  # reported as an error by the reader

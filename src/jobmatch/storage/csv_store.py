@@ -452,6 +452,9 @@ class CsvStore:
         )
         self.jobs = table("jobs.csv", Job, TableMode.READ_WRITE, ("job_id",))
         self.matches = table("matches.csv", Match, TableMode.READ_WRITE, ("match_id",))
+        self.matches_flagged = table(
+            "matches_flagged.csv", Match, TableMode.READ_WRITE, ("match_id",)
+        )
         self.reviews = table("reviews.csv", Review, TableMode.APPEND_ONLY)
         self.runs = table("runs.csv", Run, TableMode.APPEND_ONLY, ("run_id",))
 
@@ -461,6 +464,7 @@ class CsvStore:
             self.contractor_facets,
             self.jobs,
             self.matches,
+            self.matches_flagged,
             self.reviews,
             self.runs,
         ]
@@ -565,8 +569,10 @@ class CsvContractorRepository:
 
 
 class CsvMatchRepository:
-    def __init__(self, store: CsvStore) -> None:
-        self._table = store.matches
+    """matches.csv, or with flagged=True matches_flagged.csv (a rule check failed)."""
+
+    def __init__(self, store: CsvStore, *, flagged: bool = False) -> None:
+        self._table = store.matches_flagged if flagged else store.matches
 
     def list_all(self) -> list[Match]:
         return self._table.read_all()

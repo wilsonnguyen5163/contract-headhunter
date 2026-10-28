@@ -4,6 +4,332 @@ What each change solves, for the team. Newest first. Add an entry with every com
 
 ---
 
+## 2026-10-27 · Cleaner skill tags, a stricter shortlist and a first labeled check on 33 new jobs
+
+### What this solves
+- **Fewer wrong skill tags.**
+  - New `not_when` option in `config/skills_taxonomy.yaml`: phrases that contain a skill word but mean something else. "you excel at…" is no longer Excel. Hiring-process text ("an accessible recruitment experience") is no longer the recruitment skill. French "animation d'ateliers" is not animation.
+  - Removed aliases that tagged the wrong jobs: bare "ui", "figma" and "prototyping" (no longer UI/UX), "continuous improvement" (now process improvement, not Six Sigma), "trainer", bare "purchasing", and "mergers and acquisitions" (now a finance skill, not corporate law).
+- **Missing skills added:**
+  - "graphic designer" and "graphiste" (these postings had no tags before);
+  - event coordination;
+  - animation;
+  - Webflow (as a CMS);
+  - PeopleSoft and Workday Financials (as ERP);
+  - email design;
+  - industrial design;
+  - Figma, as a tool with no type of work.
+- **Twine job titles:** "I8IS INC. - Senior Full Stack Developer freelance job | Twine" was cut to "i8is inc."; it now reads "senior full stack developer".
+- **Job text no longer lost under "About the …" headers:** "About the Opportunity" and "About the Requirements" were read as the employer's "About us" pitch. All the duties and requirements after them were dropped (Tucows Graphic Designer, Copywriter). They are now job headers in `config/normalization.yaml`, along with "Job Duties" and "Qualifications Required".
+- **Stricter shortlist:** `min_score` went from 0.30 to 0.40. Jobs with no real fit in our pool (payroll, tax, data engineering, animation…) now more often show no shortlist instead of five weak names.
+- **First labeled check on new jobs:** `data/eval/llm_judge_labels.csv` holds fit / partial / no labels for each of the 33 new jobs' shortlists, plus fits the matcher missed.
+
+### How to use it
+- After pulling, run `bash scripts/reset_reimport.sh -y`, `embed-contractors`, `embed-jobs` and `match`. This re-tags the jobs that are already stored.
+- To exclude a phrase from a skill, add it under that skill's `not_when` in `config/skills_taxonomy.yaml`.
+- `scripts/rename_manual_templates.sh [--dry-run]` renames filled-in `_TEMPLATE copy*.txt` files to their title. It's a local helper and is git-ignored.
+
+### Known limits
+- **The labels are Claude's, not a reviewer's,** and they are not blind. Treat the 0.40 threshold as a guess until reviewers label more pairs.
+- **Thin contractor profiles get missed.** TAL-ON-023, -027, -028, -029 and -030 have no strengths or industries on file. They were the fits most often left out of the top 5.
+- **Some pages can't be read:** Zoho Recruit, BambooHR and similar pages need JavaScript, and macommunaute.ca only gives a short teaser. Paste such postings into `data/inbox/manual/`. The 5 Zoho postings are now pasted; the BambooHR link is commented out until someone pastes it.
+- **Animation job vs art directors:** with the wrong recruitment tag gone, the Senior Animation Artist posting counts as media work, like the art directors. Five art directors now reach the medium band. Each one shows "missing must-have: animation".
+- **"technical support" and "GTM" as department names** still tag skills.
+
+### Checks run
+- **Tests:** 594 automated tests pass (new English and French cases for every rule above); lint is clean.
+- **Real data:** 48 jobs × 42 contractors. Against the labels:
+  - high band 91% fit;
+  - medium 38% fit and 44% partial;
+  - low 10% fit.
+  Shortlist precision went from 0.33 to 0.47 with the new threshold.
+- **After the reset re-tagged stored jobs (2026-10-28), header fix included:** 80 listed pairs, precision 0.45 (0.59 counting half of partials). High band 90% fit, medium 38% fit, low 6% fit. 10 fits missed. 602 tests pass.
+
+---
+
+## 2026-10-26 · One-line postings get their sections back; over-qualified is a note
+
+### What this solves
+- **One-line postings are now split up.** Some sources, including every Workday posting (Clio, BCAA) and Safe Software's page, deliver the posting as one long run of text, with headings and list items running together. jobmatch now puts known headings on their own line, splits responsibilities and requirements into separate items, and moves the pay sentence out of the benefits text. Those postings now have real responsibilities and requirements, cleaner skills, and correct pay. Clio was showing a $2,000 benefit as the minimum salary; it now shows $110,300–149,300.
+- **Over-qualified no longer moves someone to the flagged list.** Our reviewers note a level mismatch but rarely reject for it, so it's now a note on the match. Under-qualified still moves someone to the flagged list.
+- **Type of work counts more:** its weight went from 0.10 to 0.20, so people from a different type of work rank lower.
+
+### How to use it
+Nothing new to run. After pulling, run `bash scripts/reset_reimport.sh -y`, `embed-jobs` and `match`. The rules are in `config/normalization.yaml` under `flattened_text`. That section holds:
+- when text counts as flattened;
+- which words start a new list item;
+- which "-ing" words are nouns, not new items.
+
+### Known limits
+- **It's still keyword matching:** words used in a different sense are tagged as skills. Examples: "GTM leaders" (a department), "you excel at" (not the spreadsheet), "positioning yourself".
+- **Type of work at 0.20** also pushes designers up for producer jobs whose skill tags are mostly design. The weight is a first guess to tune on more reviews.
+
+### Checks run
+- **Tests:** 568 automated tests pass, English and French; lint is clean.
+- **Real data:** 12 jobs re-imported, re-embedded, matched and evaluated. The reviewers' A/B pick is still shortlisted on 4 of 5 jobs.
+
+---
+
+## 2026-10-26 · Fixes found while checking against reviewed jobs
+
+### What this solves
+Running the matcher on the reviewed postings you saved (Create Music ×2, Safe Software, Maneva) showed six problems, now fixed:
+- **Postings whose headings run into the paragraphs** (Safe Software) lost almost all their text and skills. Now, if no responsibilities or requirements are found, the whole job text is used for skills and the description.
+- **New skills:** webinars and virtual events (Livestorm, GoToWebinar, ON24), and marketing qualified leads (MQL).
+- **Industry note:** "university degree" or "minimum education" in requirements no longer tags a job as the education industry.
+- **LinkedIn pages saved while signed in** had no web address; the posting number in the page is now used.
+- **Paste files are read before saved pages,** so when the same posting is both pasted and saved, the hand-made paste wins. A signed-in LinkedIn page mostly holds the job list, not the posting.
+- **Stale rows:** after a change to skills, industries, rules or a posting or profile, `match` kept the old rows. It now stores fresh ones, and the export shows only each job's latest run.
+
+### How to use it
+Nothing new to run. After pulling, run `bash scripts/reset_reimport.sh -y`, then `embed-jobs`, `match` and `export-matches`.
+
+### Known limits
+- **Unsplit headings:** for postings like Safe Software, the whole-text fallback also picks up a few unrelated skills from the surrounding text (logistics, help desk, privacy). Properly splitting inline headings is still to do.
+
+### Checks run
+- **Tests:** 560 automated tests pass; lint is clean.
+- **Real data:** 8 jobs re-imported, re-embedded, matched and evaluated. The reviewers' A/B pick is in our shortlist on 4 of 5 jobs (the miss is Maneva).
+
+---
+
+## 2026-10-26 · Type of work and industry in matching
+
+### What this solves
+A sales director could rank near the top for a marketing job because their wording looked similar. Now the matcher:
+- **Compares the type of work** (marketing, sales, software, finance…, taken from each side's skills) and gives it a small weight in the score. When they differ, the match carries a note such as `field: job marketing · contractor sales`.
+- **Notes the industry** on both sides, for example `same industry: media and entertainment`, or `industry: job sports · contractor cleantech`. This is information only: our reviewers have rated people from other industries as strong fits, so industry never lowers a score or removes anyone.
+
+On the Ross Video marketing role, the sales and business development director moved from 2nd to 4th, and the person our reviewers rated A moved up to 2nd.
+
+### How to use it
+Nothing new to run. `match` and `export-matches` show the notes in the flags.
+- **Weight:** `weights.field` in `config/settings.yaml` (0.10, a first guess).
+- **Ignored skill types:** `field_ignore_categories`, for skills used everywhere, such as project management.
+- **Industry names and spellings:** `config/industries.yaml`.
+
+### Known limits
+- **Type of work needs categorized skills on both sides:** contractors without listed strengths get no field part.
+- **Industry is read from words in the posting:** a SaaS company hiring for a healthcare client may show both. That's why it's a note only.
+
+### Changed in this commit
+- **New code:** `match/fields.py`; the scorer and run pass type of work and industry.
+- **Config:** `config/industries.yaml`; `weights.field` and `field_ignore_categories` in `settings.yaml`.
+
+### Checks run
+- **Tests:** 551 automated tests pass, 10 of them new; lint is clean.
+- **Real data:** dry run on 4 jobs × 42 contractors; the evaluation still has the reviewers' A pick shortlisted, now at #2.
+
+---
+
+## 2026-10-26 · Wider skill list, learned from our contractors
+
+### What this solves
+Skill matching only works when the same skill is recognized in both the job and the contractor profile. Before this change, only about a quarter of our contractors' listed strengths were recognized. Marketing, go-to-market, sales and operations were mostly missing. Now:
+- **About 60 skills were added by hand**, in English and French, with synonyms grouped. "GTM strategy", "go-to-market" and "mise en marché" count as the same skill.
+- **New strengths are learned automatically** when the contractor list is rebuilt: any strength the list doesn't recognize yet is added on its own, so jobs that mention it are tagged too.
+- **Job titles are cleaner:** job-board suffixes like "- Expired | Ross Video" are removed before titles are compared.
+
+On the reviewed Ross Video posting, the contractor our reviewers rated A moved from 10th to 3rd and now makes the shortlist.
+
+### How to use it
+After updating the contractor workbook:
+```
+docker compose run --rm app python -m jobmatch build-contractors data/contractors/contractors_master_list.xlsx
+bash scripts/reset_reimport.sh -y
+docker compose run --rm app python -m jobmatch embed-contractors
+docker compose run --rm app python -m jobmatch embed-jobs
+docker compose run --rm app python -m jobmatch match
+```
+`build-contractors` now also prints how many strengths were already known, learned, or skipped as too generic:
+```
+Skills: 143 strength phrase(s) · 118 already known · 13 learned · 12 too short or generic
+```
+
+### Curating (optional, any time)
+- **Learned skills:** `data/contractors/skills_learned.yaml`. They're rebuilt every time, so don't edit this file.
+- **Merging synonyms:** to group a learned phrase with its synonyms, add it as an alias in `config/skills_taxonomy.yaml`. For example, "social strategy" is now an alias of social media. It then drops out of the learned file automatically.
+- **Hints:** `data/contractors/skill_suggestions.csv` lists near-spellings of existing skills. It catches spelling variants, not meaning, so a person still decides synonyms.
+- **What's never learned:** single generic words (design, operations, writing, AI…), because they would tag unrelated jobs. The list is in `config/skill_learning.yaml`.
+
+### Known limits
+- **Unmerged synonyms:** learned skills aren't grouped with their synonyms until someone curates them.
+- **Re-import needed:** new skills reach jobs only after the re-import step above.
+- **Small sample:** only 2 reviewed pairs can be compared so far, so the improvement isn't measured statistically yet.
+
+### Changed in this commit
+- **Config:**
+  - `config/skills_taxonomy.yaml`: about 60 skills plus aliases;
+  - new `config/skill_learning.yaml`;
+  - `paths.learned_skills` in `settings.yaml`;
+  - title patterns in `normalization.yaml`.
+- **Code:** new `normalize/skill_learning.py`; the taxonomy loader merges learned skills; `build-contractors` learns skills.
+- **Data:** `data/contractors/skills_learned.yaml` and `skill_suggestions.csv`, generated.
+
+### Checks run
+- **Tests:** 541 automated tests pass, 30 of them new, in English and French. They include "j'ai" never counting as "AI", and generic words tagging nothing.
+- **Real run:** contractor list rebuilt; jobs re-imported offline (7 unreadable links still fail as expected); both sides re-embedded; evaluation rerun.
+
+---
+
+## 2026-10-26 · Import postings saved as web pages or PDFs
+
+### What this solves
+Some job sites refuse automated requests (jobs.ca, CareerBeacon), forbid them (LinkedIn), or only show the posting after JavaScript runs (Workday). For those, you can now save the posting from your browser and drop the file in the inbox. No copy-and-paste into the text template is needed.
+
+### How to use it
+1. Open the posting in your browser.
+2. Save it:
+   - **Best:** "Save page as…" (`.html`). The browser saves the finished page, often with the site's structured job details.
+   - **Or:** Print → "Save as PDF", **with headers and footers turned on**. The footer carries the posting's web address, which jobmatch needs.
+3. Put the file in `data/inbox/manual/` and run the usual import:
+   ```
+   bash scripts/fetch_and_import.sh
+   ```
+
+The import shows one line per file, like a paste file. If the same posting is later imported by its link, it isn't added twice.
+
+### Known limits
+- **PDFs give plain text only:** pay, location and dates are read from the text, so a saved web page is more reliable.
+- **Unreadable PDFs:** scanned (image) and password-protected PDFs can't be read, and the import says so.
+- **No web address:** a PDF printed with headers and footers off has no address and is reported with a hint.
+- **Expired postings are still imported as new.** jobs.ca, for example, keeps expired postings online with an "expired" banner. An expired-posting filter is a separate decision.
+
+### Changed in this commit
+- **New code:** `sources/saved_files.py`; manual intake now also reads `.html`, `.htm` and `.pdf`.
+- **New dependency:** `pypdf` 6.19.0 (about 1 MB, pure Python); the lockfile and image were rebuilt.
+
+### Checks run
+- **Tests:** 511 automated tests pass, 11 of them new (synthetic web pages and PDFs built in the test); lint is clean.
+- **Real file:** a saved jobs.ca page (Ross Video, expired) previewed read-only. It gave the right address, contract, 13 months, remote, 5+ years, $82k–120k/year and English. The company and the requirement bullets came out incomplete, and the expired status wasn't caught.
+
+---
+
+## 2026-10-26 · Checking the matcher against human-reviewed matches
+
+### What this solves
+We now have a way to measure the matcher against what our reviewers decided, instead of judging it by eye. A reviewed-match sheet (each row: a talent, a posting, the reviewer's score and tier) is imported as labels. The matcher's score and rank for the same pairs are then set beside the reviewer's.
+
+### How to use it
+1. Export the reviewed-match sheet as CSV, for example `data/test_data_matches/raw.csv`.
+2. Import it:
+   ```
+   docker compose run --rm app python -m jobmatch import-reviewed-matches data/test_data_matches/raw.csv
+   ```
+   Only contract-type rows are kept; permanent roles are out of scope. Names, contacts and outreach notes are not imported.
+3. After the postings are imported and `match` has run:
+   ```
+   docker compose run --rm app python -m jobmatch evaluate-matches
+   ```
+   It prints, and writes to `exports/evaluation-<time>.csv`:
+   - how closely our ranking agrees with the reviewers';
+   - reviewer tier against our band;
+   - for each job, how many of the reviewers' A/B talents made our shortlist;
+   - why any pair couldn't be compared.
+
+### Known limits
+- **Few comparable pairs today:** 1 of 33 reviewed pairs can be compared. Most reviewed postings have been removed since the review, or block automated reading (jobs.ca, CareerBeacon, LinkedIn, Workday). To include them, paste their text into `data/inbox/manual/`.
+- **Different scoring:** the reviewers' score also covers availability, location rules, how likely the role is a contract, posting age and urgency, which the matcher doesn't score. Compare tiers and the skills sub-score rather than the totals.
+- **Two reviewed talents** aren't in our contractor list (not marked as open to contract work).
+
+### Changed in this commit
+- **New commands:** `import-reviewed-matches`, `evaluate-matches`.
+- **New code:** `sources/reviewed_matches.py`, `match/evaluate.py`; the matcher can now score every pair, not just the shortlist (`score_all_jobs`).
+- **Config:** `config/reviewed_import.yaml` (sheet column names, tiers, what counts as permanent).
+- **Data:**
+  - `data/eval/reviewed_matches.csv` (labels);
+  - 11 contract posting links added to `data/inbox/links/2026-10-examples.txt` (none could be imported automatically; see above).
+
+### Checks run
+- **Tests:** 500 automated tests pass, 6 of them new (synthetic rows, no real names); lint is clean.
+- **Real run:** 33 labels imported (52 permanent rows left out); `evaluate-matches` compared the 1 available pair.
+
+---
+
+## 2026-10-26 · Matching: a shortlist of contractors for every job (phase 4)
+
+### What this solves
+For each job, jobmatch now picks up to 5 contractors who fit, gives each a score and a confidence level (high, medium or low), and explains why using only our own data: the closest title, the shared skills and the missing ones. People who would fit but fail a basic check, such as a junior for a senior role, are kept in a separate list with the reason, so nobody is silently dropped. The system recommends; a person decides.
+
+### How to use it
+After importing jobs, run these in order:
+```
+docker compose run --rm app python -m jobmatch embed-contractors   # only after the contractor list changes
+docker compose run --rm app python -m jobmatch embed-jobs
+docker compose run --rm app python -m jobmatch match --dry-run      # look first; stores nothing
+docker compose run --rm app python -m jobmatch match
+docker compose run --rm app python -m jobmatch export-matches
+```
+`match` prints each job's shortlist with talent IDs and headlines, never names:
+```
+senior campaign producer  [manual:url-9444c1afe55df9be]
+  1. 0.743 high    TAL-BC-001  Senior Digital & Technical Project Manager
+       text 0.769 · title 0.816 (producer) · skills 0.25
+       - missing must-have: graphic design, web design, motion graphics, …
+  3. 0.618 FLAGGED TAL-BC-042  Project Coordinator, Media Planner & Analytics Specialist
+       - seniority: under-qualified (job senior, contractor junior)
+```
+`export-matches` writes a spreadsheet to `exports/matches-<time>.csv`, with contractor names, job links and every score. **It contains names: keep it on your machine and don't share it outside the team.**
+
+### How a match is scored
+Three things are compared, each worth 0 to 1, then averaged with weights:
+
+| Part | Weight | Compares |
+|---|---|---|
+| Overall meaning | 0.45 | the whole job text vs the whole profile |
+| Title | 0.30 | the job title vs the contractor's closest title ("producer" vs their target titles) |
+| Skills | 0.25 | how many of the job's main skills the contractor lists |
+
+- **Bands:** high from 0.70, medium from 0.50, low below that.
+- **Profiles with only a title** are judged on title and skills, so missing text doesn't count against them.
+- **Information only, never filters:**
+  - missing must-have skills
+  - a rate above the posted pay
+  - a French posting
+  - a thin profile
+  - hours
+- **Checks that send a match to the flagged list:**
+  - **Seniority:** two or more levels apart, in either direction.
+  - **Location:** off for now, because all contract work is treated as remote.
+
+### Where the results go
+- `data/matches.csv`: matches that passed every check.
+- `data/matches_flagged.csv`: matches that failed a check, with the reason.
+
+Both files only ever grow. Re-running `match` adds nothing new. Changing a setting adds a fresh set of rows, and the export shows only the newest.
+
+### Tuning
+Every number above is a first guess, kept in `config/settings.yaml` under `matching:`. They'll be adjusted once more postings are in and reviewers start approving and rejecting matches. A change there takes effect on the next `match`; no code change is needed.
+
+### Known limits
+- **Small sample:** only 3 test jobs so far, so the weights are guesses.
+- **Thin profiles:** the 15 contractors without a profile match less reliably. "Integrated Producer" still misses the campaign producer job, because the model doesn't see those titles as close. Filling in profiles will help most.
+- **Pay gap:** the postings so far pay about $34–41/h (salaried), while contractors with a stated rate ask $70–150/h. This is shown as a note, not a filter (team decision).
+- **Taxonomy coverage:** new skill words must be added to `config/skills_taxonomy.yaml` by hand. 15 media and content skills were added in this change.
+- **Freshness reminder:** freshness is still 999 days.
+
+### Changed in this commit
+- **New commands:** `match`, `export-matches`.
+- **New code:**
+  - `match/scorer.py`, `match/gates.py`, `match/run.py`, `match/export.py`
+  - `normalize/must_have.py`
+  - title cleaning in `embed/texts.py`
+- **Embed commands:** `embed-jobs` and `embed-contractors` now also build title vectors.
+- **Config:**
+  - `settings.yaml` → `matching:` (all tuning knobs)
+  - `normalization.yaml` → `must_have_soft_markers`
+  - `skills_taxonomy.yaml` → 15 media/content skills, plus prototyping and wireframing
+- **Data:** new files `data/matches.csv`, `data/matches_flagged.csv`, and title vectors in `data/embeddings/`.
+
+### Checks run
+- **Tests:** 494 automated tests pass, 81 of them new; lint is clean.
+- **Real run on 3 jobs × 42 contractors:**
+  - 13 shortlisted and 1 flagged, in 0.09 s.
+  - A second run added nothing.
+  - The export and `validate-data` are clean.
+
+---
+
 ## 2026-10-22 · Vectors for jobs and contractors (phase 4, first part)
 
 ### What this solves

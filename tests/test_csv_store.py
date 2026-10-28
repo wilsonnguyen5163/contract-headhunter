@@ -282,6 +282,8 @@ def test_export_has_bom_and_neutralizes_formulas(tmp_path) -> None:
         skill_overlap=0.5,
         score=0.4,
         band=Band.LOW,
+        rank=1,
+        scoring_version="v1",
         created_at=datetime(2026, 10, 1, tzinfo=UTC),
     )
     dest = tmp_path / "exports" / "matches.csv"

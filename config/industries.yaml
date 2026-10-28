@@ -1,0 +1,70 @@
+# Industries (sectors), used only for an information note on each match ("same industry" or
+# "industry: job X · contractor Y"); never scored or filtered. A job's industry is found in
+# its title, company and cleaned description; a contractor's in their main_industry list.
+#
+# aliases: matched in job text and in contractor lists (whole words, case- and
+#   accent-insensitive). Keep them specific: job text is long, so a word like "energy",
+#   "culture" ("company culture") or "university" ("university degree") would tag the wrong
+#   jobs. The industry's own name is matched in contractor lists only.
+# contractor_aliases: matched in contractor industry lists only, where short generic
+#   labels ("technology", "media", "health") are safe.
+version: 1
+
+industries:
+  technology and saas:
+    aliases: [saas, b2b saas, software company, tech company, technology company, cybersecurity, ad tech, adtech, entreprise technologique, éditeur de logiciels]
+    contractor_aliases: [technology, software, b2b technology, consumer technology, sales technology, creative technology, digital products, consumer applications, enterprise innovation]
+  artificial intelligence:
+    aliases: [artificial intelligence, ai company, machine learning company, intelligence artificielle]
+    contractor_aliases: [ai, ai-enabled health products, ar/vr]
+  healthcare and life sciences:
+    aliases: [healthcare, health care, healthtech, health tech, digital health, hospital, pharmaceutical, pharmaceuticals, life sciences, biotech, soins de santé, santé numérique, pharmaceutique, sciences de la vie]
+    contractor_aliases: [health, wellness]
+  financial services:
+    aliases: [financial services, fintech, banking, wealth management, insurance company, services financiers, institution financière, banque]
+  nonprofit:
+    aliases: [nonprofit, non-profit, not-for-profit, charity, charitable organization, ngo, organisme à but non lucratif, obnl, osbl, organisme de bienfaisance]
+    contractor_aliases: [nonprofit and foundations, associations, social services, mission-driven organizations, purpose-driven organizations, community-led organizations]
+  education:
+    aliases: [edtech, education technology, school board, educational institution, conseil scolaire, établissement d'enseignement]
+    contractor_aliases: [university, université, higher education]
+  government and public sector:
+    aliases: [public sector, government of canada, municipality, crown corporation, secteur public, gouvernement du canada, municipalité, société d'état]
+    contractor_aliases: [government, government and smb]
+  media and entertainment:
+    aliases: [entertainment, broadcasting, broadcast, live production, television, film production, music industry, publishing, streaming, divertissement, télévision, radiodiffusion, industrie musicale]
+    contractor_aliases: [media, culture and media, digital publishing]
+  sports:
+    aliases: [sports, sports technology, professional sports, athletics, industrie du sport]
+  retail and e-commerce:
+    aliases: [retail, e-commerce, ecommerce, online retail, commerce de détail, commerce électronique, commerce en ligne]
+  consumer goods:
+    aliases: [consumer goods, consumer packaged goods, cpg, biens de consommation]
+    contractor_aliases: [consumer, consumer and cpg, consumer brands]
+  construction and real estate:
+    aliases: [construction industry, real estate, property management, immobilier, industrie de la construction]
+    contractor_aliases: [construction]
+  cleantech and energy:
+    aliases: [cleantech, clean tech, climate tech, renewable energy, energy sector, utilities sector, technologies propres, énergie renouvelable, secteur de l'énergie]
+  manufacturing and industrial:
+    aliases: [manufacturing, industrial automation, industrial technology, fabrication industrielle, secteur manufacturier]
+  professional services:
+    aliases: [professional services, consulting firm, law firm, accounting firm, services professionnels, cabinet d'avocats, cabinet comptable]
+    contractor_aliases: [legal and professional services, b2b services]
+  agencies and advertising:
+    aliases: [advertising agency, marketing agency, creative agency, digital agency, ad agency, agence de publicité, agence de marketing, agence créative, agence numérique]
+    contractor_aliases: [agencies, creative agencies, digital agencies, marketing agencies, advertising, experiential marketing, integrated campaigns, digital campaigns]
+  transportation and logistics:
+    # Bare "logistics" / "transportation" are everyday words in postings ("event logistics").
+    aliases: [public transit, transportation company, logistics company, third-party logistics, 3pl, freight, airline, transport en commun, entreprise de logistique]
+    contractor_aliases: [transit, transportation, logistics]
+  automotive:
+    aliases: [automotive, automobile industry, industrie automobile]
+  hospitality and tourism:
+    aliases: [hospitality, tourism, hotel, hôtellerie, tourisme]
+  telecommunications:
+    aliases: [telecommunications, telecom, télécommunications]
+  gaming:
+    aliases: [video games, video game, gaming industry, jeux vidéo, jeu vidéo]
+  arts and culture:
+    aliases: [performing arts, arts and culture, museum, arts organization, arts de la scène, musée, milieu culturel]

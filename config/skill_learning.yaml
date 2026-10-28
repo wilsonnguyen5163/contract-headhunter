@@ -1,0 +1,26 @@
+# Rules for skills learned automatically from the contractor list. build-contractors writes
+# every contractor strength the taxonomy does not recognize yet into paths.learned_skills
+# (data/contractors/skills_learned.yaml), which is loaded together with skills_taxonomy.yaml,
+# so jobs mentioning that phrase are tagged with it. A person curates later: move a learned
+# phrase into skills_taxonomy.yaml, merged with its synonyms (see skill_suggestions.csv).
+version: 1
+
+# Phrases are matched as whole words in job text, so short or generic ones would tag
+# unrelated postings. A phrase is learned only when it has min_words..max_words words, or is
+# one of the acronyms, and is not a stopword.
+min_words: 2
+max_words: 5
+acronyms: [abm, cro, crm, seo, sem, aso, gtm, ux, ui, pmp, okr, kpi, saas, b2b, b2c, fp&a, cpg]
+stopwords: [
+  ai, design, operations, writing, editing, analytics, automation, reporting, governance,
+  partnerships, partnership, coaching, hr, strategy, leadership, marketing, sales, content,
+  communications, management, development, research, production, consulting, growth, data,
+  technology, innovation, planning, execution, storytelling, creative, digital, brand,
+  social, finance, commercialization, operations leadership,
+]
+
+# A learned phrase this similar (0-100, rapidfuzz token-sort ratio: whole-phrase spelling,
+# so one shared word like "strategy" is not enough) to a curated skill or alias is listed in
+# skill_suggestions.csv as a likely synonym to merge by hand. It catches spelling variants,
+# not meaning: "social strategy" -> "social media" still needs a person.
+suggest_threshold: 85 # GUESS

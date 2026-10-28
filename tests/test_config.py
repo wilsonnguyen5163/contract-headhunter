@@ -92,3 +92,16 @@ def test_skill_alias_collision_is_rejected() -> None:
                 },
             }
         )
+
+
+def test_skill_not_when_phrase_cannot_be_a_skill_term() -> None:
+    with pytest.raises(ValidationError, match="listed under both"):
+        SkillsTaxonomy.model_validate(
+            {
+                "version": 1,
+                "skills": {
+                    "excel": {"not_when": ["excel at"]},
+                    "excellence": {"aliases": ["Excel at"]},
+                },
+            }
+        )
