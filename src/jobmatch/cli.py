@@ -547,6 +547,44 @@ def export_matches(ctx: typer.Context) -> None:
     log.info("export_matches", extra={"fields": {"rows": count}})
 
 
+@app.command("export-trial-run")
+def export_trial_run(ctx: typer.Context) -> None:
+    """Write the best shortlisted contractors per active job (exports.trial_run_per_job) to
+    exports/trial-run-<time>.csv, read by data_visualizer.ipynb. A job with no shortlist
+    gets a "no match" row. The file holds contractor names: keep it local."""
+    from datetime import UTC, datetime
+
+    from jobmatch.match.export import build_trial_rows, write_trial_run
+    from jobmatch.match.run import ACTIVE_STATUSES
+    from jobmatch.storage.csv_store import (
+        CsvContractorProfileRepository,
+        CsvJobRepository,
+        CsvMatchRepository,
+    )
+
+    settings: Settings = ctx.obj
+    timeout = settings.storage.lock_timeout_seconds
+    store = CsvStore(settings.paths.data_dir, lock_timeout=timeout)
+    path = settings.paths.contractors_csv
+    profiles = (
+        CsvContractorProfileRepository(path, lock_timeout=timeout).list_all()
+        if path.exists()
+        else []
+    )
+    rows = build_trial_rows(
+        CsvMatchRepository(store).list_all(),
+        [j for j in CsvJobRepository(store).list_all() if j.status in ACTIVE_STATUSES],
+        {p.talent_id: p for p in profiles},
+        settings.exports.trial_run_per_job,
+    )
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    dest = settings.paths.exports_dir / f"trial-run-{stamp}.csv"
+    count = write_trial_run(rows, dest)
+    jobs = len({r.job_url for r in rows})
+    typer.echo(f"Wrote {count} row(s) for {jobs} job(s) to {dest}")
+    log.info("export_trial_run", extra={"fields": {"rows": count, "jobs": jobs}})
+
+
 def _reviewed_table(settings: Settings, path: Path | None = None) -> "CsvTable[ReviewedMatch]":
     from jobmatch.schemas import ReviewedMatch
     from jobmatch.storage.csv_store import CsvTable, TableMode

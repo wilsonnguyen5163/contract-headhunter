@@ -119,6 +119,11 @@ class MatchingSettings(StrictModel):
         return self
 
 
+class ExportSettings(StrictModel):
+    # Kept out of MatchingSettings: changing it must not change the scoring version.
+    trial_run_per_job: int = Field(default=2, gt=0)
+
+
 class LoggingSettings(StrictModel):
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
@@ -131,6 +136,7 @@ class Settings(StrictModel):
     embedding: EmbeddingSettings
     normalize: NormalizeSettings
     matching: MatchingSettings
+    exports: ExportSettings = ExportSettings()
     logging: LoggingSettings
 
 

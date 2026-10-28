@@ -78,5 +78,8 @@ matching: # phase 4. Every number here is a hyperparameter, to be tuned on revie
   hours_per_year: 2080 # converts yearly/monthly/weekly/daily job pay to hourly (40 h weeks)
   rate_tolerance: 1.25 # GUESS: note when a contractor's rate is above the job's top hourly pay times this
 
+exports:
+  trial_run_per_job: 2 # contractors per job in exports/trial-run-<time>.csv (export-trial-run)
+
 logging:
   level: INFO

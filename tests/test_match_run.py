@@ -24,7 +24,7 @@ from jobmatch.embed.texts import (
     job_text,
     job_title_text,
 )
-from jobmatch.match.export import build_rows, write_export
+from jobmatch.match.export import build_rows, build_trial_rows, write_export, write_trial_run
 from jobmatch.match.run import MatchError, run_matching
 from jobmatch.normalize.skills import SkillExtractor
 from jobmatch.schemas import ContractorProfile, Job, JobStatus, Language, VectorSet
@@ -226,6 +226,73 @@ def test_new_settings_add_rows_and_the_export_shows_the_newest(
     assert write_export(rows, dest) == 3
     text = dest.read_text(encoding="utf-8-sig")
     assert "Sample Person A" in text and "rédacteur ou rédactrice" in text
+
+
+def test_trial_run_lists_the_best_shortlisted_per_job_and_jobs_with_none(
+    setup: Settings, store: CsvStore, make_job: Callable[..., Job], tmp_path: Path
+) -> None:
+    run_matching(setup)
+    unmatched = make_job(
+        job_id="manual:url-3",
+        source_id="url-3",
+        url="https://example.org/3",
+        title_raw="Analyste de la paie (contrat)",
+        language=Language.FR,
+    )
+    jobs = [*CsvJobRepository(store).list_all(), unmatched]
+
+    rows = build_trial_rows(
+        CsvMatchRepository(store).list_all(),
+        jobs,
+        {p.talent_id: p for p in PROFILES},
+        per_job=2,
+    )
+    # TAL-B is flagged for job 1, so only TAL-A is listed there; job 3 has no shortlist.
+    assert [(r.job_title, r.option, r.band, r.talent_id) for r in rows] == [
+        ("Analyste de la paie (contrat)", None, "no match", None),
+        ("Rédacteur ou rédactrice (contrat de 6 mois)", 1, rows[1].band, "TAL-C"),
+        ("Senior Digital Producer - 6 month contract", 1, rows[2].band, "TAL-A"),
+    ]
+    a = rows[2]
+    assert a.talent_name == "Sample Person A"
+    assert a.talent_title == "Senior Digital Project Manager"
+    assert a.shared_skills == ["project management", "social media"]
+    assert a.score is not None and a.score == round(a.score, 3)
+
+    dest = tmp_path / "exports" / "trial-run.csv"
+    assert write_trial_run(rows, dest) == 3
+    with dest.open(encoding="utf-8-sig", newline="") as f:
+        header = next(csv.reader(f))
+    assert header == [
+        "job_title",
+        "company",
+        "option",
+        "score",
+        "band",
+        "talent_id",
+        "talent_name",
+        "talent_title",
+        "shared_skills",
+        "job_url",
+    ]
+
+
+def test_trial_run_keeps_only_per_job_options(setup: Settings, store: CsvStore) -> None:
+    run_matching(setup)
+    shortlisted = CsvMatchRepository(store).list_all()
+    second = next(m for m in shortlisted if m.job_id == "manual:url-1").model_copy(
+        update={"match_id": "m-extra", "contractor_id": "TAL-C", "rank": 2}
+    )
+    jobs = CsvJobRepository(store).list_all()
+    profiles = {p.talent_id: p for p in PROFILES}
+
+    two = build_trial_rows([*shortlisted, second], jobs, profiles, per_job=2)
+    one = build_trial_rows([*shortlisted, second], jobs, profiles, per_job=1)
+    assert [(r.option, r.talent_id) for r in two if r.job_url.endswith("/1")] == [
+        (1, "TAL-A"),
+        (2, "TAL-C"),
+    ]
+    assert [(r.option, r.talent_id) for r in one if r.job_url.endswith("/1")] == [(1, "TAL-A")]
 
 
 def test_changed_contractor_text_must_be_re_embedded(setup: Settings) -> None:

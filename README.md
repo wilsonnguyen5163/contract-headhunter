@@ -1,78 +1,124 @@
-# Job Matching Assistant: Plain-Language Summary
+# jobmatch: contract job matching assistant
 
-Prepared October 14, 2026. This is an early plan, not a finished product. Costs and timings are rough estimates.
+A local tool that collects **Canadian contract job postings**, matches each one to **our registered contractors** using a local AI model, and gives a **person** a ranked shortlist to review. The tool recommends; people decide.
 
-## What are we building?
+Contract roles are often filled first-come, first-served, and checking job boards by hand all day is slow. jobmatch does the collecting, cleanup and first sorting so reviewers spend their time on judgment.
 
-A tool that watches for new **contract jobs in Canada**, checks which of **our registered contractors** fit each job, and puts the best matches in a list for a **person** to review. If the reviewer approves a match, that is the trigger for the next step (reaching out to the company).
+> **Status:** prototype (v0). Job intake, normalization, embeddings, matching, spreadsheet exports and evaluation against human reviews work. The review UI, automatic job-board feeds and the scheduler are not built yet.
 
-## Why?
+---
 
-Contract jobs are often filled on a first-come, first-served basis. Our contractors can lose out if we find a job late. Checking job boards by hand all day is slow, so the tool does the searching and first sorting, and people make the decisions.
+## What this repo contributes
 
-## How it works, step by step
+- **Job intake from links or pasted postings.** It reads job-board and career-page links (including LinkedIn links a person pastes), plus postings saved by hand as text, `.html` or `.pdf`. It respects robots.txt and never logs in or scrapes LinkedIn or Indeed.
+- **Normalization for English and French postings.** It cleans the text, splits the posting into sections, and extracts title, company, location, work mode, language, contract type and length, seniority, years of experience, pay and skills. Rules live in editable YAML files in `config/`.
+- **Deduplication and filtering.** The same job posted on several sites is stored once. Non-Canadian and non-contract postings are set aside, with the reason.
+- **Contractor profiles from the master workbook.** It builds the contractor list from the talent spreadsheet and learns skills that the curated skill list doesn't know yet.
+- **Local semantic matching.** It embeds jobs and contractors with `BAAI/bge-m3`, on the CPU and offline, then scores every pair on overall meaning, title, shared skills and type of work. Each pair gets a high, medium or low band, with explanations taken from the data: matched skills, missing must-have skills, flags.
+- **Rule checks.** A seniority gap of two or more levels sends a match to a separate flagged list, with the reason.
+- **Exports and evaluation.** Spreadsheet exports for reviewers, a notebook view of the best matches, and a comparison of the matcher's scores with human-reviewed matches to tune thresholds.
+- **Safe storage with no database.** Plain CSV files with schema validation, atomic writes, file locks and timestamped backups. Vectors go in NumPy `.npz` files. Every step is safe to re-run.
 
-1. **Collect jobs.** A teammate pastes the links of interesting postings into a simple list, and the tool reads each posting from its link. This works for most job boards and company career pages, including LinkedIn links. The tool never searches LinkedIn on its own, and never opens Indeed links: Indeed postings are copied in by hand. Automatic collection from free job-board feeds comes later.
-2. **Tidy them up.** Postings are cleaned and put in one consistent format. Duplicates (the same job on several sites) are merged. Non-Canadian jobs and jobs that aren't contracts are set aside.
-3. **Compare to our contractors.** The tool turns each job description and each contractor's profile into numbers that capture their meaning (the technical word is "embedding"). It then measures how close each job is to each contractor. It also checks simple rules, such as "does the contractor have the must-have skills?" and "is the language right?"
-4. **Make a shortlist.** For each job it picks the few best-fit contractors and shows why: the skills that match, the skills that are missing, and a confidence level (high, medium or low).
-5. **A person decides.** A reviewer opens the list and approves, rejects (with a reason) or asks for more information.
+## How it works
 
-Everything runs on one computer: the client's 2019 MacBook Pro. Information is kept in simple spreadsheet-style files (CSV) that can be opened in Excel or Numbers, so there is no database to set up. Please don't edit those live files while the tool is running. No contractor information is sent to outside AI services in this first version.
+```
+links / pasted postings ──► fetch ──► normalize ──► dedupe & filter ──► data/jobs.csv
+                                                                             │
+contractor workbook ──► build-contractors ──► contractors.csv                │
+                                  │                                          │
+                                  ▼                                          ▼
+                          embed-contractors                              embed-jobs
+                                  └──────────────► match ◄───────────────────┘
+                                                     │
+                       data/matches.csv  +  data/matches_flagged.csv
+                                                     │
+                     export-trial-run / export-matches ──► exports/*.csv ──► notebook / Excel ──► human review
+```
 
-## What a person does
+## Requirements
 
-- **Reviewer:** works through the shortlist, ideally several times a day, and records approve or reject. Each decision also teaches us how to improve the tool.
-- **Whoever collects jobs:** pastes the links of promising postings into the list (one line per job), and copies in the occasional posting that can't be read from its link.
-- **Someone who knows the contractors:** fills in a short, structured profile for each (specialties, skills, years of experience, seniority, languages).
+- Docker with Docker Compose. The app runs in a `linux/amd64` container, CPU only, capped at 4 GB of memory.
+- About 5 GB of disk for the embedding model (downloaded once into a Docker volume).
+- Target machine: a 2019 Intel MacBook Pro with 16 GB RAM. Development also works on any x86_64 machine.
+- Optional, for the results notebook: Jupyter and `pandas` on your own machine.
 
-## What it will *not* do (in this first version)
+## Installation
 
-- It will **not send emails**. Finding the right company contact and drafting a message come later, and a person will always review and send.
-- It will **not scrape LinkedIn or Indeed**, or log in to any site on our behalf.
-- It will **not make final decisions**. It recommends; people decide.
-- It does **not use a chatbot-style AI** for judging matches yet. We may add one later if the first results show we need it.
+```
+cp .env.example .env
+docker compose build
+docker compose run --rm -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 app python -m jobmatch smoke-embed   # one-time model download
+```
 
-## What it costs
+After the download, keep `HF_HUB_OFFLINE=1` in `.env`.
 
-- **Software and data:** expected to be close to **$0** to start. It uses free tools, free job sources and the client's existing laptop. One thing to check: the container software we plan to use (Docker Desktop) can require a paid license for larger organizations. Some free job sources limit how many requests we can make, so we may hit those limits.
-- **People's time is the real cost.** The tool should reduce it, but reviewing, filling in profiles and collecting job links still take time.
-- Later steps (finding contacts, drafting emails) may add costs. We will price them before building.
+## Usage
 
-## How we'll know it works
+The short version:
 
-We will keep track of how many of the tool's suggestions reviewers approve, and how many good matches it missed. That tells us what to adjust. Early on, expect some wrong suggestions and some misses. The first weeks are for tuning.
+```
+bash scripts/fetch_and_import.sh                                     # import jobs from data/inbox/
+docker compose run --rm app python -m jobmatch embed-contractors     # after the contractor list changes
+docker compose run --rm app python -m jobmatch embed-jobs
+docker compose run --rm app python -m jobmatch match
+docker compose run --rm app python -m jobmatch export-trial-run      # then open data_visualizer.ipynb
+```
 
-## Risks to keep in mind
+**See [quick_start.md](quick_start.md)** for every command, how to add jobs, reset and re-import, where results are stored, and how to read them.
 
-- **Accuracy:** matches can be wrong or missed, especially at the start. The human review step is the safety net.
-- **Privacy:** contractor profiles are personal information. They stay on our computer and should not be shared outside the team. Because they are plain files, the laptop should be password-protected with disk encryption turned on.
-- **Speed:** a job posted a few hours ago may already be taken, and jobs only enter the list as fast as someone adds their links.
-- **Older laptop:** the 2019 MacBook must stay on, plugged in and awake for the scheduled checks, and some modern AI software no longer supports its Intel chip, so setup needs extra care. This is a technical issue we have a plan for.
-- **Rules for outreach:** Canada has an anti-spam law (CASL) that affects commercial emails, even business-to-business ones. We need qualified advice before the email step. This summary is not legal advice.
-- **Upkeep:** the lists of skills and "contract" wording need occasional updates.
+## Project structure
 
-## What we need from the team
+```
+config/              settings.yaml and YAML rules (skills, contract phrases, locations, normalization…)
+src/jobmatch/
+  cli.py             command line (python -m jobmatch <command>)
+  sources/           link fetching, paste files, saved pages and PDFs, contractor workbook
+  normalize/         one module per normalization step
+  embed/             local embedding model and embedding texts
+  match/             scoring, rule checks, exports, evaluation
+  storage/           CSV store, NumPy vector store, repository interfaces
+  llm/, review/      placeholders for later phases
+scripts/             fetch_and_import.sh, reset_reimport.sh, rename_manual_templates.sh
+data/                runtime data (git-ignored): inbox/, jobs.csv, matches*.csv, embeddings/, raw/
+exports/             spreadsheets for people (git-ignored; they contain contractor names)
+tests/               unit and end-to-end tests (synthetic data, network always mocked)
+data_visualizer.ipynb   notebook for reading trial-run results
+```
 
-- The contractor list with a description of each person's expertise.
-- A few examples of past good and bad matches, if they exist.
-- A decision on who reviews, how often, and who collects job links.
-- Confirmation of which job sources we are allowed and comfortable using.
+## Documentation
 
-## Plan in plain terms
+| File | For |
+|---|---|
+| [quick_start.md](quick_start.md) | Day-to-day use: commands, importing, running, reading results |
+| [DEVELOPMENT.md](DEVELOPMENT.md) | Technical details: layout, normalization, embeddings, matching, storage |
+| [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) | Goals, architecture and decisions |
+| [LOG-UPDATE.md](LOG-UPDATE.md) | What each change solved, newest first |
+| [CLAUDE.md](CLAUDE.md) | Working rules for AI-assisted development |
 
-1. Set up the foundation and the contractor profiles.
-2. Get job collection and cleanup working with a few free sources.
-3. Build the matching and the review list.
-4. Try it with real jobs, collect reviewer feedback and tune it.
-5. Only then consider the next stage: finding the company contact and drafting emails for human review.
+## What it does not do (v0)
 
-## Small glossary
+- **No emails.** Finding company contacts and drafting outreach come later, and a person will always review and send.
+- **No LinkedIn or Indeed scraping**, and no logging in to any site. LinkedIn jobs enter only through links a person pastes. Indeed postings are pasted by hand.
+- **No final decisions.** Every match is reviewed by a person.
+- **No chatbot-style AI.** Matching uses embeddings and rules only. No contractor data is sent to outside AI services.
 
-- **Embedding:** a way of turning text into numbers so a computer can tell which texts mean similar things.
-- **Skill taxonomy:** our list of skills and their alternate spellings (for example, "React" and "ReactJS" count as the same).
-- **Job board source / API:** an official way for a website to share its job listings with software.
-- **CASL:** Canada's Anti-Spam Legislation.
-- **Prototype:** the first, simple, working version, used to learn before we invest more.
-- **CSV:** a simple spreadsheet-style text file that opens in Excel or Numbers.
-- **Docker container:** a sealed package of the software that runs the same way on different computers, which we use because the client's older Mac can't run some modern AI software directly.
+## Privacy and data
+
+- Contractor profiles are personal information. They stay on the local machine, in git-ignored files. Logs and terminal output show talent IDs, never names.
+- The exports in `exports/` contain names: don't share them outside the team.
+- Use a password-protected laptop with disk encryption turned on.
+- Don't edit the live CSV files while a command is running.
+
+## Known limits
+
+- Scores and thresholds are first guesses, tuned on a small set of reviewed matches. Expect some wrong suggestions and some misses early on.
+- Pages that need JavaScript (Workday, Zoho Recruit, BambooHR) can't be fetched and must be pasted by hand.
+- Contractors with thin profiles (no summary or strengths) are matched less reliably.
+- Canadian anti-spam law (CASL) applies to any future outreach step and needs qualified advice before it is built.
+
+## Glossary
+
+- **Embedding:** turning text into numbers so a computer can tell which texts mean similar things.
+- **Skill taxonomy:** our list of skills and their alternate spellings ("React" and "ReactJS" count as the same).
+- **Band:** the confidence level of a match: high, medium or low.
+- **Docker container:** a sealed package of the software that runs the same way on different computers.
