@@ -37,6 +37,7 @@ from jobmatch.embed.texts import (
 )
 from jobmatch.ingest import RUN_LOCK_FILE
 from jobmatch.match.fields import IndustryFinder, skill_categories
+from jobmatch.match.lexical import LexicalIndex, contractor_lexical_text, job_lexical_text
 from jobmatch.match.scorer import (
     Candidate,
     ContractorFacts,
@@ -256,7 +257,7 @@ def _score_all(settings: Settings, store: CsvStore) -> ScoredJobs:
     industries = IndustryFinder(load_industries(settings.config_dir))
     rules = load_normalization_rules(settings.config_dir)
     seniority = SeniorityDetector(rules.seniority)
-    cleaner = TitleCleaner(rules.seniority)
+    cleaner = TitleCleaner(rules.seniority, rules.title_engagement_words)
     must_haves = MustHaveReader(extractor, rules.must_have_soft_markers)
     facts: list[ContractorFacts] = []
     texts: dict[str, str] = {}
@@ -289,6 +290,15 @@ def _score_all(settings: Settings, store: CsvStore) -> ScoredJobs:
     )
     title_row = {job_id: i for i, job_id in enumerate(job_titles)}
 
+    lexical: np.ndarray | None = None
+    lexical_version = ""
+    if settings.matching.weights.lexical > 0:
+        job_words = [job_lexical_text(j) for j in jobs]
+        con_words = [contractor_lexical_text(p) for p in profiles]
+        index = LexicalIndex([*job_words, *con_words], settings.matching.lexical_stopwords)
+        lexical = index.similarity(job_words, con_words)
+        lexical_version = index.fingerprint  # word rarity moves when jobs are imported
+
     ranked: dict[str, list[Candidate]] = {}
     for i, job in enumerate(jobs):
         must_have = tuple(must_haves.read(job.requirements))
@@ -304,7 +314,14 @@ def _score_all(settings: Settings, store: CsvStore) -> ScoredJobs:
             categories=skill_categories(job.skills, taxonomy, ignore),
             industries=industries.in_job(job_text_for_industry),
         )
-        ranked[job.job_id] = rank_all(job_facts, facts, cosines[i], settings.matching, titles)
+        ranked[job.job_id] = rank_all(
+            job_facts,
+            facts,
+            cosines[i],
+            settings.matching,
+            titles,
+            None if lexical is None else lexical[i],
+        )
     return ScoredJobs(
         jobs=jobs,
         profiles=profiles,
@@ -315,6 +332,7 @@ def _score_all(settings: Settings, store: CsvStore) -> ScoredJobs:
             taxonomy.model_dump_json(),
             load_industries(settings.config_dir).model_dump_json(),
             rules.model_dump_json(),
+            lexical_version,
         ),
         fingerprints={
             **{talent: content_hash(text) for talent, text in texts.items()},

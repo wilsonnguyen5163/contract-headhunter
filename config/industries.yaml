@@ -68,3 +68,21 @@ industries:
     aliases: [video games, video game, gaming industry, jeux vidéo, jeu vidéo]
   arts and culture:
     aliases: [performing arts, arts and culture, museum, arts organization, arts de la scène, musée, milieu culturel]
+  # Other fields (2026-11-04). Legal services sit under professional services ("law firm") and
+  # utilities under cleantech and energy, so they are not repeated here.
+  agriculture and food:
+    aliases: [agriculture, agri-food, agrifood, farming operation, food processing, food manufacturing, agroalimentaire, transformation alimentaire, secteur agricole]
+    contractor_aliases: [food, food and beverage, agribusiness]
+  mining, oil and gas:
+    aliases: [mining company, mining industry, mining sector, oil and gas, oil sands, upstream oil, secteur minier, industrie minière, pétrole et gaz, sables bitumineux]
+    contractor_aliases: [mining, natural resources]
+  aerospace and defence:
+    aliases: [aerospace, aerospace industry, defence industry, defense industry, aéronautique, aérospatiale, industrie de la défense]
+    contractor_aliases: [defence, defense]
+  social and community services:
+    aliases: [social service agency, community agency, child welfare, family services, community health centre, community health center, services sociaux, protection de la jeunesse, organisme communautaire]
+    contractor_aliases: [community services]
+  public safety and emergency services:
+    aliases: [police service, police department, fire department, fire service, paramedic service, emergency services, public safety, sécurité publique, service de police, service d'incendie, services d'urgence]
+  childcare and early learning:
+    aliases: [child care centre, childcare centre, child care center, daycare, early learning centre, early learning and child care, garderie, centre de la petite enfance, service de garde éducatif]

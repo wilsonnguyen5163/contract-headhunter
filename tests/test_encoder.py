@@ -51,6 +51,18 @@ def test_info_reports_model_identity(settings: Settings) -> None:
     assert info.dim == 7
     revision = settings.embedding.model_revision or "unpinned"
     assert info.model_version.startswith(f"{revision}+")
+    assert info.model_version.endswith(f"+max{settings.embedding.max_seq_length}")
+
+
+def test_a_longer_token_limit_is_a_new_model_version(settings: Settings) -> None:
+    """Stored vectors made with another limit must not be reused (embed/build.py)."""
+    short = Encoder(
+        settings.embedding.model_copy(update={"max_seq_length": 512}), model=FakeModel()
+    ).info()
+    long = Encoder(
+        settings.embedding.model_copy(update={"max_seq_length": 1024}), model=FakeModel()
+    ).info()
+    assert short.model_version != long.model_version
 
 
 @pytest.mark.model

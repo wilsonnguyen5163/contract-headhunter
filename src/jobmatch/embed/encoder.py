@@ -48,7 +48,9 @@ class Encoder:
             dim = int(self._raw_encode(["probe"]).shape[1])
             self._info = EmbeddingInfo(
                 model_name=self._settings.model_name,
-                model_version=_model_version(self._settings.model_revision),
+                model_version=_model_version(
+                    self._settings.model_revision, self._settings.max_seq_length
+                ),
                 dim=dim,
             )
         return self._info
@@ -68,9 +70,12 @@ class Encoder:
         return np.asarray(vectors, dtype=np.float32)
 
 
-def _model_version(revision: str | None) -> str:
+def _model_version(revision: str | None, max_seq_length: int) -> str:
+    """Everything that changes the vectors: the model revision, the library and how many
+    tokens are read (a longer limit gives different vectors for long texts, so stored ones
+    must be re-embedded)."""
     try:
         st_version = version("sentence-transformers")
     except PackageNotFoundError:
         st_version = "unknown"
-    return f"{revision or 'unpinned'}+sentence-transformers-{st_version}"
+    return f"{revision or 'unpinned'}+sentence-transformers-{st_version}+max{max_seq_length}"

@@ -7,13 +7,13 @@ people: never attach it to logs or send it anywhere. Formula-like cells are neut
 by export_csv, because posting text is untrusted.
 """
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel
 
-from jobmatch.schemas import ContractorProfile, Job, Match
+from jobmatch.schemas import ContractorProfile, Job, JobStatus, Match
 from jobmatch.storage.csv_store import export_csv
 
 
@@ -40,13 +40,24 @@ class MatchExportRow(BaseModel):
     missing_must_have: list[str]
     gates_failed: list[str]
     flags: list[str]
+    profession: str | None = None  # a hint for the reviewer, not part of the score
     match_id: str
     scored_at: datetime
 
 
-def latest(matches: Iterable[Match]) -> list[Match]:
-    """The rows of each job's latest run (one run stamps all its rows with one time)."""
+def newest_version(matches: Iterable[Match]) -> str | None:
+    """The scoring version of the most recent matching run that stored rows."""
+    newest = max(matches, key=lambda m: m.created_at, default=None)
+    return newest.scoring_version if newest else None
+
+
+def latest(matches: Iterable[Match], version: str | None = None) -> list[Match]:
+    """The rows of each job's latest run (one run stamps all its rows with one time), from
+    the newest scoring version only (or `version`): a job left without a shortlist by the
+    newest run stores no rows, so its older rows must not stand in for a current shortlist."""
     rows = list(matches)
+    version = version or newest_version(rows)
+    rows = [m for m in rows if m.scoring_version == version]
     newest: dict[str, datetime] = {}
     for m in rows:
         if m.job_id not in newest or m.created_at > newest[m.job_id]:
@@ -59,7 +70,10 @@ def build_rows(
     flagged: Iterable[Match],
     jobs: dict[str, Job],
     profiles: dict[str, ContractorProfile],
+    professions: Mapping[tuple[str, str], str] | None = None,
 ) -> list[MatchExportRow]:
+    """professions: (job_id, talent_id) -> profession note (match/professions.py)."""
+    professions = professions or {}
     tagged = [(m, "shortlist") for m in shortlisted] + [(m, "flagged") for m in flagged]
     current = {m.match_id for m in latest(m for m, _ in tagged)}
     rows: list[MatchExportRow] = []
@@ -67,7 +81,11 @@ def build_rows(
         job = jobs.get(m.job_id)
         if m.match_id not in current or job is None:
             continue
+        if which == "shortlist" and job.status is not JobStatus.MATCHED:
+            continue  # the newest run left this job without a shortlist
         p = profiles.get(m.contractor_id)
+        if profiles and p is None:
+            continue  # contractor no longer in the contractor list
         rows.append(
             MatchExportRow(
                 job_title=job.title_norm or job.title_raw,
@@ -92,6 +110,7 @@ def build_rows(
                 missing_must_have=m.missing_must_have,
                 gates_failed=m.gates_failed,
                 flags=m.flags,
+                profession=professions.get((m.job_id, m.contractor_id)),
                 match_id=m.match_id,
                 scored_at=m.created_at,
             )
@@ -119,6 +138,7 @@ class TrialRunRow(BaseModel):
     talent_name: str | None
     talent_title: str | None
     shared_skills: list[str]
+    profession: str | None = None  # a hint for the reviewer, not part of the score
     job_url: str
 
 
@@ -127,16 +147,25 @@ def build_trial_rows(
     jobs: Iterable[Job],
     profiles: dict[str, ContractorProfile],
     per_job: int,
+    flagged: Iterable[Match] = (),
+    professions: Mapping[tuple[str, str], str] | None = None,
 ) -> list[TrialRunRow]:
     """The best `per_job` shortlisted contractors of each job's latest run, one row each.
     A job with no shortlist gets one "no match" row, so every job is listed. Flagged
-    matches are left out."""
+    matches are left out, but count when finding the newest run. professions:
+    (job_id, talent_id) -> profession note."""
+    professions = professions or {}
+    shortlisted = list(shortlisted)
+    version = newest_version([*shortlisted, *flagged])
     by_job: dict[str, list[Match]] = {}
-    for m in latest(shortlisted):
+    for m in latest(shortlisted, version):
+        if profiles and m.contractor_id not in profiles:
+            continue  # contractor no longer in the contractor list
         by_job.setdefault(m.job_id, []).append(m)
     rows: list[TrialRunRow] = []
     for job in jobs:
-        best = sorted(by_job.get(job.job_id, []), key=lambda m: m.rank)[:per_job]
+        current = by_job.get(job.job_id, []) if job.status is JobStatus.MATCHED else []
+        best = sorted(current, key=lambda m: m.rank)[:per_job]
         if not best:
             rows.append(
                 TrialRunRow(
@@ -165,6 +194,7 @@ def build_trial_rows(
                     talent_name=p.talent_name if p else None,
                     talent_title=p.standardized_headline if p else None,
                     shared_skills=m.matched_skills,
+                    profession=professions.get((job.job_id, m.contractor_id)),
                     job_url=job.url,
                 )
             )

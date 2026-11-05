@@ -1,0 +1,273 @@
+# Professions: what a person is accountable for and produces, not the industry or domain
+# they work in ("UX" is a domain: a UX writer and a UX designer are different professions).
+# Used for the reviewer note "profession: job X · talent Y (same / close / different)" in
+# the exports and the match output. The note never changes a score (2026-11-04).
+#
+# Job profession: from the job title and its first 3 responsibilities. Contractor
+# professions: one per title (headline and target titles). Each is the closest description
+# below by embedding similarity, so descriptions say what the work is, in plain words,
+# without seniority. Editing this file re-embeds the descriptions on the next embed-jobs.
+# Keep entries broad: two titles in the same profession should be able to do each other's
+# core work. Prototype and results: scripts/prototypes/professions.py, doc/PROTOTYPES.md.
+version: 1
+
+# How much better the best profession must fit than the second for a title to count.
+# Generic titles ("Consultant", "Advisor") fit many professions about equally and are
+# skipped; a job below the margin gets the verdict "unclear". 0.01 on 2026-11-04 (155 blind
+# labels): 10 of 82 jobs unclear (23 at 0.02); "different" hits 2 fits and 53 non-fits.
+min_margin: 0.01
+
+# GUESS (from 9 fits the judges accepted across professions, 2026-11-04): pairs close
+# enough that a match between them is "close", not "different". Each group is a set of
+# professions that all accept each other; keep groups small.
+close:
+  - [creative direction, graphic and visual design]
+  - [creative direction, content writing and editing]
+  - [content writing and editing, media and content production]
+  - [content writing and editing, social media and community management]
+  - [media and content production, digital project management]
+  - [marketing management, digital and performance marketing]
+  - [marketing management, brand strategy and management]
+  - [human resources, recruiting and talent acquisition]
+  - [human resources, payroll and compensation]
+  - [ux and product design, graphic and visual design]
+  - [business analysis, data analysis and business intelligence]
+  - [data engineering, software development]
+  # Other fields (2026-11-04)
+  - [customer service and call centre, client services and account management]
+  - [customer service and call centre, retail sales]
+  - [administrative and office support, program coordination]
+  - [it support and infrastructure, cybersecurity]
+  - [it support and infrastructure, software development]
+  - [engineering technology and drafting, civil and structural engineering]
+  - [engineering technology and drafting, mechanical and electrical engineering]
+  - [construction trades, construction project management]
+  - [nursing, personal support and health care aides]
+  - [school teaching, post-secondary teaching]
+  - [school teaching, early childhood education]
+  - [post-secondary teaching, training and facilitation]
+  - [social work and counselling, community and support work]
+  - [policy and government programs, regulatory and compliance]
+  - [warehouse and logistics operations, equipment operation and driving]
+  - [manufacturing and production, warehouse and logistics operations]
+  - [mechanical repair and maintenance, welding and metal fabrication]
+
+professions:
+  digital project management: >
+    Plans and delivers digital, web, software or IT projects and programs: scope, schedule,
+    budget, resources, vendors, risks and status reporting to stakeholders.
+  construction project management: >
+    Plans and coordinates construction, facilities, engineering or capital projects on site:
+    contractors, permits, drawings, site schedules, safety and cost control.
+  program coordination: >
+    Coordinates programs and services for an organization or community: logistics,
+    participants, schedules, partners, reporting and administrative follow-up.
+  operations management: >
+    Runs how an organization works day to day: processes, governance, policies, workflow,
+    organizational effectiveness and operational planning.
+  human resources: >
+    Manages HR for employees: HR policies, employee relations, HR programs, onboarding,
+    compliance, HR administration and people operations.
+  recruiting and talent acquisition: >
+    Finds and hires people: sourcing candidates, screening, interviewing, hiring strategy and
+    managing the recruitment process.
+  payroll and compensation: >
+    Runs pay: payroll processing, compensation and salary structures, benefits, pay equity
+    and HR data reporting.
+  finance and accounting: >
+    Manages money and financial records: accounting, financial statements and reporting,
+    budgeting, forecasting, controllership, tax, collections and treasury.
+  sales and business development: >
+    Sells and grows revenue directly: prospecting, closing deals, managing client accounts,
+    partnerships and the sales pipeline.
+  client services and account management: >
+    Looks after existing clients: client relationships, service delivery, renewals,
+    satisfaction and coordinating work for the client.
+  marketing management: >
+    Leads marketing: marketing strategy, go-to-market, positioning, campaigns, budgets,
+    channels and the marketing team.
+  digital and performance marketing: >
+    Drives measurable demand online: SEO, paid media, email and marketing automation,
+    conversion rate optimization, lifecycle marketing and marketing analytics.
+  brand strategy and management: >
+    Manages a brand: brand positioning, brand plans, brand guidelines, product or shopper
+    marketing for a brand.
+  content writing and editing: >
+    Writes and edits words: copywriting, articles, web and UX copy, scripts, editorial
+    content, content strategy and content calendars.
+  social media and community management: >
+    Runs social media channels and online communities: posting, engagement, community
+    moderation, influencer partnerships and social analytics.
+  communications and public relations: >
+    Manages an organization's communications: internal and external communications, media
+    relations, announcements, stakeholder messaging.
+  events: >
+    Plans and runs events: event logistics, venues, speakers, webinars, conferences and event
+    promotion.
+  graphic and visual design: >
+    Designs visuals: layouts, graphics, illustrations, typography, brand identity, print and
+    digital assets, art direction of visual work.
+  creative direction: >
+    Leads creative work across copy and design: big ideas, campaign concepts, creative teams
+    and the creative quality of the output.
+  ux and product design: >
+    Designs how people use digital products: user research, UX and UI design, wireframes,
+    prototypes and usability testing.
+  animation and motion: >
+    Creates animation, motion graphics and visual effects for video, film, games or digital
+    media.
+  media and content production: >
+    Produces media: plans and manages video, broadcast, audio, web or campaign productions
+    from brief to delivery, crews, budgets and schedules.
+  product management: >
+    Decides what a product does: product strategy, roadmap, requirements, prioritization and
+    working with engineering to ship it.
+  business analysis: >
+    Analyses business needs and systems: gathering requirements, mapping processes,
+    functional specifications and configuring business software.
+  software development: >
+    Builds software: writing code for applications, web sites, APIs and integrations;
+    engineering and technical leadership.
+  data engineering: >
+    Builds data systems: data pipelines, ETL, data warehouses, data integration and data
+    architecture.
+  data analysis and business intelligence: >
+    Turns data into insight: analysis, dashboards, reporting, data strategy and business
+    intelligence.
+  machine learning and ai: >
+    Builds and applies machine learning and AI: models, AI solutions, AI strategy and AI
+    adoption.
+  regulatory and compliance: >
+    Makes sure an organization meets rules: regulatory submissions, compliance programs,
+    health and safety (HSE) programs, audits and risk.
+  information and records management: >
+    Organizes information: records management, information governance, document and web
+    content management systems.
+  training and facilitation: >
+    Leads workshops, training sessions and group facilitation; designs learning activities
+    and performs for audiences.
+
+  # ---- Other fields (2026-11-04), grouped by NOC 2021 broad occupational category. The
+  # professions above cover our contractors (mostly NOC 1, 2 and 5); these let jobs in other
+  # fields get an honest profession instead of the nearest marketing or tech one.
+  # NOC 1: business, finance and administration
+  administrative and office support: >
+    Keeps an office running: reception, scheduling, correspondence, data entry, filing and
+    administrative assistance to a team or executive.
+  customer service and call centre: >
+    Helps customers by phone, chat or in person: answering questions, resolving complaints,
+    taking orders and processing requests.
+  purchasing and procurement: >
+    Buys goods and services for an organization: sourcing suppliers, requests for proposals,
+    purchase orders, vendor contracts and negotiation.
+  # NOC 2: natural and applied sciences
+  it support and infrastructure: >
+    Keeps computers and networks working: help desk, user support, system and network
+    administration, servers, devices and IT operations.
+  cybersecurity: >
+    Protects IT systems and data as a cybersecurity or security operations centre (SOC)
+    analyst: security monitoring, threat detection, incident response and vulnerability
+    management.
+  civil and structural engineering: >
+    Designs and oversees roads, bridges, buildings, water and other infrastructure:
+    structural design, calculations, drawings and site reviews.
+  mechanical and electrical engineering: >
+    Designs machines, electrical systems, equipment and production processes as a
+    mechanical, electrical or industrial engineer (ingénieur): engineering calculations,
+    specifications and testing.
+  engineering technology and drafting: >
+    Supports engineers: CAD drafting, technical drawings, field measurements, testing,
+    inspections and technical documentation.
+  laboratory and life sciences: >
+    Runs scientific work in a lab: experiments, sample analysis, lab equipment, research
+    data and scientific reports in biology, chemistry or similar.
+  architecture and urban planning: >
+    Designs buildings and plans communities: architectural design, land use, zoning,
+    planning applications and urban design.
+  # NOC 3: health
+  nursing: >
+    Provides nursing care to patients as a registered or practical nurse (RN, RPN, LPN;
+    infirmière, infirmier, infirmière auxiliaire): assessments, medications, treatments,
+    care plans and patient monitoring.
+  personal support and health care aides: >
+    Helps people with daily living as a personal support worker (PSW), health care aide or
+    préposé aux bénéficiaires: bathing, feeding, mobility and basic care in homes, long-term
+    care or hospitals.
+  physicians and medicine: >
+    Diagnoses and treats patients as a doctor (family physician, specialist, médecin):
+    medical examinations, prescriptions, procedures and clinical decisions.
+  allied health and therapy: >
+    Provides therapy and rehabilitation: physiotherapy, occupational therapy, respiratory
+    therapy, speech therapy, dietetics and similar clinical care.
+  pharmacy: >
+    Dispenses medications and advises on their use: prescriptions, drug interactions and
+    pharmacy operations.
+  medical laboratory and diagnostic imaging: >
+    Performs medical tests and imaging as a medical laboratory technologist or medical
+    radiation technologist: blood and specimen analysis, x-ray, ultrasound and MRI.
+  # NOC 4: education, law, social, community and government services
+  school teaching: >
+    Teaches children or teenagers as an elementary or secondary school teacher (enseignant,
+    enseignante): lesson planning, classroom instruction and student assessment.
+  post-secondary teaching: >
+    Teaches courses at a college or university as a professor, lecturer or sessional
+    instructor (chargé de cours): lectures, course design, grading and student support.
+  early childhood education: >
+    Cares for and educates young children in a child care or early learning setting: play-
+    based learning, routines and child development.
+  social work and counselling: >
+    Supports people through personal and social problems: case management, counselling,
+    assessments, referrals and crisis support.
+  community and support work: >
+    Supports youth, people with disabilities or vulnerable groups in the community: outreach,
+    life skills, housing support and program activities.
+  law and paralegal: >
+    Provides legal services: legal advice, drafting and reviewing legal documents, research,
+    filings and representing clients.
+  policy and government programs: >
+    Develops and runs public policy and programs: policy analysis, briefing notes, program
+    design, grants administration and government relations.
+  public safety and emergency response: >
+    Protects the public as a police officer or constable, firefighter, paramedic or
+    emergency dispatcher (policier, pompier): policing, firefighting and emergency response.
+  # NOC 6: sales and service
+  retail sales: >
+    Sells products to customers in a store: serving customers, cashiering, merchandising,
+    stocking shelves and store operations.
+  hospitality and food service: >
+    Serves guests in restaurants, hotels and kitchens as a cook, line cook, chef, server or
+    bartender (cuisinier, serveur): food preparation, serving, front desk and housekeeping.
+  security services: >
+    Guards buildings and property as a security guard (agent de sécurité): patrols, access
+    control, monitoring alarms and cameras, and reporting incidents.
+  cleaning and facilities maintenance: >
+    Keeps buildings clean and in working order: janitorial work, custodial duties, grounds
+    keeping and minor building repairs.
+  # NOC 7: trades, transport and equipment operators
+  electrical trades: >
+    Installs and repairs electrical wiring hands-on as a licensed electrician (électricien):
+    wiring, panels, lighting, controls and electrical code compliance.
+  plumbing and hvac: >
+    Installs and repairs pipes, plumbing fixtures, heating, ventilation and air conditioning
+    systems.
+  construction trades: >
+    Builds on site with hand and power tools: carpentry, framing, drywall, concrete, roofing,
+    painting and general construction labour.
+  mechanical repair and maintenance: >
+    Repairs and maintains vehicles, machinery and industrial equipment: mechanics,
+    millwrights and maintenance technicians.
+  welding and metal fabrication: >
+    Joins, cuts and shapes metal: welding, fitting, machining and fabrication from drawings.
+  equipment operation and driving: >
+    Operates trucks, delivery vehicles, buses, forklifts or heavy equipment: driving routes,
+    loading and safe equipment operation.
+  # NOC 8 and 9: natural resources, agriculture, manufacturing and utilities
+  agriculture and natural resources work: >
+    Works on farms, in forestry, fishing, mining or oil and gas fields: planting, harvesting,
+    animal care, drilling and resource extraction.
+  manufacturing and production: >
+    Makes products in a plant: operating production machines, assembly lines, quality checks
+    and following production schedules.
+  warehouse and logistics operations: >
+    Moves goods through a warehouse: receiving, picking, packing, shipping, inventory counts
+    and order fulfilment.

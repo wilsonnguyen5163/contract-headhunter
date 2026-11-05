@@ -5,6 +5,7 @@
         scaled_title    job title vs the contractor's closest title
         skill_overlap   job skills the contractor has / min(job's skill count, cap)
         field           share of the job's type of work (skill categories) the contractor covers
+        lexical         TF-IDF word overlap of the raw posting and profile (match/lexical.py)
 
 Cosines are stretched from [floor, ceiling] to [0, 1], one fixed scale for all jobs, so a job
 nobody fits still looks weak. A part with nothing to compare (a job with no skills, no title
@@ -59,6 +60,7 @@ class Candidate(BaseModel):
     title_cosine: float | None
     matched_title: str | None
     skill_overlap: float | None
+    lexical: float | None = None  # TF-IDF cosine; None when weights.lexical is 0
     score: float
     band: Band
     rank: int
@@ -101,6 +103,7 @@ def score_pair(
     cosine: float,
     settings: MatchingSettings,
     title: TitleMatch | None = None,
+    lexical: float | None = None,
 ) -> Candidate:
     overlap, matched = skill_overlap(job.job.skills, contractor.skills, settings.skill_overlap_cap)
     w = settings.weights
@@ -119,6 +122,10 @@ def score_pair(
         parts.append(
             (w.cosine, scale_cosine(cosine, settings.cosine_floor, settings.cosine_ceiling))
         )
+        if lexical is not None and w.lexical > 0:
+            parts.append(
+                (w.lexical, scale_cosine(lexical, settings.lexical_floor, settings.lexical_ceiling))
+            )
     total = sum(weight for weight, _ in parts)
     score = sum(weight * value for weight, value in parts) / total if total else 0.0
     missing = [s for s in job.must_have if s not in contractor.skills]
@@ -137,6 +144,7 @@ def score_pair(
         title_cosine=None if title is None else round(title.cosine, 4),
         matched_title=None if title is None else title.title,
         skill_overlap=None if overlap is None else round(overlap, 4),
+        lexical=None if lexical is None else round(lexical, 4),
         score=round(score, 4),
         band=band_for(score, settings.bands, missing_must_have=lower),
         rank=0,  # set by shortlist()
@@ -166,14 +174,16 @@ def rank_all(
     cosines: np.ndarray,
     settings: MatchingSettings,
     titles: list[TitleMatch | None] | None = None,
+    lexical: np.ndarray | None = None,
 ) -> list[Candidate]:
     """Every contractor scored for this job, best first, rank 1..n. titles[i] is contractor
-    i's closest title, or None."""
+    i's closest title, or None; lexical[i] its TF-IDF word overlap with the job, or None."""
     titles = titles if titles is not None else [None] * len(contractors)
+    words = [float(v) for v in lexical] if lexical is not None else [None] * len(contractors)
     scored = sorted(
         (
-            score_pair(job, c, float(cos), settings, title)
-            for c, cos, title in zip(contractors, cosines, titles, strict=True)
+            score_pair(job, c, float(cos), settings, title, word)
+            for c, cos, title, word in zip(contractors, cosines, titles, words, strict=True)
         ),
         key=lambda c: (-c.score, c.contractor_id),
     )
@@ -200,5 +210,6 @@ def shortlist(
     cosines: np.ndarray,
     settings: MatchingSettings,
     titles: list[TitleMatch | None] | None = None,
+    lexical: np.ndarray | None = None,
 ) -> list[Candidate]:
-    return select(rank_all(job, contractors, cosines, settings, titles), settings)
+    return select(rank_all(job, contractors, cosines, settings, titles, lexical), settings)

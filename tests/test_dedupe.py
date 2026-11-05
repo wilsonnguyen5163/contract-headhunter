@@ -2,6 +2,8 @@ from collections.abc import Callable
 
 import pytest
 
+from conftest import CONFIG_DIR
+from jobmatch.config import load_normalization_rules
 from jobmatch.normalize.dedupe import DedupeDecision, TitleSimilarity, dedupe
 from jobmatch.schemas import Job, JobStatus
 
@@ -151,3 +153,10 @@ def test_without_similarity_only_exact_fingerprints_match(make_job: Callable[...
 
 def test_title_key_expands_abbreviations() -> None:
     assert SIMILARITY.title_key("Sr. Data Eng. & Analyst") == "senior data engineer and analyst"
+
+
+def test_live_abbreviations_cover_other_fields() -> None:
+    live = TitleSimilarity(92, load_normalization_rules(CONFIG_DIR).title_abbreviations)
+    assert live.title_key("RN - Med/Surg") == live.title_key("Registered Nurse - Med/Surg")
+    assert live.title_key("PSW, Home Care") == "personal support worker home care"
+    assert live.title_key("ECE - Toddler Room") == "early childhood educator toddler room"

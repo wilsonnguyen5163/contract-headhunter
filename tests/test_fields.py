@@ -67,6 +67,14 @@ def test_field_overlap_and_note() -> None:
         ),
         ("A B2B SaaS company in fintech", ("financial services", "technology and saas")),
         ("We value company culture, energy and social media savvy.", ()),  # generic words
+        # Other fields (2026-11-04)
+        ("A Canadian mining company with sites in Sudbury", ("mining, oil and gas",)),
+        ("Organisme communautaire en services sociaux", ("social and community services",)),
+        ("Join our fire department as a dispatcher", ("public safety and emergency services",)),
+        ("Garderie à Montréal : éducatrice recherchée", ("childcare and early learning",)),
+        ("We build parts for the aerospace industry", ("aerospace and defence",)),
+        ("Food processing plant in Guelph", ("agriculture and food",)),
+        ("Our community engagement team", ()),  # "community" alone is not an industry
     ],
 )
 def test_job_industries(text: str, industries: tuple[str, ...]) -> None:

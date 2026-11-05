@@ -4,6 +4,507 @@ What each change solves, for the team. Newest first. Add an entry with every com
 
 ---
 
+## 2026-11-04 · v0 prototype complete: cleanup before v1
+
+### What this solves
+The v0 experiments are finished, and v1 will call a free external LLM API for the matching itself. The repo now keeps only what v0 runs on and what v1 needs to measure itself:
+- **Removed:** nine experiment scripts (reranker, ColBERT and sparse modes, dual vectors, facets, combined fields, profession penalty, learned score). Their results stay in the docs.
+- **`scripts/eval/` keeps the tools v1 needs:**
+  - `label_sheet.py` makes and imports blind label sheets; its sampling no longer depends on the rejected methods;
+  - `common.py` has today's score matrix and the ranking measures, with the blind consensus labels as the default;
+  - `tune.py` re-checks the weights.
+- **Removed the unused facet design:** the `Contractor` and `ContractorFacet` models, the `ContractorRepository` protocol, `CsvContractorRepository`, the `contractors.csv` and `contractor_facets.csv` tables in `CsvStore`, and the facet cross-check in `validate-data`. The contractor list is `data/contractors/contractors.csv` (`ContractorProfile`), as before. The tests for the general CSV rules (read-only tables, file-and-row errors, no cell values in messages, duplicate keys, blank lines, Excel BOM and leading zeros) now use a test-only read-only table, so those rules stay covered.
+- **Docs:**
+  - [PROTOTYPES.md](PROTOTYPES.md) is now a one-page summary; the full log is in `doc/archive/`;
+  - README and [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) (new section 14) describe the v0 outcome and what v1 must decide (CLAUDE.md rules, privacy, rate limits, evaluation).
+
+### How to use it
+- **Blind labelling and evaluation:** same as before, with `-v ./scripts/eval:/exp:ro` instead of `scripts/prototypes`. See [LABELLING.md](LABELLING.md).
+- **Comparing an LLM judge in v1:** build its jobs × contractors score matrix and use `Metrics`, `paired_bootstrap` and `cross_validate` from `scripts/eval/common.py`. Add its shortlist to `alternatives` in `label_sheet.py make` to sample where it and today's score disagree.
+
+### Known limits
+- **Still to do:** old exports and data backups (deleting them was blocked by a safety check; to be removed by hand).
+- **`validate-data` no longer checks** `contractors.csv` or `contractor_facets.csv` in a data folder. The sample copies in `data/samples/` are left in place and ignored.
+- **CLAUDE.md still states the v0 rules** ("No LLM in v0", Groq/Gemini off) and still names `ContractorRepository` and `contractor_facets.csv`. Rewrite it when v1 starts.
+
+### Checks run
+- `pytest`: 716 passed (one test fewer: the facet cross-check test was removed with the check).
+- `ruff check .`, `ruff check scripts` and `ruff format --check`: all pass.
+
+---
+
+## 2026-11-04 · Vocabulary for other fields: contract wording, professions, industries, levels
+
+### What this solves
+The rules only knew how marketing, creative and tech postings are worded. A nursing, teaching, public-sector or trades posting could be misread: a "locum", an "LTO" or "specified period employment" wasn't recognised as a contract, and its profession note fell back to the nearest marketing or tech profession. Now:
+
+**Contract wording** (`contract_phrases.yaml`), EN and FR:
+- **Contract signals (48):**
+  - locum and travel nursing;
+  - LTO, sessional and chargé de cours;
+  - specified period, période déterminée and term employment;
+  - for the duration of the project;
+  - temporary assignments;
+  - Job Bank's "term or contract".
+- **Permanent signals (7):** regular full-time, tenure-track, menant à la permanence.
+- **False positives (18):** "general contractor" and "contract research organization" describe the employer, and "business casual" or "seasonal flu" are perks or health notes, not the job.
+
+**Professions** (`professions.yaml`): 68 instead of 31, with 29 `close` pairs. The 37 new ones are grouped by NOC 2021 broad category: nursing, personal support, physicians, allied health, teaching, early childhood, social work, law, policy, public safety, IT support, cybersecurity, engineering, trades, driving, warehouse, manufacturing and more. Descriptions include common EN and FR title words.
+
+**Industries:** 6 more:
+- agriculture and food;
+- mining, oil and gas;
+- aerospace and defence;
+- social and community services;
+- public safety and emergency services;
+- childcare and early learning.
+
+**Levels:**
+- apprentice and intern → junior;
+- journeyperson / compagnon → intermediate;
+- foreman / contremaître and charge nurse → lead;
+- school principal → executive.
+
+**Title abbreviations** for spotting duplicate postings: RN, RPN, LPN, PSW, ECE, HCA, CSR, EIT and others.
+
+The skill list wasn't touched: it stays frozen (decision of 2026-11-02).
+
+### How to use it
+- Nothing new to run. New postings from these fields are read with the new wording.
+- To extend a list, edit the YAML file and add a test case. For professions, run `embed-jobs` afterwards.
+
+### Known limits
+- **It doesn't create matches.** All 38 contractors are in marketing, creative, digital, product, finance, HR or sales.
+- **Weights for the new contract phrases are guesses,** like the existing ones.
+- **On bare titles,** "electrical engineer" and "line cook" stay "unclear". A real posting also has responsibilities, which help.
+
+### Checks run
+- 717 tests pass (new EN/FR cases for the contract phrases, levels, industries and abbreviations). Lint is clean.
+- **Re-imported the jobs, then re-embedded and re-matched:**
+  - no job's status, contract type, level or title changed;
+  - every score is identical. The scoring version changed only because the industry list is part of it.
+- **Profession notes:**
+  - 2 jobs and 5 contractors got a different profession;
+  - agreement with the 331 blind labels is unchanged ("different" covers 13 fits and 104 non-fits).
+- **Typical titles from other fields:**
+  - a first check on 47 titles found 11 misassigned, mostly French titles and titles missing from the descriptions;
+  - after adding EN/FR title words to the descriptions, 22 re-checked titles give 19 right, 2 "unclear" and 1 on a close neighbour (sessional instructor → training and facilitation, now a `close` pair with post-secondary teaching).
+
+---
+
+## 2026-11-04 · Sheet 3 (Claude only) imported: the learned score doesn't hold up
+
+### What this solves
+Sheet 3 tested the learned score (option 3) on exactly the shortlist pairs where it differs from today's score. Claude labelled all 26; ChatGPT is pending.
+- **The 8 pairs only the learned score shortlists:** no fits, 3 partial, 5 non-fits.
+- **The 3 pairs only today's score shortlists:** all non-fits.
+
+On all 331 labels, the learned score's held-out gain falls from +0.017 to +0.003, and its shortlists hold fewer fits than today's (76 vs 82).
+
+**Not adopted. Today's score and the profession note stay as they are.**
+
+### How to use it
+- **When ChatGPT's labels arrive:** add them to the same file (`chatgpt_label`, `chatgpt_reasoning`) and run `label_sheet.py import` again. Claude's labels aren't added twice, and the consensus is rebuilt.
+- **Then re-run** `learned_score.py`.
+
+### Known limits
+- **Until ChatGPT's labels are in,** sheet 3 counts on Claude's word alone (`ai-single` in the consensus).
+- **Only 11 pairs decide the question.**
+
+### Checks run
+- Dry-run import, then the import itself (26 labels; the consensus was backed up first).
+- `learned_score.py` re-run on the 331-pair consensus.
+
+---
+
+## 2026-11-04 · Label sheet 3: testing the learned score's shortlists
+
+### What this solves
+The learned score (option 3) couldn't be judged on its shortlists, because it brings in pairs nobody has labelled. Sheet 3 holds exactly those pairs:
+- **8** only the learned score shortlists;
+- **3** only today's score shortlists;
+- **15** both shortlist, as a reference.
+
+Once labelled, its shortlists can be compared with today's directly.
+
+The model trained on all 305 labels changes very few unlabelled shortlist pairs. Most of its differences from today's score are among pairs already labelled, so the sheet is short.
+
+### How to use it
+- **Give the judges** `exports/label-sheet-20261104T040703Z.csv` (26 pairs, no names) with the instruction text in [LABELLING.md](LABELLING.md).
+- **Settle disagreements:** fill `human_label` for the rows where the AIs disagree.
+- **Import it,** then re-run `learned_score.py`.
+- **To make another sheet like it:** `learned_score.py --sheet`. `label_sheet.py` now has a shared `write_sheet` function, and `make` works as before.
+
+### Known limits
+- **Only 11 pairs decide the question.** With the 15 reference pairs it's a quick round, but a small one.
+- **The shortlists reflect today's jobs and contractors.**
+
+### Checks run
+- The sheet has no names and no pair labelled before. A dry-run import reads its columns.
+- Script lint and format are clean.
+
+---
+
+## 2026-11-04 · Prototype: a score learned from the blind labels (option 3)
+
+### What this solves
+Today's score averages five parts with hand-picked weights, and it can't use evidence that should count against a match, such as a different profession or being over-qualified. The prototype learns the combination from the 305 blind labels, using the five parts plus the profession verdict, the seniority gap, missing must-haves and the industry.
+
+The best version beats today's score on 70% of held-out job folds (mean +0.017). That's the best result so far: re-fitting the weights alone gave 61%.
+
+**Nothing in matching changed.**
+
+### How to use it
+- **Run it:** `docker compose run --rm -e LABELS=data/eval/blind_consensus.csv -v ./scripts/prototypes:/exp:ro app python /exp/learned_score.py` (about 2 minutes, read-only).
+- **Results and next step:** in [PROTOTYPES.md](PROTOTYPES.md).
+
+### Known limits
+- **Intervals touch zero.**
+- **Its shortlists can't be judged yet:** it brings in about 9 unlabelled pairs.
+- **A few learned weights are likely artefacts** of how the label sheets were sampled.
+- **Needs one more small label sheet** before it can be considered for adoption.
+
+### Checks run
+- Cross-validation by job, 20 × 5 folds, with the L2 strength chosen inside each training fold.
+- Script lint is clean.
+
+---
+
+## 2026-11-04 · Label sheet 2 imported; everything re-checked on 305 blind pairs
+
+### What this solves
+Sheet 1's 40 fits were too few to settle anything. With sheet 2, the blind labels cover **305 pairs: 98 fit, 170 no, 37 partial**, including the 11 contractors added on 2026-11-03.
+
+Re-checked on all of them:
+- **Today's settings hold:** within one job, fits rank above non-fits 87% of the time; across jobs, 90%.
+- **Bands:** a fit rate of 88% in high, 75% in medium, 29% in low and 4% below `min_score`. Keep `min_score` at 0.45; 0.60 would lose 30 fits.
+- **The profession note:** 89% of the labelled pairs marked "different" are rejections.
+- **Two leads from sheet 1 vanished:** the raw-text vector and strength × industry sentences.
+
+**Nothing in matching changed.**
+
+### How to use it
+- **The fixed copy:** ChatGPT's answers were one column to the left and its text had broken characters. The corrected copy, `exports/label-sheet-20261104T021127Z_labeled_fixed.csv`, was imported; the original is untouched.
+- **New consensus rule:** one AI's "fit" with the other's "partial" counts as fit. The change is in `label_sheet.py`; see [LABELLING.md](LABELLING.md).
+- **Results:** in [PROTOTYPES.md](PROTOTYPES.md).
+
+### Known limits
+- **No person labelled sheet 2.** It's AI judges only, and the 37 pairs where they disagree count as partial.
+- **Sheet 2's "fit" is broader than sheet 1's,** because it includes Claude's partials.
+- **Re-fitted weights won slightly on held-out jobs for the first time** (+0.006, in 61% of folds). Not adopted; re-check after the next sheet.
+
+### Checks run
+- Dry-run import, then the import itself (300 labels; the consensus was backed up first).
+- `tune.py`, `professions.py`, `more_combos.py` and `dual_embedding.py` were run on the 305-pair consensus.
+- Script lint is clean.
+
+---
+
+## 2026-11-04 · Profession note for reviewers; label sheet 2
+
+### What this solves
+- **Reviewers couldn't see a profession mismatch.** The most common reason the blind judges rejected a match was "same domain, different profession": recruiting vs sales, UX writing vs UX design, HR vs operations. Each shortlisted pair now carries a hint, for example `job: recruiting and talent acquisition · talent: sales and business development (different)`.
+  - **It changes no score or shortlist.**
+  - **How reliable it is:** on the 155 blind labels, "different" covered 2 fits and 53 non-fits.
+- **The 11 contractors added on 2026-11-03 had no blind labels,** and the open questions needed more evidence. Label sheet 2 has 150 new pairs: 82 involve those contractors, and 49 are pairs where today's open candidates disagree.
+
+### How to use it
+- **Where the note appears:**
+  - the `profession` column in `exports/trial-run-<time>.csv` and in the notebook;
+  - `exports/matches-<time>.csv`;
+  - a "profession (hint)" line in the `match` output.
+- **How to read it:**
+  - "different": look twice.
+  - "close": a neighbouring profession the judges often accept.
+  - "unclear": the posting's profession couldn't be told.
+- **Changing the profession list:** edit `config/professions.yaml` (descriptions, `close` pairs, `min_margin`), then run `embed-jobs` again.
+- **Label sheet 2:** `exports/label-sheet-20261104T021127Z.csv`. It has **no contractor names**, so it can be pasted into ChatGPT or Claude as it is. Give them the fixed instructions in [LABELLING.md](LABELLING.md). Then decide yourself the rows where the two AIs disagree, in `human_label`. Import the filled sheet with `label_sheet.py import`.
+
+### Known limits
+- **The profession list and the `close` pairs are a first guess.** Review them.
+- **10 of 82 jobs get "unclear".**
+- **`embed-jobs` builds two more vector sets,** about 6 s here, only for new or changed jobs.
+
+### Checks run
+- 675 tests pass (new: profession config, assignment, verdicts, notes end to end, stale vectors, the job core text in EN and FR, the export column). Lint and format are clean for `src`, `tests` and `scripts`.
+- `embed-jobs`, `match` and `export-trial-run` ran. The scoring version is unchanged (`437f851e6100`), and no rows were re-stored.
+- **Sheet 2 checked:** 150 pairs, no contractor names, no pair from sheet 1. A dry-run import reads its columns.
+
+---
+
+## 2026-11-04 · Prototype: profession check
+
+### What this solves
+Most matches the judges rejected were the same domain but a different profession: an HR manager job offered to an operations director, recruiting to a salesperson, UX writing to a UX designer. The matcher's text similarity can't see the difference.
+
+This prototype names each job's and each contractor's profession from a short list, and checks it against the blind labels:
+- **Agreement:** 81% of rejected pairs are a different profession, and 78% of fits are the same.
+- **As a score penalty:** it cleans the shortlists, but it isn't reliably better at ranking across jobs.
+
+Nothing in matching changed.
+
+### How to use it
+- **Review the draft profession list** in `config/professions.yaml`. It's read only by the prototype.
+- **Run the prototype:** `docker compose run --rm -e LABELS=data/eval/blind_consensus.csv -v ./scripts/prototypes:/exp:ro app python /exp/professions.py` (about 1 minute). It prints each job's and each contractor's profession, so the list can be checked.
+
+### Known limits
+- **Adjacent professions are counted as mismatches.** Creative direction, graphic design and copywriting accept each other, and the list doesn't say so yet.
+- **Generic contractor titles** ("consultant", "advisor") are assigned badly.
+- **Small sample:** 155 labelled pairs.
+
+### Checks run
+- The prototype ran on the blind labels with cross-validation. Results are in [PROTOTYPES.md](PROTOTYPES.md).
+- Lint is clean.
+
+---
+
+## 2026-11-04 · Blind labels imported; matcher re-checked against them
+
+### What this solves
+Until now, every setting was tuned on Claude Code's own labels, which weren't blind. The returned sheet now gives labels made without seeing any score: 13 by a person, and all 155 by ChatGPT and Claude (web), each with reasons. The person agreed with both AIs on all 13 pairs.
+
+The matcher was re-checked against these labels:
+- **Today's settings hold up:** within one job, fits rank above non-fits 92% of the time; across jobs, 93%.
+- **Re-fitting the weights didn't beat today's** on jobs held out from the fit.
+- **Nothing in the scoring changed.**
+
+### How to use it
+- `label_sheet.py import` now reads the judge columns (`human label`, `ChatGPT Label`, `Claude Label` and their reasons). It writes `data/eval/blind_consensus.csv`: one label per pair, human first, then the AIs where they agree, else partial.
+- **Re-tune after the next sheet:** `docker compose run --rm -e LABELS=data/eval/blind_consensus.csv -v ./scripts/prototypes:/exp:ro app python /exp/tune.py`.
+- **Reading the bands:**
+  - **Medium and high** (score 0.60 and up) are fits about 8 times in 10.
+  - **Low** (0.45–0.60) is a fit about 1 time in 10.
+
+### Known limits
+- **155 pairs, 40 fits, 27 jobs with a fit.** Small, and the sheet over-samples hard pairs.
+- **The 11 contractors added on 2026-11-03 aren't on the sheet.** The next sheet should include them.
+- **Two candidates wait for a decision:**
+  - the raw-text vector, better on both label sets but with a few more non-fits in shortlists;
+  - a profession check: most high-scored non-fits are the same domain but a different profession.
+
+### Checks run
+- Import dry run, then the import itself: 323 labels.
+- `tune.py`: 432 weight combinations with cross-validation.
+- All five prototype comparisons re-run on the blind labels.
+- Tests and lint pass.
+
+---
+
+## 2026-11-03 · One command for contractor updates; jobs re-tagged with new skills
+
+### What this solves
+- **New profiles meant remembering six steps in the right order,** and in particular re-importing jobs when the build learned new skills. Without that step, jobs didn't get the new skill tags. `scripts/update_contractors.sh` runs all six. It re-imports the jobs only when `skills_learned.yaml` actually changed.
+- **Jobs now carry the skills learned from the 11 added profiles.** 8 jobs gained tags (mostly "b2b"). No job changed status, and 52 of 82 still have matches.
+
+### How to use it
+```
+bash scripts/update_contractors.sh --dry-run   # shows the steps
+bash scripts/update_contractors.sh             # default workbook: data/contractors/contractor-master-list.xlsx
+bash scripts/update_contractors.sh path/to/book.xlsx
+```
+Don't run it while an import or a match is running.
+
+### Known limits
+- **A re-import moves `jobs.csv` and `runs.csv` into `data/backups/reset-<time>/`.** It re-reads every posting from `data/inbox/` and the page cache. Links that never fetched may be tried again.
+- **`ruff check .` in the container doesn't see `scripts/`,** because the folder isn't mounted. Lint scripts with `docker compose run --rm -v ./scripts:/app/scripts:ro app ruff check scripts`.
+
+### Checks run
+- Dry-run, `--help` and a bad option all behave as described.
+- The re-import, embed, match and export steps were run by hand: same 82 jobs, same statuses.
+- 660 tests pass. Lint and format are clean for `src`, `tests` and `scripts`.
+- Prototype results are in [PROTOTYPES.md](PROTOTYPES.md): seven more field combinations, none adopted.
+
+---
+
+## 2026-11-03 · Search Keywords used in matching; 11 more contractors
+
+### What this solves
+- **The workbook's Search Keywords column was ignored.** It now feeds the contractor's embedding text (a `Keywords:` line after the skills), the skill detection and the word overlap. It's also a new `search_keywords` column in `contractors.csv`, and the notebook shows it.
+- **5 profiles weren't joined to their Talent row** because their IDs read `TAL-014` instead of `TAL-ON-014`. The IDs were fixed in the workbook. With 6 new talent rows, the list grows from 27 to 38 contractors. Talents with no profile row are still left out (10), and so is TAL-BC-005, which has no Talent row.
+
+### How to use it
+- Nothing new to run. Fill in Search Keywords in the workbook, separated by `;`, then `build-contractors`, `embed-contractors`, `embed-jobs`, `match`.
+- Older workbooks without the column still build.
+
+### Known limits
+- **On Claude's labels, the keywords make ranking slightly worse** (fit-or-partial vs no 0.814 → 0.784; the interval excludes zero). See [PROTOTYPES.md](PROTOTYPES.md). They stay in until blind labels decide.
+- **The template version changed,** so every vector was rebuilt and every score moved.
+- **The 11 added contractors are not in the blind label sheet.** Make a new sheet once they've been reviewed.
+- **The rebuild learned new skill phrases from the new profiles.** Jobs get those tags only after `bash scripts/reset_reimport.sh` (not run yet).
+
+### Checks run
+- 660 tests pass (new: keywords parsed from the workbook, an older workbook without the column, the `Keywords:` line, keywords in the word overlap). Lint and format are clean.
+- `build-contractors` and `validate-data`: 38 contractors, all data valid. Re-embedded 38 contractors and 82 jobs; `match`: 52 jobs matched, 30 with no match. Trial-run export written.
+
+---
+
+## 2026-11-03 · Blind labelling sheet for reviewers
+
+### What this solves
+Every tuning decision so far rests on Claude's labels. They aren't blind, and the open questions (sparse word weights, bge-m3 mix, raw-text vector, dropping the skill list, the bands) are too close to call on them. A reviewer can now label pairs **without seeing any score**, and those labels decide.
+
+### How to use it
+- **Give the reviewer two things:** `exports/label-sheet-20261103T015024Z.csv` (155 pairs, 62 jobs) and [LABELLING.md](LABELLING.md). Don't give them the key in `data/eval/label-sheets/`.
+- **When the sheet comes back,** import it with `scripts/prototypes/label_sheet.py import <sheet> [--dry-run]`. Labels go to `data/eval/blind_labels.csv` (append-only). The import also reports agreement with Claude's labels.
+- **Re-run any comparison on the blind labels** by setting `LABELS=data/eval/blind_labels.csv`.
+
+### Known limits
+- **The sheet holds contractor names.** Keep it local.
+- **One reviewer gives one opinion.** Two reviewers on the same sheet would also show how much reviewers agree with each other.
+
+### Checks run
+- **Self-test:** a copy filled with Claude's labels imported in dry-run mode with 100% agreement (109 shared pairs). A wrong label was rejected. Nothing was written.
+- Lint is clean.
+
+---
+
+## 2026-11-03 · Long postings are no longer cut; bge-m3 output modes tested
+
+### What this solves
+- **Long postings were cut off.** The embedding model read only the first 512 tokens, and 35% of job texts are longer, so the end of their requirements was ignored. It now reads 1,024 tokens, which covers every posting we have, for about 15% more embedding time.
+- **The token limit is now part of the stored model version.** Before, changing it would have silently reused the old vectors. Now it re-embeds everything.
+- **Tested and not adopted** (details in [PROTOTYPES.md](PROTOTYPES.md)):
+  - a second, raw-text vector;
+  - a context longer than 2,048 tokens (no posting is that long);
+  - `bge-m3`'s sparse and ColBERT outputs.
+
+### How to use it
+- After pulling, re-embed once:
+  ```
+  docker compose run --rm app python -m jobmatch embed-contractors
+  docker compose run --rm app python -m jobmatch embed-jobs
+  docker compose run --rm app python -m jobmatch match
+  ```
+- On the client Mac, expect a few minutes for the first re-embed.
+
+### Known limits
+- **No measurable change in the shortlists** on Claude's labels: the same 55 fits and 48 non-fits. The change is about not losing text.
+- **The most promising untested swap is `bge-m3`'s sparse output in place of TF-IDF.** Its result is mixed, and it waits for blind labels.
+
+### Checks run
+- **Tests:** 659 pass, including a new test that a different token limit gives a different model version. Lint is clean.
+- **Real data:** all 27 contractors, 174 titles and 82 jobs re-embedded; matched, exported, and 2 new pairs labelled.
+
+---
+
+## 2026-11-03 · Word overlap in the score, skill list frozen, clearer bands
+
+### What this solves
+- **Ranking depends less on the hand-made skill list.** A new score part, TF-IDF word overlap, compares the raw posting with the whole profile. Every word counts, and rare words count more. There are no aliases to maintain, and it works the same in English and French.
+  - The skill list is **frozen for ranking**: add or fix entries only when a wrong tag misleads a reviewer.
+  - The skill list still drives the "matched skills" and "missing must-haves" shown to reviewers.
+- **The bands mean more.** "Medium" now starts at 0.60 instead of 0.50. On judged pairs: high is 82% fit, medium 41% (was 19%), low 5%.
+- **The reranker test model is removed** (2.3 GB freed), and so is its code.
+
+### How to use it
+- Nothing new to run. After pulling:
+  ```
+  docker compose run --rm app python -m jobmatch match
+  docker compose run --rm app python -m jobmatch export-trial-run
+  ```
+- `match` output now shows `words 0.xxx` beside text, title and skills.
+- **After every import,** the next `match` stores all shortlists again (about 200 rows), because word rarity changed. That's expected.
+
+### Known limits
+- **The gains are small and within the noise of Claude's labels.** It's slightly better at separating fits from non-fits, and slightly worse at putting a fit above a partial. Blind reviewer labels are still the next step.
+- **One reviewer A pair now reads "low"** (still shortlisted).
+- **The word-overlap value isn't stored in `matches.csv`;** adding a column would need a migration.
+- **Settings are guesses:** `weights.lexical` 0.2, `lexical_ceiling` 0.10 and `bands.medium` 0.60.
+
+### Checks run
+- **Tests:** 658 pass, with new tests for tokenizing (EN/FR), word rarity, the fingerprint and the score part. Lint and format are clean.
+- **Real data:** 82 jobs × 27 contractors. The same 55 fits are shortlisted, with 6 fewer non-fits. 9 new pairs were labelled. Details are in [PROTOTYPES.md](PROTOTYPES.md).
+
+---
+
+## 2026-11-02 · Prototypes: can we match without growing hand-written rules?
+
+### What this solves
+Every new batch of postings needed new skill aliases and parser patches. We tested three alternatives against 381 labelled pairs: sentence matching, a cross-encoder reranker, and TF-IDF word overlap. Full results and recommendations are in [PROTOTYPES.md](PROTOTYPES.md). In short:
+- **Keep the structural parser.** Without its cleanup, quality drops clearly.
+- **The skill list isn't needed for ranking.** TF-IDF word overlap beats it on every measure, with no upkeep. Keep the skill list for explanations only.
+- **The reranker and sentence matching don't pay off.** The reranker is also too slow for the client's Mac.
+
+### How to use it
+- Re-run the comparison (read-only):
+  ```
+  docker compose run --rm -v ./scripts/prototypes:/exp:ro app python /exp/compare_methods.py
+  ```
+- Nothing in the pipeline changed.
+
+### Known limits
+- **The labels are Claude's, not blind.** Differences under about 0.05 AUC are noise. Blind reviewer labels are the next step.
+- **The reranker model** (about 2.3 GB) is in the `hf-cache` Docker volume from this test.
+
+### Checks run
+- 123 more pairs labelled, so the parser-free methods' own picks are judged too.
+- 90% bootstrap intervals over jobs.
+- Lint is clean.
+
+---
+
+## 2026-11-02 · 34 new postings checked; thin profiles out of matching; fixes from the results
+
+### What this solves
+- **34 new postings imported and checked.** Every one is a contract by its own wording. Six are doubtful:
+  - Jelly SEO says "Contract" but offers a salary with bonuses.
+  - Five Job Bank postings (Kitchener Housing, City of Calgary, three PCL) say only "Term or contract".
+
+  They stay in, because the tool keeps anything unclear for review. Reviewers should confirm them. About 10 others are fixed-term salaried jobs (union, benefits), not independent-contractor work.
+- **Contractors with no profile text are left out.** The 15 contractors with no Executive Summary and no Core Strengths (TAL-ON-014 to TAL-ON-031) were matched on their headline alone. They are now skipped at `build-contractors` (`require_profile_text` in `config/contractor_import.yaml`), and their vectors are dropped. The pool is 27 contractors. **Filling in their profile in the workbook brings them back on the next build.**
+- **Fewer wrong high-band matches:**
+  - **Data Strategist (City of Calgary)** had no skill tags and matched a Social Media Strategist in the **high** band on the word "strategist". New skills (data visualization, workforce planning, forecasting) and "Power Business Intelligence" as Power BI now tag it.
+  - **"Fractional" job titles matched every fractional executive.** "Fractional", "interim" and "freelance" are now removed from titles before they are compared (`title_engagement_words` in `config/normalization.yaml`). Fractional CFO for a Fractional HR Manager went from high to medium.
+  - **"Creative Director" counted as executive,** so a Senior Creative Director was flagged as under-qualified. Creative, art and design director titles (EN/FR) are now the **lead** level. "Executive creative director" and bare "Director" stay executive.
+- **Wrong skill tags removed:**
+  - "participant recruitment" and "recruitment campaigns" were tagged as HR recruitment.
+  - "defect triage" was tagged as patient care.
+  - A new **influencer marketing** skill tags influencer roles.
+- **Fields read better:**
+  - **Contract length:** "3 months probationary period" is no longer the contract length. "2-year temporary full-time contract" and "one-year parental leave contract" are read.
+  - **Pay:** a date after the pay ("Advertised until 2026-11-15") is no longer read as pay.
+  - **Hours:** "37.5-hour work week" counts as full-time.
+- **Stricter shortlist:** `min_score` went from 0.40 to 0.45. In 168 judged pairs, nothing between 0.40 and 0.45 was a fit.
+- **Exports no longer show stale shortlists:**
+  - A job that the newest `match` left without a shortlist kept showing its old shortlist in `export-matches` and `export-trial-run`. Both exports now use the newest scoring version only, and only for jobs still marked `matched`.
+  - Contractors no longer in the list are left out of both exports.
+
+### How to use it
+- After pulling, run these in order:
+  ```
+  docker compose run --rm app python -m jobmatch build-contractors data/contractors/contractors_master_list.xlsx
+  bash scripts/reset_reimport.sh -y
+  docker compose run --rm app python -m jobmatch embed-contractors
+  docker compose run --rm app python -m jobmatch embed-jobs
+  docker compose run --rm app python -m jobmatch match
+  docker compose run --rm app python -m jobmatch export-trial-run
+  ```
+- **To bring a contractor back:** fill in their Executive Summary or Core Strengths in the workbook, then rebuild.
+
+### Results (82 jobs × 27 contractors; labels are Claude's, not blind)
+| Band | Before: % fit | After: % fit | After: fit / partial / no |
+|---|---|---|---|
+| high | 86% | 89% | 32 / 4 / 0 |
+| medium | 21% | 19% | 22 / 62 / 32 |
+| low | 2% | 3% | 1 / 15 / 22 |
+
+- Precision is 0.29 (0.50 counting half of partials). It was 0.27 (0.48) for the same contractors before.
+- No previously shortlisted fit was lost.
+- Reviewer A/B pairs are unchanged: 5 of 6 are shortlisted.
+- `data/eval/llm_judge_labels.csv` now has 294 labelled pairs (169 added today, no duplicates). Every current shortlist pair is labelled.
+
+### Known limits
+- **The medium band is mostly noise.** Below a score of 0.60 only 5 of 104 shortlisted pairs are fits. From 0.60 to 0.70 it's 35–38%, and from 0.70 it's 75–96%.
+- **Many new postings have no counterpart in our pool:** business analysts, controllers, construction, compensation, HSE.
+- **Agency postings mention their client's departments,** so "Senior Graphic Designer" is still tagged sales enablement, product marketing and Salesforce.
+- **A rebrand phase's "3–6 months" is still read as a 6-month contract** on that posting. Duration is information only.
+
+### Checks run
+- **Tests:** 649 pass, with new EN/FR cases for every rule above. Lint and format are clean.
+- **Real data:** reset and re-import with no network calls, then re-embed (27 contractors, 174 contractor titles, 82 jobs), match, export and evaluate.
+
+---
+
 ## 2026-10-28 · Trial-run export in the pipeline, quick start guide and new README
 
 ### What this solves

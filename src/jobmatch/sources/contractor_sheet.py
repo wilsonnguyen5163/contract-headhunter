@@ -46,6 +46,7 @@ class ProfileColumns(StrictModel):
     core_strengths: str
     proof_points: str
     industries: str
+    search_keywords: str | None = None  # optional: older workbooks lack the column
     seniority: str
     rate: str
     target_titles: list[str]
@@ -66,6 +67,9 @@ class ContractorImportRules(StrictModel):
     location_placeholders: list[str]
     rate_default: str = Field(min_length=1)
     list_separators: list[str]
+    # Leave out confirmed contractors with no Executive Summary and no Core Strengths: a
+    # headline alone is too little to match on.
+    require_profile_text: bool = False
     columns: ImportColumns
 
 
@@ -83,6 +87,7 @@ class BuildReport(BaseModel):
     with_profile: int
     without_profile: int
     not_contract: int  # talent rows whose Contract? flag is not true
+    no_profile_text: int = 0  # contractors left out by require_profile_text
     profile_without_talent: int  # profiles with no tab-1 row, so no Contract? flag
     rates_numeric: int
     rates_default: int
@@ -160,13 +165,19 @@ def build_contractors(
     talent_ids = {_clean(r.get(rules.id_column)) for r in talent_rows}
 
     exported: list[ContractorRow] = []
-    not_contract = with_profile = rates_numeric = 0
+    not_contract = no_profile_text = with_profile = rates_numeric = 0
     for talent in talent_rows:
         talent_id = _clean(talent.get(rules.id_column))
         if (_clean(talent.get(rules.contract_column)) or "").casefold() not in true_values:
             not_contract += 1
             continue
         profile = profiles.get(talent_id, {})
+        if rules.require_profile_text and not (
+            _clean(profile.get(p_cols.summary))
+            or split_list(profile.get(p_cols.core_strengths), rules.list_separators)
+        ):
+            no_profile_text += 1
+            continue
         with_profile += bool(profile)
 
         location = _clean(profile.get(p_cols.location))
@@ -193,6 +204,10 @@ def build_contractors(
                 ),
                 proof_points=split_list(profile.get(p_cols.proof_points), rules.list_separators),
                 main_industry=split_list(profile.get(p_cols.industries), rules.list_separators),
+                search_keywords=split_list(
+                    profile.get(p_cols.search_keywords) if p_cols.search_keywords else None,
+                    rules.list_separators,
+                ),
                 seniority=_clean(profile.get(p_cols.seniority)),
                 weekly_hours=_hours(_clean(talent.get(t_cols.weekly_hours))),
                 rate_expectation=format_number(rate) if rate is not None else rules.rate_default,
@@ -207,6 +222,7 @@ def build_contractors(
         with_profile=with_profile,
         without_profile=len(exported) - with_profile,
         not_contract=not_contract,
+        no_profile_text=no_profile_text,
         profile_without_talent=len(set(profiles) - talent_ids),
         rates_numeric=rates_numeric,
         rates_default=len(exported) - rates_numeric,

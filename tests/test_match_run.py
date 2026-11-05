@@ -246,6 +246,7 @@ def test_trial_run_lists_the_best_shortlisted_per_job_and_jobs_with_none(
         jobs,
         {p.talent_id: p for p in PROFILES},
         per_job=2,
+        professions={("manual:url-1", "TAL-A"): "job: x · talent: x (same)"},
     )
     # TAL-B is flagged for job 1, so only TAL-A is listed there; job 3 has no shortlist.
     assert [(r.job_title, r.option, r.band, r.talent_id) for r in rows] == [
@@ -257,6 +258,8 @@ def test_trial_run_lists_the_best_shortlisted_per_job_and_jobs_with_none(
     assert a.talent_name == "Sample Person A"
     assert a.talent_title == "Senior Digital Project Manager"
     assert a.shared_skills == ["project management", "social media"]
+    assert a.profession == "job: x · talent: x (same)"
+    assert rows[1].profession is None  # no note given for that pair
     assert a.score is not None and a.score == round(a.score, 3)
 
     dest = tmp_path / "exports" / "trial-run.csv"
@@ -273,8 +276,50 @@ def test_trial_run_lists_the_best_shortlisted_per_job_and_jobs_with_none(
         "talent_name",
         "talent_title",
         "shared_skills",
+        "profession",
         "job_url",
     ]
+
+
+def test_exports_drop_old_shortlists_of_jobs_the_newest_run_left_empty(
+    setup: Settings, store: CsvStore
+) -> None:
+    run_matching(setup)
+    old = CsvMatchRepository(store).list_all()
+    # A newer run (new scoring version) re-scored job 1 and left job 2 without a shortlist:
+    # it stored rows for job 1 only and set job 2 to no_match.
+    later = max(m.created_at for m in old).replace(year=2027)
+    newer = [
+        m.model_copy(update={"match_id": f"{m.match_id}-v2", "scoring_version": "v2",
+                             "created_at": later})
+        for m in old
+        if m.job_id == "manual:url-1"
+    ]  # fmt: skip
+    jobs = [
+        j.model_copy(update={"status": JobStatus.NO_MATCH}) if j.job_id == "manual:url-2" else j
+        for j in CsvJobRepository(store).list_all()
+    ]
+    profiles = {p.talent_id: p for p in PROFILES}
+
+    rows = build_rows([*old, *newer], [], {j.job_id: j for j in jobs}, profiles)
+    assert {(r.job_url, r.contractor_id) for r in rows} == {("https://example.org/1", "TAL-A")}
+    assert {r.match_id for r in rows} == {m.match_id for m in newer}
+    trial = build_trial_rows([*old, *newer], jobs, profiles, per_job=2)
+    assert [(r.job_url, r.band == "no match") for r in trial] == [
+        ("https://example.org/2", True),  # job 2's old TAL-C row is not shown
+        ("https://example.org/1", False),
+    ]
+
+
+def test_exports_leave_out_contractors_no_longer_listed(setup: Settings, store: CsvStore) -> None:
+    run_matching(setup)
+    jobs = CsvJobRepository(store).list_all()
+    shortlisted = CsvMatchRepository(store).list_all()
+    without_a = {p.talent_id: p for p in PROFILES if p.talent_id != "TAL-A"}
+    rows = build_rows(shortlisted, [], {j.job_id: j for j in jobs}, without_a)
+    assert "TAL-A" not in {r.contractor_id for r in rows}
+    trial = build_trial_rows(shortlisted, jobs, without_a, per_job=2)
+    assert "TAL-A" not in {r.talent_id for r in trial}
 
 
 def test_trial_run_keeps_only_per_job_options(setup: Settings, store: CsvStore) -> None:
@@ -332,8 +377,23 @@ def test_missing_title_vectors_are_refused(setup: Settings) -> None:
         run_matching(setup)
 
 
-def test_an_edited_profile_gets_fresh_rows(setup: Settings, store: CsvStore) -> None:
-    run_matching(setup)
+@pytest.mark.parametrize(
+    ("lexical", "new_rows"),
+    [
+        (0.0, 1),  # only TAL-A's row is new
+        # Word rarity moves with the edited text, so the scoring version changes and every
+        # shortlist is stored again (no partial shortlists).
+        (0.2, 2),
+    ],
+)
+def test_an_edited_profile_gets_fresh_rows(
+    setup: Settings, store: CsvStore, lexical: float, new_rows: int
+) -> None:
+    weights = setup.matching.weights.model_copy(update={"lexical": lexical})
+    setup = setup.model_copy(
+        update={"matching": setup.matching.model_copy(update={"weights": weights})}
+    )
+    first, _, _ = run_matching(setup)
     before = {m.match_id for m in CsvMatchRepository(store).list_all()}
     # Same scoring settings, but TAL-A's profile text changes (and is re-embedded).
     path = setup.paths.contractors_csv
@@ -357,7 +417,8 @@ def test_an_edited_profile_gets_fresh_rows(setup: Settings, store: CsvStore) -> 
     )
     report, _, _ = run_matching(setup)
     after = {m.match_id for m in CsvMatchRepository(store).list_all()}
-    assert report.stored == 1 and len(after - before) == 1  # only TAL-A's row is new
+    assert report.stored == new_rows and len(after - before) == new_rows
+    assert (report.scoring_version != first.scoring_version) is (lexical > 0)
 
 
 def test_export_shows_only_each_jobs_latest_run(setup: Settings, store: CsvStore) -> None:

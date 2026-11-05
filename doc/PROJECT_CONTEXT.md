@@ -25,7 +25,7 @@ Out of scope for v0: **any LLM (no LLM judge)**, contact discovery, email drafti
 - Language: **Python 3.12**.
 - **Hardware target (client machine): MacBook Pro 13-inch (2019), Intel Core i5 1.4 GHz quad-core, 16 GB LPDDR3 RAM, Intel Iris Plus 645 graphics, macOS on Intel x86_64.** CPU-only; the integrated GPU is not usable for ML. Every model, library and batch size must be chosen for this CPU. Report model size and memory in cost estimates. See section 3a for Intel-Mac constraints.
 - **Development machine:** Windows PC, AMD Ryzen 9 9950X3D, NVIDIA RTX 5070 Ti, 32 GB DDR5 RAM (x86_64). It is much faster than the client's Mac and has a GPU the client lacks: **never use the GPU** (no CUDA dependencies or code paths, no `--gpus`), develop and test in CPU-only containers, and treat any timing measured on the dev machine as optimistic; benchmark on the client Mac.
-- Storage: **no database in v0.** Data lives in **CSV files** (human-readable tables) and **NumPy `.npz` files** (embeddings) in a `data/` folder mounted as a Docker volume (section 8a). Similarity is computed in-process with NumPy (a few hundred contractors and thousands of jobs need no vector index). All access goes through repository interfaces (`JobRepository`, `ContractorRepository`, `MatchRepository`, `ReviewRepository`, `VectorStore`), so MongoDB or SQLite can replace the CSV layer later without touching matching code. MongoDB was considered and deferred to keep v0 lightweight.
+- Storage: **no database in v0.** Data lives in **CSV files** (human-readable tables) and **NumPy `.npz` files** (embeddings) in a `data/` folder mounted as a Docker volume (section 8a). Similarity is computed in-process with NumPy (a few hundred contractors and thousands of jobs need no vector index). All access goes through repository interfaces (`JobRepository`, `ContractorProfileRepository`, `MatchRepository`, `ReviewRepository`, `VectorStore`), so MongoDB or SQLite can replace the CSV layer later without touching matching code. MongoDB was considered and deferred to keep v0 lightweight.
 - AI is **local only** in v0: pretrained multilingual embeddings via `sentence-transformers`, zero-shot, no training.
 - **No LLM in v0.** The LLM judge is deferred. Explanations come from data, not generated text.
 - Final deliverable: a **Python package with a CLI** run by a scheduler, plus a small local **Streamlit review UI**. Not an EXE (section 10).
@@ -90,7 +90,9 @@ Uniqueness on (`source`, `source_id`) is enforced in code; fingerprints are load
 
 ## 7. Contractors
 
-Schema (`data/contractors.csv` plus `data/contractor_facets.csv`, with one facet per row linked by `contractor_id`): `contractor_id`, `display_name` (personal data), `profile_text_raw`, `profile_text_clean`, `facets` (list of {area, skills, years, seniority, domains}), `languages`, `regions` and remote preference, `noc_codes`, `rate_range` (optional), `profile_hash`; embeddings live in `data/embeddings/` (one vector per facet, plus one for the whole profile, keyed by content hash, with model/version/dim in a metadata file).
+**As built (2026-11-04):** the contractor list is `data/contractors/contractors.csv`, built from the master workbook by `build-contractors` (`ContractorProfile` schema), with one vector per contractor. The facet design below was prototyped and not adopted (no reliable gain, see [PROTOTYPES.md](PROTOTYPES.md)); its `Contractor`/`ContractorFacet` schema and tables were removed. The original plan, kept for reference:
+
+Planned schema (`data/contractors.csv` plus `data/contractor_facets.csv`, with one facet per row linked by `contractor_id`): `contractor_id`, `display_name` (personal data), `profile_text_raw`, `profile_text_clean`, `facets` (list of {area, skills, years, seniority, domains}), `languages`, `regions` and remote preference, `noc_codes`, `rate_range` (optional), `profile_hash`; embeddings live in `data/embeddings/` (one vector per facet, plus one for the whole profile, keyed by content hash, with model/version/dim in a metadata file).
 
 Technique: without an LLM, facets are built from a **human-fillable template** (CSV or YAML: area, skills, years, seniority, domains) and checked against the skill taxonomy; the skill matcher can propose skills from the raw description for the human to confirm. Embed each facet from a **fixed text template** so jobs and contractors compare like with like. A contractor's score for a job is the **max over facets**. Re-embed when `profile_hash` or the embedding model changes. Contractor data is personal information: keep it local and out of logs.
 
@@ -108,7 +110,7 @@ Technique: without an LLM, facets are built from a **human-fillable template** (
 ## 8a. Data storage: CSV and NumPy files (no database in v0)
 
 Layout under `data/` (a Docker volume; never overwrite without a backup):
-- `contractors.csv`, `contractor_facets.csv`: human-maintained inputs. The tool only reads them.
+- `contractors/contractors.csv`: the contractor list, built from the human-maintained master workbook. The pipeline only reads it.
 - `jobs.csv`: normalized jobs. New rows are appended; status changes rewrite the file atomically.
 - `matches.csv`: one row per shortlisted (job, contractor, facet): `match_id`, `job_id`, `contractor_id`, `facet`, `cosine`, `skill_overlap`, `score`, `band`, `matched_skills`, `missing_must_have`, `gates_failed`, `created_at`.
 - `reviews.csv`: **append-only** reviewer decisions: `match_id`, `decision` (approved / rejected / needs_info), `reason_code`, `notes`, `reviewer`, `reviewed_at`. The current status of a match is its latest review. This file doubles as the evaluation dataset. Reason codes: wrong_skills, seniority, location, language, not_contract, duplicate, expired, other.
@@ -128,6 +130,8 @@ Layout under `data/` (a Docker volume; never overwrite without a backup):
 - **When to move on:** concurrent writers, frequent row-level updates, cross-file queries or growth beyond tens of thousands of jobs. Then swap the repository implementation to SQLite (single file, no server) or MongoDB.
 
 ## 9. Future (not v0): optional LLM judge
+
+> **2026-11-04:** v1 will use an LLM for the matching itself; see section 14. The design below is the v0-era sketch.
 
 If added later, behind an `LLMProvider` interface: input = posting + top-k facets; output = JSON verdicts (strong/possible/reject, reason, matched/missing requirements, red flags, evidence quotes), temperature 0, pydantic-validated. On this hardware, only small local models are realistic (roughly 4B parameters or less, quantized) and CPU inference may take tens of seconds per posting, so it would run only on the shortlist, or optionally through free Groq/Gemini (disabled by default; review data terms; never send contractor personal data without explicit approval). Decide this only after v0 has produced reviewer data showing whether the rule gates and embeddings are not enough.
 
@@ -201,7 +205,7 @@ If added later, behind an `LLMProvider` interface: input = posting + top-k facet
 - **Deferred:** an "expired" filter from `validThrough`; freshness stays 999 (section 12 reminder).
 
 **2026-10-22**
-- **Contractor list:** `build-contractors` builds `data/contractors/contractors.csv` from the master workbook (Talent + Talent Profiles joined on Talent ID; `Contract? = Yes` only; hourly rate, range averaged, else "Industry Standard"). 42 contractors, 15 without a profile. It is read directly for embedding; mapping it to the `Contractor`/facet schema of section 7 is still open.
+- **Contractor list:** `build-contractors` builds `data/contractors/contractors.csv` from the master workbook (Talent + Talent Profiles joined on Talent ID; `Contract? = Yes` only; hourly rate, range averaged, else "Industry Standard"). 42 contractors, 15 without a profile. It is read directly for embedding. (2026-11-04: the `Contractor`/facet schema of section 7 was dropped; this file is the contractor list.)
 - **Embedding model changed to `BAAI/bge-m3`** (user decision), revision `5617a9f61b028005a4858fdac845db406aefb181`: 1024 dimensions, no prefixes, cut at 512 tokens (GUESS, keeps CPU time down), batch 8 (GUESS). About 4.5 GB in the model cache and roughly 2.5–3 GB of memory while loaded (estimate, within the 4 GB cap). Dev PC: 42 contractors in 11.4 s (270 ms each); expect several times slower on the client Mac, still to measure.
 - **One vector per contractor**, not per facet, for now. The embedding text uses shared labels in a fixed order (Title, Target titles, Seniority, Skills, Industries, then the job's lists or the contractor's summary and proof points); names, location, pay, hours, work mode and company are left out. Details in `DEVELOPMENT.md`; the template replaces the one sketched in section 8.
 - **First look at scores (2 jobs × 42 contractors):** top 5 were sensible creative/content/project profiles; best 0.68–0.79, median 0.54–0.61, lowest 0.43–0.48. Wider spread than E5, but the top 5 sit within about 0.05 of each other, so skill and rule scoring still has to separate them. Too small a sample to set thresholds.
@@ -262,4 +266,33 @@ If added later, behind an `LLMProvider` interface: input = posting + top-k facet
   - **Industry** is a note only, never scored, from `config/industries.yaml` (about 22 sectors, English and French). Reviewers rated a cleantech B2B marketer A for a sports-industry role, so industry must not filter.
   - No schema change: the field part is folded into the score and both notes go in `flags`.
   - **Ross Video:** the sales and business development director dropped from #2 to #4 (note "field: job marketing · contractor admin, sales"); the reviewers' A pick rose to #2.
+
+## 14. v0 outcome and v1 direction (2026-11-04)
+
+**v0 is complete.** The pipeline runs end to end:
+- intake from links and pastes;
+- EN/FR normalization;
+- contract filter;
+- bge-m3 embeddings;
+- a weighted score (text, title, shared skills, type of work, TF-IDF word overlap) with bands and rule checks;
+- a profession note;
+- spreadsheet exports and the notebook.
+
+**How good it is,** on 331 blind-labelled pairs ([PROTOTYPES.md](PROTOTYPES.md)):
+- fits rank above non-fits within a job about 87% of the time, and across jobs about 90%;
+- about 15 alternatives (rerankers, other embeddings, facets, learned weights, a learned score) didn't reliably beat it.
+
+**The remaining error is the "same domain, different profession" pair,** such as UX design for a UX writing job, or sales for recruiting. That needs judgment about what a job is accountable for, which an LLM can give and embeddings can't.
+
+**v1 direction (user decision, 2026-11-04):** call a free external LLM API (Groq or Gemini) for the matching itself. To settle when v1 starts:
+- **CLAUDE.md rules to rewrite:**
+  - "No LLM in v0";
+  - rule 4 (Groq/Gemini off by default; never send contractor personal data without asking).
+- **Privacy:** which contractor fields may leave the machine. Suggested: talent ID and profile text only; never names, contact details or rates without a decision. Also, the free tiers' data terms (logging, training on inputs).
+- **Cost and limits:** free-tier rate limits. Judging only today's shortlist (about 5 per job) keeps calls near 400 per batch of about 80 jobs.
+- **Design:** an `LLMProvider` interface in `src/jobmatch/llm/`:
+  - temperature 0;
+  - JSON output validated with pydantic, with evidence quotes from the provided text only;
+  - posting text treated as untrusted (prompt injection).
+- **Evaluation:** compare the LLM judge with today's score on the same blind labels with `scripts/eval/`, before it replaces anything.
 

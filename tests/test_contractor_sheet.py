@@ -17,7 +17,9 @@ from jobmatch.sources.contractor_sheet import (
 )
 from jobmatch.sources.xlsx import read_sheets
 
-RULES = load_contractor_import(CONFIG_DIR)
+LIVE_RULES = load_contractor_import(CONFIG_DIR)
+# Most tests check the join and field rules, so they keep contractors without profile text.
+RULES = LIVE_RULES.model_copy(update={"require_profile_text": False})
 
 TALENT = [
     [
@@ -52,6 +54,7 @@ PROFILES = [
         "Target Title 3",
         "Target Title 4",
         "Target Title 5",
+        "Search Keywords",
     ],
     [
         "TAL-1",
@@ -69,6 +72,7 @@ PROFILES = [
         "Program Manager",
         "",
         "",
+        "Website migration; Drupal; gestion de projet",
     ],
     [
         "TAL-2",
@@ -86,8 +90,9 @@ PROFILES = [
         "",
         "",
         "",
+        "",
     ],
-    ["TAL-9", "Sample Person Z", "Halifax, NS", "Profile only", *[""] * 11],
+    ["TAL-9", "Sample Person Z", "Halifax, NS", "Profile only", *[""] * 12],
 ]
 
 
@@ -166,7 +171,16 @@ def test_fields_are_joined_and_cleaned(book: Path) -> None:
         "Program Manager",
     ]
     assert first.weekly_hours == 40
+    assert first.search_keywords == ["Website migration", "Drupal", "gestion de projet"]
+    assert rows[1].search_keywords == []  # empty cell
     assert first.rate_expectation == "52.5"  # average of the range
+
+
+def test_workbook_without_search_keywords_still_builds(tmp_path: Path) -> None:
+    profiles = [row[:-1] for row in PROFILES]  # an older workbook: no Search Keywords column
+    book = workbook(tmp_path / "old.xlsx", {"Talent": TALENT, "Talent Profiles": profiles})
+    rows, _ = build_contractors(read_sheets(book), RULES)
+    assert all(r.search_keywords == [] for r in rows)
 
 
 def test_contractor_without_profile_keeps_tab_one_fields(book: Path) -> None:
@@ -177,6 +191,26 @@ def test_contractor_without_profile_keeps_tab_one_fields(book: Path) -> None:
     assert thin.weekly_hours is None  # "#N/A"
     assert thin.rate_expectation == "Industry Standard"
     assert thin.executive_summary is None and thin.core_strengths == []
+
+
+def test_live_config_leaves_out_contractors_without_profile_text(book: Path) -> None:
+    assert LIVE_RULES.require_profile_text
+    rows, report = build_contractors(read_sheets(book), LIVE_RULES)
+    assert [r.talent_id for r in rows] == ["TAL-1", "TAL-2"]  # TAL-5 has a headline only
+    assert (report.no_profile_text, report.not_contract) == (1, 2)
+
+
+def test_summary_or_strengths_alone_is_enough_profile_text(tmp_path: Path) -> None:
+    summary_only = [*PROFILES[2][:5], "", *PROFILES[2][6:]]
+    summary_only[0] = "TAL-5"
+    strengths_only = [*PROFILES[1][:4], "", *PROFILES[1][5:]]
+    book = workbook(
+        tmp_path / "master.xlsx",
+        {"Talent": TALENT, "Talent Profiles": [PROFILES[0], strengths_only, summary_only]},
+    )
+    rows, report = build_contractors(read_sheets(book), LIVE_RULES)
+    assert [r.talent_id for r in rows] == ["TAL-1", "TAL-5"]  # TAL-2 is not in the profiles
+    assert report.no_profile_text == 1
 
 
 @pytest.mark.parametrize(
@@ -211,12 +245,14 @@ def test_cli_writes_csv_and_backs_up_previous(book: Path, tmp_path: Path) -> Non
         app, ["--config-dir", str(CONFIG_DIR), "build-contractors", str(book), "--out", str(out)]
     )
     assert result.exit_code == 0, result.output
-    assert "Wrote 3 contractor(s)" in result.output
+    assert "Wrote 2 contractor(s)" in result.output  # live config: TAL-5 has no profile text
+    assert "1 with no summary or core strengths" in result.output
     assert "Sample Person" not in result.output  # no names in the report
     lines = out.read_text(encoding="utf-8-sig").splitlines()
     assert lines[0] == (
         "talent_id,talent_name,location,standardized_headline,executive_summary,"
-        "core_strengths,proof_points,main_industry,seniority,weekly_hours,rate_expectation,"
+        "core_strengths,proof_points,main_industry,search_keywords,seniority,weekly_hours,"
+        "rate_expectation,"
         "target_titles,contract"
     )
     assert ",40,52.5," in lines[1]

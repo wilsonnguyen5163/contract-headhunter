@@ -25,6 +25,8 @@ _AMOUNT = re.compile(
     r"(?P<post>\s?(?:\$|cad\b|usd\b))?"
 )
 _THOUSANDS = re.compile(r"(?<=\d)[ ,](?=\d{3}(?!\d))")
+# A date is not an amount: "$46.90 hourly. Advertised until 2026-11-15" is not $11-46.90.
+_DATE = re.compile(r"\b(?:19|20)\d{2}[-/]\d{1,2}[-/]\d{1,2}\b")
 # Text between the two ends of a range: "60-75", "70 000 $ à 85 000 $", "between 60 and 75".
 _RANGE_GAP = re.compile(r"^\s*(?:-|–|—|to|a|and|et|ou|or)\s*$")
 
@@ -91,6 +93,7 @@ class PayParser:
 
     def _amounts(self, line: str) -> list[_Amount]:
         found: list[_Amount] = []
+        line = _DATE.sub(lambda d: " " * len(d.group()), line)  # same length: offsets hold
         for m in _AMOUNT.finditer(line):
             if m.group("scale"):
                 continue  # "$5M budget"

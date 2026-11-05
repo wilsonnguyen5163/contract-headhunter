@@ -21,6 +21,7 @@ COMPANY_ALIASES_FILE = "company_aliases.yaml"
 NORMALIZATION_FILE = "normalization.yaml"
 CANADA_LOCATIONS_FILE = "canada_locations.yaml"
 SOURCES_FILE = "sources.yaml"
+PROFESSIONS_FILE = "professions.yaml"
 
 
 def _fold(text: str) -> str:
@@ -73,10 +74,11 @@ class MatchingWeights(StrictModel):
     title: float = Field(default=0, ge=0)
     skill_overlap: float = Field(ge=0)
     field: float = Field(default=0, ge=0)
+    lexical: float = Field(default=0, ge=0)  # TF-IDF word overlap (match/lexical.py)
 
     @model_validator(mode="after")
     def _not_all_zero(self) -> "MatchingWeights":
-        if self.cosine + self.title + self.skill_overlap + self.field <= 0:
+        if self.cosine + self.title + self.skill_overlap + self.field + self.lexical <= 0:
             raise ValueError("at least one matching weight must be positive")
         return self
 
@@ -109,6 +111,10 @@ class MatchingSettings(StrictModel):
     assume_all_remote: bool
     hours_per_year: float = Field(gt=0)
     rate_tolerance: float = Field(gt=0)
+    # TF-IDF word overlap (weights.lexical): cosines stretched from [floor, ceiling] to [0, 1].
+    lexical_floor: float = Field(default=0.0, ge=0, le=1)
+    lexical_ceiling: float = Field(default=0.3, ge=0, le=1)
+    lexical_stopwords: list[str] = []
 
     @model_validator(mode="after")
     def _cosine_range(self) -> "MatchingSettings":
@@ -116,6 +122,8 @@ class MatchingSettings(StrictModel):
             raise ValueError("matching.cosine_floor must be below cosine_ceiling")
         if self.title_floor >= self.title_ceiling:
             raise ValueError("matching.title_floor must be below title_ceiling")
+        if self.lexical_floor >= self.lexical_ceiling:
+            raise ValueError("matching.lexical_floor must be below lexical_ceiling")
         return self
 
 
@@ -303,6 +311,9 @@ class NormalizationRules(StrictModel):
     title_abbreviations: dict[str, str] = {}
     number_words: dict[str, int] = {}
     seniority: SeniorityLevels
+    # Words about how someone is engaged ("fractional", "interim"), not the role: removed from
+    # titles before they are embedded, like the seniority words.
+    title_engagement_words: list[str] = []
     language_words: BilingualList
     must_have_soft_markers: BilingualList = BilingualList(en=[], fr=[])
     flattened_text: FlattenedTextRules | None = None
@@ -450,6 +461,29 @@ class Industries(StrictModel):
 
 def load_industries(config_dir: Path) -> Industries:
     return Industries.model_validate(_read_yaml(config_dir / INDUSTRIES_FILE))
+
+
+class Professions(StrictModel):
+    """config/professions.yaml: what each profession does, which ones are close enough to
+    accept each other, and how clear an assignment must be to count."""
+
+    version: int
+    min_margin: float = Field(ge=0, lt=1)
+    close: list[list[str]] = []
+    professions: dict[str, str] = Field(min_length=2)
+
+    @model_validator(mode="after")
+    def _close_names_exist(self) -> "Professions":
+        unknown = sorted({n for group in self.close for n in group} - set(self.professions))
+        if unknown:
+            raise ValueError(f"close groups name unknown profession(s): {', '.join(unknown)}")
+        return self
+
+
+def load_professions(config_dir: Path) -> Professions | None:
+    """None when the file is missing: profession notes are optional."""
+    path = config_dir / PROFESSIONS_FILE
+    return Professions.model_validate(_read_yaml(path)) if path.exists() else None
 
 
 def load_canada_locations(config_dir: Path) -> CanadaLocations:

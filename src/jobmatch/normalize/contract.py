@@ -15,13 +15,24 @@ from jobmatch.normalize.phrases import PhraseMatch, PhraseMatcher, fold
 from jobmatch.schemas import EmploymentType
 
 _WEEKS_PER_MONTH = 52 / 12
-_CONTRACT_WORDS = r"(?:contract|term|mandate|contrat|mandat|ftc|cdd)"
+# "(?<!-)": the "term" of "long-term" is not a contract word.
+_CONTRACT_WORDS = r"(?<!-)(?:contract|term|mandate|contrat|mandat|ftc|cdd)"
+# Up to three words between "2-year" and the contract word ("2-year temporary full-time
+# contract", "one-year parental leave contract"), but never across words that describe
+# experience: "5 years of long-term care", "5 years in a contract role" are not durations.
+_GAP_WORDS = (
+    r"(?:(?!(?:of|in|as|at|with|on|working|experience|experiences|de|d|dans|comme)\b)"
+    r"[\w'-]+\s+){0,3}"
+)
+# A probation or trial period is not the contract length ("3 months probationary period").
+_PROBATION = re.compile(r"\s*(?:of\s+)?(?:probation|probationary|trial|d'essai|de probation)\b")
 
 
 class DurationParser:
     """Contract length in folded text: "6-month", "12 mois", "six-month mandate",
-    "a one-year contract", "2-year FTC", "contrat d'un an", "8 weeks". Years only count next
-    to a contract word, so "5+ years of Python" is not a duration."""
+    "a one-year contract", "2-year FTC", "contrat d'un an", "8 weeks". Years only count near
+    a contract word, so "5+ years of Python" is not a duration, and probation periods are
+    skipped."""
 
     def __init__(self, number_words: Mapping[str, int] | None = None) -> None:
         self._words = folded_words(number_words or {})
@@ -29,20 +40,29 @@ class DurationParser:
         self._months = re.compile(rf"{count}\s*\+?\s*-?\s*(?:months?|mois)\b")
         self._weeks = re.compile(rf"{count}\s*-?\s*(?:weeks?|semaines?)\b")
         years = r"(?:years?|ans?|annees?)"
-        self._years_before = re.compile(rf"{count}\s*-?\s*{years}\s+{_CONTRACT_WORDS}\b")
+        self._years_before = re.compile(
+            rf"{count}\s*-?\s*{years}\s+{_GAP_WORDS}{_CONTRACT_WORDS}\b"
+        )
         self._years_after = re.compile(
             rf"\b{_CONTRACT_WORDS}\s+(?:of|de|d'|d)\s*{count}\s*{years}\b"
         )
 
+    def _first(self, pattern: re.Pattern[str], folded: str) -> re.Match[str] | None:
+        """The first match not followed by a probation phrase."""
+        for match in pattern.finditer(folded):
+            if not _PROBATION.match(folded, match.end()):
+                return match
+        return None
+
     def months(self, text: str) -> float | None:
         folded = fold(text)
-        match = self._months.search(folded)
+        match = self._first(self._months, folded)
         if match:
             return count_value(match.group("n"), self._words)
-        match = self._years_before.search(folded) or self._years_after.search(folded)
+        match = self._first(self._years_before, folded) or self._first(self._years_after, folded)
         if match:
             return 12.0 * count_value(match.group("n"), self._words)
-        match = self._weeks.search(folded)
+        match = self._first(self._weeks, folded)
         if match:
             return round(count_value(match.group("n"), self._words) / _WEEKS_PER_MONTH, 1)
         return None

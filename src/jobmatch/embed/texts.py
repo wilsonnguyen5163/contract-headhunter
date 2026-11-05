@@ -7,6 +7,7 @@ Both sides use the same labels in the same order, so the model compares like wit
     Seniority:
     Skills:         taxonomy skills found in the text (both sides), then (contractors) their
                     core strengths
+    Keywords:       (contractors) their search keywords
     Industries:     (contractors)
     Responsibilities / Requirements / Nice to have:   (jobs)
     Summary / Proof points:                           (contractors)
@@ -25,16 +26,22 @@ Director" names a role. Cleaned titles are lowercase and accent-free.
 
 import hashlib
 import re
+from collections.abc import Iterable
 
 from jobmatch.config import SeniorityLevels
 from jobmatch.normalize.phrases import PhraseMatcher
 from jobmatch.normalize.skills import SkillExtractor
 from jobmatch.schemas import ContractorProfile, Job
 
-TEMPLATE_VERSION = "2026-10-22.v1"  # bump when the templates below change
+TEMPLATE_VERSION = "2026-11-03.v1"  # bump when the templates below change
 TEMPLATE_HASH = hashlib.sha256(TEMPLATE_VERSION.encode("utf-8")).hexdigest()[:16]
-TITLE_TEMPLATE_VERSION = "2026-10-26.v1"  # bump when TitleCleaner or the title texts change
+TITLE_TEMPLATE_VERSION = "2026-11-02.v1"  # bump when TitleCleaner or the title texts change
 TITLE_TEMPLATE_HASH = hashlib.sha256(TITLE_TEMPLATE_VERSION.encode("utf-8")).hexdigest()[:16]
+# Profession notes (match/professions.py): a job's core (title and first responsibilities)
+# and each profession's description. Bump when job_core_text or profession_text changes.
+PROFESSION_TEMPLATE_VERSION = "2026-11-04.v1"
+PROFESSION_TEMPLATE_HASH = hashlib.sha256(PROFESSION_TEMPLATE_VERSION.encode()).hexdigest()[:16]
+CORE_LINES = 3  # responsibilities that, with the title, say what the job is accountable for
 _SEPARATOR = "; "
 
 
@@ -72,6 +79,23 @@ def job_text(job: Job) -> str:
     )
 
 
+def job_core_text(job: Job) -> str:
+    """The title and the first responsibilities: what the job is accountable for, without
+    the company blurb, benefits or requirements. Falls back to requirements, then to the
+    first sentences of the clean description."""
+    lines = job.responsibilities or job.requirements
+    if not lines and job.description_clean:
+        sentences = re.split(r"(?<=[.!?])\s+|\n", job.description_clean)
+        lines = [s for s in sentences if len(s.strip()) > 30]
+    return _join(
+        [job.title_norm or job.title_raw, *(" ".join(x.split()) for x in lines[:CORE_LINES])]
+    )
+
+
+def profession_text(name: str, description: str) -> str:
+    return f"{name}: {' '.join(description.split())}"
+
+
 def contractor_skills(profile: ContractorProfile, extractor: SkillExtractor) -> list[str]:
     """Taxonomy skills found anywhere in the profile, so both sides share one vocabulary."""
     text = "\n".join(
@@ -80,6 +104,7 @@ def contractor_skills(profile: ContractorProfile, extractor: SkillExtractor) -> 
             profile.standardized_headline,
             *profile.target_titles,
             *profile.core_strengths,
+            *profile.search_keywords,
             profile.executive_summary,
             *profile.proof_points,
         )
@@ -91,12 +116,15 @@ def contractor_skills(profile: ContractorProfile, extractor: SkillExtractor) -> 
 def contractor_text(profile: ContractorProfile, skills: list[str]) -> str:
     known = {skill.casefold() for skill in skills}
     strengths = [s for s in profile.core_strengths if s.casefold() not in known]
+    known |= {s.casefold() for s in strengths}
+    keywords = [k for k in profile.search_keywords if k.casefold() not in known]
     return _join(
         [
             _line("Title", profile.standardized_headline),
             _line("Target titles", profile.target_titles),
             _line("Seniority", profile.seniority),
             _line("Skills", [*skills, *strengths]),
+            _line("Keywords", keywords),
             _line("Industries", profile.main_industry),
             _line("Summary", profile.executive_summary),
             _line("Proof points", profile.proof_points),
@@ -110,11 +138,12 @@ _STRAY = ",.;:|-"  # left behind when a seniority word is removed ("sr." -> ".")
 
 
 class TitleCleaner:
-    """Removes junior/intermediate/senior words ("Sr.", "Sénior", "Mid-level") from titles."""
+    """Removes junior/intermediate/senior words ("Sr.", "Sénior", "Mid-level") and engagement
+    words ("Fractional", "Interim") from titles."""
 
-    def __init__(self, levels: SeniorityLevels) -> None:
+    def __init__(self, levels: SeniorityLevels, engagement_words: Iterable[str] = ()) -> None:
         self._levels = PhraseMatcher.from_terms(
-            [*levels.junior, *levels.intermediate, *levels.senior]
+            [*levels.junior, *levels.intermediate, *levels.senior, *engagement_words]
         )
 
     def clean(self, title: str | None, *, drop_brackets: bool = False) -> str:

@@ -5,8 +5,6 @@ from collections.abc import Iterable, Mapping
 from typing import Protocol
 
 from jobmatch.schemas import (
-    Contractor,
-    ContractorFacet,
     ContractorProfile,
     EmbeddingMeta,
     Job,
@@ -40,14 +38,6 @@ class RunRepository(Protocol):
     def append(self, run: Run) -> None: ...
 
     def list_all(self) -> list[Run]: ...
-
-
-class ContractorRepository(Protocol):
-    """Read-only: contractor data is maintained by humans."""
-
-    def list_contractors(self) -> list[Contractor]: ...
-
-    def list_facets(self) -> list[ContractorFacet]: ...
 
 
 class ContractorProfileRepository(Protocol):

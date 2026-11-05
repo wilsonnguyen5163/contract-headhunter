@@ -4,7 +4,7 @@ A local tool that collects **Canadian contract job postings**, matches each one 
 
 Contract roles are often filled first-come, first-served, and checking job boards by hand all day is slow. jobmatch does the collecting, cleanup and first sorting so reviewers spend their time on judgment.
 
-> **Status:** prototype (v0). Job intake, normalization, embeddings, matching, spreadsheet exports and evaluation against human reviews work. The review UI, automatic job-board feeds and the scheduler are not built yet.
+> **Status:** v0 prototype complete (2026-11-04). Job intake, normalization, embeddings, matching, profession notes, spreadsheet exports and evaluation against 331 blind-labelled pairs work. Next, in v1: an LLM judge for the matching itself. The review UI, automatic job-board feeds and the scheduler are not built yet.
 
 ---
 
@@ -15,7 +15,7 @@ Contract roles are often filled first-come, first-served, and checking job board
 - **Deduplication and filtering.** The same job posted on several sites is stored once. Non-Canadian and non-contract postings are set aside, with the reason.
 - **Contractor profiles from the master workbook.** It builds the contractor list from the talent spreadsheet and learns skills that the curated skill list doesn't know yet.
 - **Local semantic matching.** It embeds jobs and contractors with `BAAI/bge-m3`, on the CPU and offline, then scores every pair on overall meaning, title, shared skills and type of work. Each pair gets a high, medium or low band, with explanations taken from the data: matched skills, missing must-have skills, flags.
-- **Rule checks.** A seniority gap of two or more levels sends a match to a separate flagged list, with the reason.
+- **Rule checks and notes.** A seniority gap of two or more levels sends a match to a separate flagged list, with the reason. Each match also carries a profession note ("job: recruiting · talent: sales (different)") for the reviewer.
 - **Exports and evaluation.** Spreadsheet exports for reviewers, a notebook view of the best matches, and a comparison of the matcher's scores with human-reviewed matches to tune thresholds.
 - **Safe storage with no database.** Plain CSV files with schema validation, atomic writes, file locks and timestamped backups. Vectors go in NumPy `.npz` files. Every step is safe to re-run.
 
@@ -79,7 +79,8 @@ src/jobmatch/
   match/             scoring, rule checks, exports, evaluation
   storage/           CSV store, NumPy vector store, repository interfaces
   llm/, review/      placeholders for later phases
-scripts/             fetch_and_import.sh, reset_reimport.sh, rename_manual_templates.sh
+scripts/             fetch_and_import.sh, reset_reimport.sh, update_contractors.sh, rename_manual_templates.sh
+  eval/              blind label sheets (make, import), ranking measures, weight check
 data/                runtime data (git-ignored): inbox/, jobs.csv, matches*.csv, embeddings/, raw/
 exports/             spreadsheets for people (git-ignored; they contain contractor names)
 tests/               unit and end-to-end tests (synthetic data, network always mocked)
@@ -94,6 +95,8 @@ data_visualizer.ipynb   notebook for reading trial-run results
 | [doc/DEVELOPMENT.md](doc/DEVELOPMENT.md) | Technical details: layout, normalization, embeddings, matching, storage |
 | [doc/PROJECT_CONTEXT.md](doc/PROJECT_CONTEXT.md) | Goals, architecture and decisions |
 | [doc/LOG-UPDATE.md](doc/LOG-UPDATE.md) | What each change solved, newest first |
+| [doc/PROTOTYPES.md](doc/PROTOTYPES.md) | What v0 tried and decided (full log in `doc/archive/`) |
+| [doc/LABELLING.md](doc/LABELLING.md) | The blind labelling sheet: why, how to fill it in, how to import it |
 | [doc/JTBD2-Full_pipeline.png](doc/JTBD2-Full_pipeline.png) | General pipeline template (not a v0 spec) |
 | [doc/Project_repo_artifact.pdf](doc/Project_repo_artifact.pdf) | Project repo artifact (PDF) |
 | [CLAUDE.md](CLAUDE.md) | Working rules for AI-assisted development (kept at the root so Claude Code loads it) |

@@ -47,7 +47,7 @@ def matching(settings: Settings) -> MatchingSettings:
     [
         ("Senior / Director", ["senior", "executive"]),
         ("Mid-level specialist", ["intermediate"]),
-        ("Sénior / Directrice de création", ["senior", "executive"]),
+        ("Sénior / Directrice de création", ["senior", "lead"]),  # creative director is lead
         ("Executive / VP / Advisor", ["executive"]),
         ("Founder", []),
         (None, []),
