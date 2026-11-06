@@ -32,6 +32,7 @@ from jobmatch.schemas import (
     ContractorProfile,
     Job,
     JobStatus,
+    LlmUsage,
     Match,
     Review,
     Run,
@@ -446,6 +447,8 @@ class CsvStore:
         )
         self.reviews = table("reviews.csv", Review, TableMode.APPEND_ONLY)
         self.runs = table("runs.csv", Run, TableMode.APPEND_ONLY, ("run_id",))
+        # v1: one row per LLM API call (token counts only), read by the daily budget guard.
+        self.llm_usage = table("llm_usage.csv", LlmUsage, TableMode.APPEND_ONLY, ("call_id",))
 
     def all_tables(self) -> list[CsvTable[Any]]:
         return [
@@ -454,6 +457,7 @@ class CsvStore:
             self.matches_flagged,
             self.reviews,
             self.runs,
+            self.llm_usage,
         ]
 
 

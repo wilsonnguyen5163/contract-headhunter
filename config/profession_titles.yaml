@@ -1,0 +1,83 @@
+# Title phrases that place a JOB in a profession without any model (v1 prefilter, step 1 of
+# doc/V1_PLAN.md section 7). Keys are profession names from professions.yaml.
+#
+# How they will be used (phase 3, llm/classify.py): the job's cleaned title is compared,
+# whole words only, case- and accent-insensitive; the longest phrase found wins. A title with
+# no phrase, or with phrases from two professions that are not in the same `close` group,
+# is "unclear" and goes to the batched Gemini classifier, or gets the full roster.
+#
+# Keep phrases specific: bare "manager", "analyst", "coordinator", "consultant", "specialist"
+# fit many professions and are left out on purpose. A phrase may appear under one profession
+# only (checked on load). Seniority words are not needed: they are removed from titles.
+# First draft 2026-11-05 (GUESS); widen it from the "unclear" list after real runs.
+version: 1
+
+titles:
+  digital project management: [project manager, program manager, programme manager, scrum master, delivery manager, project coordinator, pmo, gestionnaire de projet, chargé de projet, chargée de projet, chef de projet, directeur de projet, directrice de projet]
+  construction project management: [construction manager, construction project manager, site superintendent, superintendent, capital projects manager, gestionnaire de chantier, surintendant, surintendante, chargé de projet construction]
+  program coordination: [program coordinator, programme coordinator, program officer, coordonnateur de programme, coordonnatrice de programme, agent de programme]
+  operations management: [operations manager, director of operations, chief operating officer, coo, operations director, directeur des opérations, directrice des opérations, gestionnaire des opérations]
+  human resources: [hr generalist, hr manager, hr business partner, human resources, hrbp, people operations, employee relations, ressources humaines, conseiller rh, conseillère rh, partenaire d'affaires rh]
+  recruiting and talent acquisition: [recruiter, talent acquisition, sourcer, recruitment, recruteur, recruteuse, acquisition de talents, recrutement]
+  payroll and compensation: [payroll, compensation, total rewards, paie, rémunération]
+  finance and accounting: [accountant, controller, comptroller, bookkeeper, financial analyst, finance manager, cfo, accounts payable, accounts receivable, comptable, contrôleur, contrôleuse, analyste financier, analyste financière, tenue de livres]
+  sales and business development: [sales, account executive, business development, sales representative, business development representative, sales development representative, bdr, sdr, ventes, représentant commercial, représentante commerciale, développement des affaires]
+  client services and account management: [account manager, client services, client success, customer success, client relationship manager, gestionnaire de compte, service à la clientèle entreprises, succès client]
+  marketing management: [marketing manager, marketing director, head of marketing, cmo, marketing lead, product marketing, go-to-market, directeur marketing, directrice marketing, gestionnaire marketing, responsable marketing]
+  digital and performance marketing: [digital marketing, performance marketing, seo, sem, paid media, paid search, email marketing, marketing automation, growth marketing, lifecycle marketing, marketing numérique, marketing de performance]
+  brand strategy and management: [brand manager, brand strategist, brand director, shopper marketing, gestionnaire de marque, directeur de marque, directrice de marque]
+  content writing and editing: [copywriter, content writer, writer, editor, copy editor, content strategist, ux writer, technical writer, content designer, rédacteur, rédactrice, réviseur, réviseure, concepteur-rédacteur, conceptrice-rédactrice]
+  social media and community management: [social media, community manager, social media manager, influencer, médias sociaux, gestionnaire de communauté]
+  communications and public relations: [communications, public relations, media relations, internal communications, communications advisor, pr manager, relations publiques, conseiller en communication, conseillère en communication, relations médias]
+  events: [event manager, event coordinator, event planner, events, conference manager, gestionnaire d'événements, coordonnateur d'événements, coordonnatrice d'événements, événementiel]
+  graphic and visual design: [graphic designer, visual designer, designer graphique, graphiste, production artist, illustrator, illustrateur, illustratrice, layout artist]
+  creative direction: [creative director, associate creative director, executive creative director, art director, directeur de création, directrice de création, directeur artistique, directrice artistique]
+  ux and product design: [ux designer, ui designer, ux/ui designer, product designer, interaction designer, ux researcher, user researcher, service designer, designer ux, designer ui, concepteur ux, conceptrice ux]
+  animation and motion: [animator, motion designer, motion graphics, vfx artist, 3d artist, compositor, animateur 3d, animatrice 3d, infographiste 3d]
+  media and content production: [producer, video producer, production manager, post-production, video editor, broadcast producer, integrated producer, content producer, producteur, productrice, monteur vidéo, monteuse vidéo, réalisateur, réalisatrice]
+  product management: [product manager, product owner, head of product, gestionnaire de produit, chef de produit, propriétaire de produit]
+  business analysis: [business analyst, business systems analyst, functional analyst, systems analyst, analyste d'affaires, analyste fonctionnel, analyste fonctionnelle]
+  software development: [software developer, software engineer, developer, programmer, full stack, front end, frontend, back end, backend, web developer, mobile developer, devops, site reliability engineer, développeur, développeuse, programmeur, programmeuse, ingénieur logiciel, ingénieure logiciel]
+  data engineering: [data engineer, etl developer, data architect, analytics engineer, ingénieur de données, ingénieure de données, architecte de données]
+  data analysis and business intelligence: [data analyst, business intelligence, bi analyst, bi developer, reporting analyst, data scientist, analyste de données, intelligence d'affaires]
+  machine learning and ai: [machine learning, ml engineer, ai engineer, ai specialist, artificial intelligence, intelligence artificielle, apprentissage automatique]
+  regulatory and compliance: [compliance, regulatory affairs, regulatory, health and safety, hse, ehs, risk analyst, auditor, conformité, affaires réglementaires, santé et sécurité, vérificateur, vérificatrice]
+  information and records management: [records management, records manager, information management, archivist, document control, librarian, gestion documentaire, archiviste, bibliothécaire]
+  training and facilitation: [trainer, facilitator, instructional designer, learning and development, training specialist, formateur, formatrice, animateur de formation, conseiller en formation, conseillère en formation]
+  administrative and office support: [administrative assistant, executive assistant, office manager, receptionist, office administrator, data entry, adjoint administratif, adjointe administrative, réceptionniste, agent administratif, agente administrative]
+  customer service and call centre: [customer service, call centre, call center, contact centre, customer support, service à la clientèle, centre d'appels, agent de service à la clientèle]
+  purchasing and procurement: [buyer, purchasing, procurement, sourcing specialist, supply chain analyst, acheteur, acheteuse, approvisionnement]
+  it support and infrastructure: [help desk, service desk, it support, desktop support, system administrator, systems administrator, network administrator, network engineer, it technician, soutien informatique, technicien informatique, technicienne informatique, administrateur réseau, administratrice réseau]
+  cybersecurity: [security analyst, cybersecurity, cyber security, soc analyst, information security, penetration tester, cybersécurité, sécurité de l'information]
+  civil and structural engineering: [civil engineer, structural engineer, transportation engineer, municipal engineer, geotechnical engineer, ingénieur civil, ingénieure civile, ingénieur en structure]
+  mechanical and electrical engineering: [mechanical engineer, electrical engineer, industrial engineer, process engineer, manufacturing engineer, controls engineer, ingénieur mécanique, ingénieur électrique, ingénieur industriel]
+  engineering technology and drafting: [drafter, draftsperson, cad technician, engineering technologist, engineering technician, dessinateur, dessinatrice, technologue en génie]
+  laboratory and life sciences: [lab technician, laboratory technician, research scientist, chemist, biologist, research associate, technicien de laboratoire, technicienne de laboratoire, chimiste, biologiste]
+  architecture and urban planning: [architect, urban planner, land use planner, intern architect, architecte paysagiste, urbaniste]
+  nursing: [nurse, registered nurse, rn, rpn, lpn, nurse practitioner, infirmier, infirmière, infirmière auxiliaire]
+  personal support and health care aides: [personal support worker, psw, health care aide, care aide, préposé aux bénéficiaires, préposée aux bénéficiaires]
+  physicians and medicine: [physician, family doctor, medical doctor, psychiatrist, médecin]
+  allied health and therapy: [physiotherapist, occupational therapist, respiratory therapist, speech-language pathologist, dietitian, kinesiologist, physiothérapeute, ergothérapeute, inhalothérapeute, orthophoniste, diététiste]
+  pharmacy: [pharmacist, pharmacy technician, pharmacien, pharmacienne, technicien en pharmacie]
+  medical laboratory and diagnostic imaging: [medical laboratory technologist, mlt, medical radiation technologist, sonographer, mri technologist, technologiste médical, technologue en imagerie médicale]
+  school teaching: [teacher, elementary teacher, secondary teacher, enseignant, enseignante]
+  post-secondary teaching: [professor, lecturer, sessional instructor, college instructor, chargé de cours, chargée de cours, professeur, professeure]
+  early childhood education: [early childhood educator, ece, educatrice en petite enfance, éducateur en petite enfance, éducatrice à la petite enfance]
+  social work and counselling: [social worker, counsellor, counselor, case manager, therapist, travailleur social, travailleuse sociale, conseiller en orientation, intervenant psychosocial, intervenante psychosociale]
+  community and support work: [youth worker, community support worker, outreach worker, support worker, intervenant communautaire, intervenante communautaire, éducateur spécialisé, éducatrice spécialisée]
+  law and paralegal: [lawyer, legal counsel, paralegal, law clerk, solicitor, avocat, avocate, parajuriste, conseiller juridique, conseillère juridique, technicien juridique]
+  policy and government programs: [policy analyst, policy advisor, program analyst, government relations, grants officer, analyste des politiques, conseiller en politiques, conseillère en politiques, relations gouvernementales]
+  public safety and emergency response: [police officer, constable, firefighter, paramedic, dispatcher, policier, policière, pompier, pompière, paramédic, répartiteur d'urgence]
+  retail sales: [retail associate, sales associate, cashier, store manager, merchandiser, caissier, caissière, conseiller aux ventes, conseillère aux ventes, commis de magasin]
+  hospitality and food service: [cook, line cook, chef, sous chef, server, bartender, dishwasher, front desk agent, housekeeper, cuisinier, cuisinière, serveur, serveuse, barman, plongeur]
+  security services: [security guard, security officer, agent de sécurité, agente de sécurité, gardien de sécurité]
+  cleaning and facilities maintenance: [janitor, custodian, cleaner, caretaker, groundskeeper, building maintenance, concierge d'immeuble, préposé à l'entretien, préposée à l'entretien]
+  electrical trades: [electrician, apprentice electrician, électricien, électricienne]
+  plumbing and hvac: [plumber, hvac technician, pipefitter, gas fitter, refrigeration mechanic, plombier, plombière, frigoriste, technicien cvac]
+  construction trades: [carpenter, framer, drywaller, roofer, labourer, general labourer, painter, mason, charpentier, menuisier, couvreur, manœuvre, peintre en bâtiment]
+  mechanical repair and maintenance: [mechanic, millwright, maintenance technician, heavy duty technician, automotive technician, mécanicien, mécanicienne, technicien de maintenance]
+  welding and metal fabrication: [welder, fabricator, machinist, cnc operator, soudeur, soudeuse, machiniste]
+  equipment operation and driving: [truck driver, delivery driver, driver, forklift operator, heavy equipment operator, bus driver, chauffeur, camionneur, cariste, opérateur de machinerie lourde]
+  agriculture and natural resources work: [farm worker, farmhand, forestry worker, miner, driller, ouvrier agricole, ouvrière agricole, mineur, foreur]
+  manufacturing and production: [production worker, machine operator, assembler, assembly worker, production operator, quality inspector, opérateur de production, opératrice de production, assembleur, assembleuse]
+  warehouse and logistics operations: [warehouse associate, warehouse worker, picker, packer, shipper, receiver, inventory clerk, logistics coordinator, commis d'entrepôt, préparateur de commandes, préparatrice de commandes, magasinier]

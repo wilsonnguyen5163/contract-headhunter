@@ -297,6 +297,41 @@ class ContractorProfile(BaseModel):
     rate_expectation: NonEmptyStr  # hourly figure ("150", "52.5") or the default text
     target_titles: list[str] = []
     contract: bool = True
+    # v1 (2026-11-05), optional so older contractor lists still load. Values come from the
+    # workbook (later the intake form) and use config/professions.yaml names, lowercase.
+    # They feed the v1 prefilter and are sent to Gemini (doc/V1_PLAN.md section 9).
+    primary_profession: str | None = None
+    secondary_professions: list[str] = []
+    years_experience: float | None = Field(default=None, ge=0)
+    languages: list[str] = []  # "en", "fr"
+
+
+class LlmCallStatus(StrEnum):
+    OK = "ok"
+    ERROR = "error"  # bad answer or HTTP error; tokens may still have been spent
+    RATE_LIMITED = "rate_limited"  # per-minute 429 after every retry
+    DAILY_QUOTA = "daily_quota"  # per-day 429: nothing more until midnight Pacific time
+    NOT_SENT = "not_sent"  # stopped locally before sending (call too large)
+
+
+class LlmUsage(Record):
+    """One LLM API call in data/llm_usage.csv. Append-only. Holds counts and IDs only, never
+    prompt text or contractor data. The budget guard reads it to know today's usage."""
+
+    call_id: NonEmptyStr
+    at: AwareDatetime
+    model: NonEmptyStr
+    purpose: NonEmptyStr  # judge, classify, intake, test
+    job_ids: list[str] = []
+    status: LlmCallStatus
+    http_status: int | None = None
+    attempts: int = Field(default=1, ge=0)  # requests sent, retries included (0: not sent)
+    input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+    thinking_tokens: int = Field(default=0, ge=0)
+    total_tokens: int = Field(default=0, ge=0)
+    estimated_tokens: int | None = Field(default=None, ge=0)  # local estimate before the call
+    note: str | None = None
 
 
 class ReviewedMatch(BaseModel):

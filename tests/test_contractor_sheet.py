@@ -183,6 +183,35 @@ def test_workbook_without_search_keywords_still_builds(tmp_path: Path) -> None:
     assert all(r.search_keywords == [] for r in rows)
 
 
+def test_v1_profession_columns_are_read_when_present(tmp_path: Path) -> None:
+    extra = ["Primary Profession", "Secondary Professions", "Years Experience", "Languages"]
+    values = {
+        "TAL-1": [
+            "Digital Project Management",
+            "Program coordination; Events",
+            "15",
+            "English; Français",
+        ],
+        "TAL-2": ["content writing and editing", "", "seven", "fr"],
+    }
+    profiles = [PROFILES[0] + extra] + [row + values.get(row[0], [""] * 4) for row in PROFILES[1:]]
+    book = workbook(tmp_path / "v1.xlsx", {"Talent": TALENT, "Talent Profiles": profiles})
+    rows, _ = build_contractors(read_sheets(book), RULES)
+    first, second, thin = rows
+    assert first.primary_profession == "digital project management"  # lowercase, as in config
+    assert first.secondary_professions == ["program coordination", "events"]
+    assert first.years_experience == 15
+    assert first.languages == ["en", "fr"]
+    assert second.years_experience is None  # not a number
+    assert second.languages == ["fr"]
+    assert thin.primary_profession is None and thin.languages == []
+
+
+def test_workbook_without_v1_columns_leaves_them_empty(book: Path) -> None:
+    rows, _ = build_contractors(read_sheets(book), RULES)
+    assert all(r.primary_profession is None and r.secondary_professions == [] for r in rows)
+
+
 def test_contractor_without_profile_keeps_tab_one_fields(book: Path) -> None:
     rows, _ = build_contractors(read_sheets(book), RULES)
     thin = rows[2]
@@ -253,7 +282,8 @@ def test_cli_writes_csv_and_backs_up_previous(book: Path, tmp_path: Path) -> Non
         "talent_id,talent_name,location,standardized_headline,executive_summary,"
         "core_strengths,proof_points,main_industry,search_keywords,seniority,weekly_hours,"
         "rate_expectation,"
-        "target_titles,contract"
+        "target_titles,contract,"
+        "primary_profession,secondary_professions,years_experience,languages"
     )
     assert ",40,52.5," in lines[1]
     assert "Previous file copied to" in result.output

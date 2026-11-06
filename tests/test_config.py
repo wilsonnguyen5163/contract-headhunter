@@ -6,12 +6,16 @@ from pydantic import ValidationError
 from conftest import CONFIG_DIR
 from jobmatch.config import (
     ContractPhrases,
+    LlmSettings,
     NormalizationRules,
+    ProfessionTitles,
     SkillsTaxonomy,
     load_canada_locations,
     load_company_aliases,
     load_contract_phrases,
     load_normalization_rules,
+    load_profession_titles,
+    load_professions,
     load_settings,
     load_skills_taxonomy,
 )
@@ -31,6 +35,39 @@ def test_unknown_setting_is_rejected(tmp_path: Path) -> None:
     (cdir / "settings.yaml").write_text(text + "\nsurprise: true\n", encoding="utf-8")
     with pytest.raises(ValidationError):
         load_settings(cdir)
+
+
+def test_llm_settings_load_without_any_key() -> None:
+    llm = load_settings(CONFIG_DIR).llm
+    assert llm is not None
+    assert llm.provider == "gemini"
+    assert llm.api_key_env == "GEMINI_API_KEY"  # the variable's name, never a key
+    assert llm.temperature == 0
+    assert llm.prefilter.enabled is False  # off until the recall check passes
+
+
+def test_both_thinking_settings_are_rejected() -> None:
+    llm = load_settings(CONFIG_DIR).llm
+    assert llm is not None
+    data = llm.model_dump()
+    data.update(thinking_budget=0, thinking_level="low")
+    with pytest.raises(ValidationError, match="not both"):
+        LlmSettings.model_validate(data)
+
+
+def test_profession_titles_name_real_professions() -> None:
+    titles = load_profession_titles(CONFIG_DIR)
+    professions = load_professions(CONFIG_DIR)
+    assert professions is not None
+    assert set(titles.titles) <= set(professions.professions)
+    assert "rédacteur" in titles.titles["content writing and editing"]
+
+
+def test_title_phrase_under_two_professions_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="both"):
+        ProfessionTitles.model_validate(
+            {"version": 1, "titles": {"a": ["Producer"], "b": ["producer"]}}
+        )
 
 
 def test_repo_taxonomies_load() -> None:

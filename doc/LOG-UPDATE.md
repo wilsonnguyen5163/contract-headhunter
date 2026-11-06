@@ -4,6 +4,102 @@ What each change solves, for the team. Newest first. Add an entry with every com
 
 ---
 
+## 2026-11-05 · v1 phase 5: Gemini pilot on the blind-labelled jobs
+
+### What this solves
+We needed to know whether Gemini matches better than v0 before replacing it.
+- **`llm-judge`** judges jobs (`--labelled`, `--job-id`, `--exclude-language`, `--max-calls`, `--dry-run`) with the budget check, pacing and one usage line per call. Answers are cached in `data/llm_results/judgments/`, so a re-run only pays for what changed.
+- **`llm-compare`** compares the cached answers with the blind labels and with v0's latest stored run (scoring version `0ceca894e984`, read from `matches.csv`; v0 is not re-run). No API call. It writes a pair table to `data/llm_results/compare-<time>.csv`.
+
+### Results (78 jobs, 328 labelled pairs; the one French posting was left out)
+- **Cost:** 78 calls, 0 failed, 690k tokens (8.9k per call; the estimate was 10.5k), 16 minutes. 18 requests were per-minute retries.
+- **Ranking within a job, fit above "no":**
+  - Gemini 0.88, v0 shortlist 0.856. The difference is +0.024, but the 95% interval (-0.044 to +0.084) includes zero.
+  - v0's full-score figure, recorded in PROTOTYPES.md, is about 0.87.
+- **Put in front of the reviewer:**
+  - Gemini (fit or partial): 88 of 99 fits, 37 of 181 "no"; "no" is 24% of what it shows.
+  - v0 shortlist: 82 of 99 fits, 46 of 181 "no"; "no" is 32% of what it shows.
+- **Gemini's "fit" verdict is reliable:** 58 pairs, of which 48 are labelled fit and 1 "no". Its "partial" is mixed: 40 fit, 21 partial, 36 no.
+- **Agreement with the labels:** 65%, kappa 0.43 (0.56 on labels both AI judges agreed on).
+- **11 labelled fits were rejected,** 8 of them pairs the two AI judges disagreed on. Gemini applies "different profession" strictly (graphic designer for a UX role, art director for video production).
+- **10 of 78 answers contradicted themselves** on `no_fit`, even with prompt v2.
+
+### Known limits
+- **The labels are AI judges (ChatGPT, Claude),** with 13 pairs by a person. Gemini is also an LLM, so its agreement with them may be inflated relative to v0.
+- **The label sheets were sampled around v0's shortlists.**
+- **The contractor professions sent to Gemini were suggested by Gemini itself.**
+
+### Checks run
+- `pytest`: 793 passed, 1 deselected. `ruff format` and `ruff check .`: pass.
+
+---
+
+## 2026-11-05 · v1 phase 4: first real Gemini calls, contractor professions
+
+### What this solves
+- **Contractor professions (user choice: let Gemini suggest them).**
+  - `suggest-professions` makes one call over the 38 anonymized cards and writes `data/contractors/profession_suggestions-<time>.csv`.
+  - `apply-professions <file>` writes the professions into `contractors.csv` after a timestamped backup.
+  - Done on 2026-11-05: 38 of 38 answered, 36 "high" confidence and 2 "low" (TAL-ON-014, TAL-ON-020).
+- **`llm-try`** judges one job with one real call, prints the token usage and verdicts (talent IDs and headlines only), and saves the checked answer to `data/llm_results/<time>/`.
+- **`llm/runner.py`:** every call goes through one function that checks the call's size first and logs its usage afterwards, failed calls included.
+- **Tests can never reach the real API:** the key is removed from the environment in every test.
+
+### First results
+- **Profession call:** 10,261 tokens (estimate 13,653).
+- **Matching call:** 7,872 tokens (estimate 10,088). The local estimates run about 25% high, which is the safe side.
+- **The verdicts followed the profession rule,** e.g. "Different profession…" for a technical project manager on a communications project role.
+- **The answer contradicted itself:** 2 "partial" verdicts with `no_fit` true and no detailed matches. Prompt v2 says partial matches go in `top`, and `no_fit` only when every verdict is "no". `check_output` now reports both cases.
+
+### How to use it
+- `docker compose run --rm app python -m jobmatch llm-try [--job-id <id>]`: 1 call.
+- `... suggest-professions` (1 call), then `... apply-professions data/contractors/profession_suggestions-<time>.csv` (no call).
+- **Keep the professions:** `build-contractors` rebuilds `contractors.csv` from the workbook, so copy the suggested values into the workbook's profession columns, or they are lost on the next rebuild.
+
+### Known limits
+- **French postings without bullet lists send their whole clean description,** including benefits and employer text when normalization didn't split the sections (seen on the first job tried).
+- **`thinking_level: minimal`** for `gemini-3.5-flash-lite` is a GUESS default; the calls reported 0 thinking tokens.
+
+### Checks run
+- `pytest`: 787 passed, 1 deselected. `ruff format` and `ruff check .`: pass.
+
+---
+
+## 2026-11-05 · v1 phases 0 and 1: Gemini foundation (no API calls yet)
+
+### What this solves
+v1 matches jobs to contractors with the Gemini API ([V1_PLAN.md](V1_PLAN.md)). This change builds everything a call needs, so the first real call can be checked before it is made:
+- **Gemini client** (`src/jobmatch/llm/gemini.py`):
+  - plain `httpx`, no new dependency; the key comes from `GEMINI_API_KEY` in `.env`;
+  - temperature 0, JSON answers checked against a schema;
+  - per-minute limits retried, the daily limit stops cleanly.
+- **Usage log and budget guard** (`llm/usage.py`, `data/llm_usage.csv`):
+  - every call is logged with its tokens, and the day counts from midnight Pacific time;
+  - a run that would use most of today's allowance stops and says how many calls fit.
+- **Smaller requests:**
+  - the job text is pruned with what normalization already extracted (`llm/payload.py`): no employer pitch, benefits, company or pay;
+  - contractors are sent as anonymized cards (`llm/anonymize.py`): no name, location, rate, hours, proof points or talent ID, and contact details are scrubbed from free text.
+- **Prompt and answer checks** (`llm/prompt.py`, `llm/evidence.py`):
+  - one verdict per contractor, and the best 5 described in detail;
+  - quotes that are not in the text sent are removed and reported.
+- **Contractor list:** optional workbook columns Primary Profession, Secondary Professions, Years Experience and Languages (`config/contractor_import.yaml`), for the prefilter in phase 3.
+- **Config:** a new `llm:` section in `settings.yaml` (limits are GUESSES until copied from AI Studio), and `config/profession_titles.yaml`, the title phrases the phase 3 classifier will use.
+
+### How to use it
+- `docker compose run --rm app python -m jobmatch llm-preview` writes the requests for the first 3 active jobs to `data/llm_preview/<time>/`, plus the local alias map. Use `--job-id <id>` to pick jobs. **Nothing is sent.** Read the files before approving any API call.
+- `... llm-preview --stats` prints token estimates for every active job, and how many requests and days a full run needs at the limits in `settings.yaml`.
+
+### Known limits
+- **No API call exists yet.** The first one is phase 4, after approval.
+- **The v0 `match` and `run-once` commands are unchanged** until phase 6.
+- **Scrubbing a name** removes every word equal to a part of it ("Grant", "Rose"), which can cost a skill word.
+
+### Checks run
+- `pytest`: 773 passed, 1 deselected (the model test). One existing test was updated for the four new `contractors.csv` columns.
+- `ruff format` (8 new files rewrapped) and `ruff check .`: all pass.
+
+---
+
 ## 2026-11-04 · v0 prototype complete: cleanup before v1
 
 ### What this solves

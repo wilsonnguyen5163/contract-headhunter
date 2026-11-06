@@ -11,11 +11,14 @@ Project: **jobmatch**, a local pipeline that finds Canadian contract job posting
    - Allowed in project code: job-board and job-feed sources only (Adzuna API, Job Bank, public ATS job feeds I approve), and the free LLM providers **Groq** and **Gemini**.
    - Forbidden: every other external API or service, including paid LLM APIs (Anthropic, OpenAI and others), email services, enrichment or lookup services, analytics and telemetry.
    - Package installs and model downloads (pip, Hugging Face, `ollama pull`) are network access too. Ask first each time.
-   - Groq/Gemini are **not part of v0**. If a provider module or stub is ever added, it stays unplugged and disabled by default, and must never be switched on, called or tested without my explicit instruction. Never send contractor personal data to any external service without asking.
 5. **No email sending.** The email block is out of scope for the prototype. Do not write code that sends email. A stub interface is allowed only if I ask for it.
 6. **No LinkedIn or Indeed scraping.** No automated access to LinkedIn or Indeed, no logins, no browser automation against sites that prohibit it. LinkedIn jobs enter the system only through manual human input. However, a human can manually paste LinkedIn link to a job / posts for curling process to get the json file.
 7. **Secrets.** Never write API keys or credentials into source files, logs or docs. Use `.env` (git-ignored) and keep `.env.example` updated. Do not print or read the contents of `.env` unless I ask.
 8. **No destructive data operations** (deleting or overwriting files in `data/`, rewriting a CSV without a timestamped backup) without asking.
+
+> ## Update for V1: for the matching framework. This prototype version will be offloading the matching process to Gemini API. Only use Gemini API (referred to as API). For each call to Gemini API, report back the token usage, and flag potential calls that would drain all token allotment for the day
+1. Detach the old matcher (v0) from the pipeline, and connect to it the API pipeline. You are to never use the old matcher (v0) anywhere for v1
+2. For the contractor's details being sent to the API, abstract their personal details (if any), the only thing matters for matching is related to their assets and skillsets, professional field, targeted positions. Their names + address + phone number must be omitted
 
 ## Cost estimate format (rule 3)
 
