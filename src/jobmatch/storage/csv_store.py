@@ -6,7 +6,7 @@ Conventions (doc/PROJECT_CONTEXT.md section 8a):
 - multi-value cells are joined with "|" (a literal "|" or "\\" inside an item is backslash-escaped).
 - empty cell = null; booleans true/false; timestamps ISO 8601 UTC; IDs stay strings.
 - rewrites are atomic, under a file lock, after a timestamped backup.
-- contractors.csv and contractor_facets.csv are human-maintained: never written.
+- read-only tables (e.g. the built contractor list) are never written.
 - reviews.csv and runs.csv are append-only.
 - human-facing exports neutralize spreadsheet formulas (posting text is untrusted).
 """
@@ -29,8 +29,6 @@ from pydantic import BaseModel, ValidationError
 
 from jobmatch.schemas import (
     SCHEMA_VERSION,
-    Contractor,
-    ContractorFacet,
     ContractorProfile,
     Job,
     JobStatus,
@@ -441,15 +439,6 @@ class CsvStore:
                 unique_key=key,
             )
 
-        self.contractors = table(
-            "contractors.csv", Contractor, TableMode.READ_ONLY, ("contractor_id",)
-        )
-        self.contractor_facets = table(
-            "contractor_facets.csv",
-            ContractorFacet,
-            TableMode.READ_ONLY,
-            ("contractor_id", "facet_id"),
-        )
         self.jobs = table("jobs.csv", Job, TableMode.READ_WRITE, ("job_id",))
         self.matches = table("matches.csv", Match, TableMode.READ_WRITE, ("match_id",))
         self.matches_flagged = table(
@@ -460,8 +449,6 @@ class CsvStore:
 
     def all_tables(self) -> list[CsvTable[Any]]:
         return [
-            self.contractors,
-            self.contractor_facets,
             self.jobs,
             self.matches,
             self.matches_flagged,
@@ -554,18 +541,6 @@ class CsvRunRepository:
 
     def list_all(self) -> list[Run]:
         return self._table.read_all()
-
-
-class CsvContractorRepository:
-    def __init__(self, store: CsvStore) -> None:
-        self._contractors = store.contractors
-        self._facets = store.contractor_facets
-
-    def list_contractors(self) -> list[Contractor]:
-        return self._contractors.read_all()
-
-    def list_facets(self) -> list[ContractorFacet]:
-        return self._facets.read_all()
 
 
 class CsvMatchRepository:

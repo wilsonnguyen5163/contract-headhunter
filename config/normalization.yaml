@@ -181,6 +181,19 @@ title_abbreviations:
   dir: director
   spec: specialist
   tech: technician
+  # Other fields (2026-11-04)
+  rn: registered nurse
+  rpn: registered practical nurse
+  lpn: licensed practical nurse
+  psw: personal support worker
+  ece: early childhood educator
+  hca: health care aide
+  csr: customer service representative
+  eit: engineer in training
+  supt: superintendent
+  rep: representative
+  mfg: manufacturing
+  acct: accountant
   "&": and
   et: and
 
@@ -224,11 +237,21 @@ number_words:
 # Seniority words looked up in the title. When several match, the highest level wins
 # (junior < intermediate < senior < lead < executive).
 seniority:
-  junior: [junior, jr, entry level, entry-level, débutant, débutante]
-  intermediate: [intermediate, mid-level, mid level, intermédiaire, confirmé, confirmée, ii]
+  # Trades and health levels added 2026-11-04: apprentice -> junior, journeyperson ->
+  # intermediate, foreperson and charge nurse -> lead. "student" is left out on purpose
+  # ("Student Success Advisor" is not a junior role).
+  junior: [junior, jr, entry level, entry-level, débutant, débutante, apprentice, apprenti, apprentie, intern, stagiaire]
+  intermediate: [intermediate, mid-level, mid level, intermédiaire, confirmé, confirmée, ii, journeyperson, journeyman, journeywoman, compagnon, compagne]
   senior: [senior, sr, sénior, principal, principale, expert, experte, chevronné, chevronnée, iii, iv]
-  lead: [lead, team lead, tech lead, technical lead, chef d'équipe, responsable d'équipe, architect, architecte]
-  executive: [director, directeur, directrice, head of, vice president, vice-president, vice-président, vice-présidente, vp, chief, cto, cio, cfo, ciso]
+  # Creative-industry "director" titles name a senior hands-on role, not an executive: the
+  # longest phrase wins, so "creative director" is lead while bare "director" stays executive.
+  lead: [lead, team lead, tech lead, technical lead, foreman, forewoman, foreperson, contremaître, contremaîtresse, charge nurse, infirmière-chef, infirmier-chef, vice-principal, directeur adjoint d'école, directrice adjointe d'école, chef d'équipe, responsable d'équipe, architect, architecte, creative director, art director, design director, associate creative director, directeur de création, directrice de création, directeur artistique, directrice artistique, directeur de la création, directrice de la création]
+  executive: [director, directeur, directrice, head of, school principal, directeur d'école, directrice d'école, vice president, vice-president, vice-président, vice-présidente, vp, chief, cto, cio, cfo, ciso, executive creative director, group creative director, chief creative officer]
+
+# How someone is engaged, not what the role is: removed from job and contractor titles
+# before title embedding, so "Fractional HR Manager" is compared as "hr manager" and stops
+# matching every "Fractional CFO/CMO". Bare "contract" stays: "contract manager" is a role.
+title_engagement_words: [fractional, interim, freelance, freelancer, par intérim, pigiste, à la pige, fractionnel, fractionnelle]
 
 # Must-have skills (matching): every skill in a Requirements line is a must-have, unless the
 # line uses one of these softer phrases. Bare "asset" is left out on purpose: it would also

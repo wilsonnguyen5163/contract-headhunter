@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
+from pydantic import Field, ValidationError
 
 from jobmatch.schemas import (
     Band,
@@ -10,27 +10,71 @@ from jobmatch.schemas import (
     EmploymentType,
     JobStatus,
     Language,
+    LanguageCode,
     Match,
+    NocCode,
+    NonEmptyStr,
     PayUnit,
     ReasonCode,
+    Record,
     Review,
 )
 from jobmatch.storage.csv_store import (
     AppendOnlyTableError,
     CsvJobRepository,
     CsvReviewRepository,
+    CsvStore,
+    CsvTable,
     CsvValidationError,
     ReadOnlyTableError,
+    TableMode,
     export_csv,
     join_multi,
     sanitize_cell,
     split_multi,
 )
 
-CONTRACTOR_HEADER = (
-    "contractor_id,display_name,profile_text_raw,languages,regions,remote_preference,"
-    "noc_codes,rate_min,rate_max,rate_unit,rate_currency"
-)
+
+# Test-only, human-maintained (read-only) tables with the field kinds the real tables use:
+# string IDs, a personal-data column, multi-value cells, NOC codes, a bounded number.
+class Person(Record):
+    person_id: NonEmptyStr
+    display_name: NonEmptyStr = Field(repr=False)
+    languages: list[LanguageCode] = []
+    noc_codes: list[NocCode] = []
+    rate_min: float | None = Field(default=None, ge=0)
+
+
+class Area(Record):
+    person_id: NonEmptyStr
+    area_id: NonEmptyStr
+    area: NonEmptyStr
+
+
+PERSON_HEADER = "person_id,display_name,languages,noc_codes,rate_min"
+
+
+def read_only_table[M: Record](
+    store: CsvStore, filename: str, model: type[M], key: tuple[str, ...]
+) -> CsvTable[M]:
+    return CsvTable(
+        store.data_dir / filename,
+        model,
+        TableMode.READ_ONLY,
+        backups_dir=store.backups_dir,
+        lock_timeout=5,
+        unique_key=key,
+    )
+
+
+@pytest.fixture
+def people(store: CsvStore) -> CsvTable[Person]:
+    return read_only_table(store, "people.csv", Person, ("person_id",))
+
+
+@pytest.fixture
+def areas(store: CsvStore) -> CsvTable[Area]:
+    return read_only_table(store, "areas.csv", Area, ("person_id", "area_id"))
 
 
 def write_raw(path: Path, text: str, encoding: str = "utf-8") -> None:
@@ -106,64 +150,64 @@ def test_empty_cell_means_null_and_defaults_apply(store, make_job) -> None:
     assert loaded.status is JobStatus.NEW
 
 
-def test_reads_excel_bom_crlf_and_leading_zero_ids(store) -> None:
-    text = CONTRACTOR_HEADER + "\r\n007,Sample Person,,en|fr,CA-ON,remote,00012,,,,\r\n"
-    write_raw(store.contractors.path, text, encoding="utf-8-sig")
-    [contractor] = store.contractors.read_all()
-    assert contractor.contractor_id == "007"
-    assert contractor.noc_codes == ["00012"]
-    assert contractor.languages == ["en", "fr"]
+def test_reads_excel_bom_crlf_and_leading_zero_ids(people) -> None:
+    text = PERSON_HEADER + "\r\n007,Sample Person,en|fr,00012,\r\n"
+    write_raw(people.path, text, encoding="utf-8-sig")
+    [person] = people.read_all()
+    assert person.person_id == "007"
+    assert person.noc_codes == ["00012"]
+    assert person.languages == ["en", "fr"]
 
 
 # ---- validation errors name file and row ----
 
 
-def test_unknown_column_is_reported_with_file_name(store) -> None:
-    write_raw(store.contractors.path, CONTRACTOR_HEADER + ",email\nC1,A,,,,,,,,,,a@example.org\n")
-    _, errors = store.contractors.check()
+def test_unknown_column_is_reported_with_file_name(people) -> None:
+    write_raw(people.path, PERSON_HEADER + ",email\nC1,A,,,,a@example.org\n")
+    _, errors = people.check()
     assert len(errors) == 1
-    assert "contractors.csv, row 1" in str(errors[0])
+    assert "people.csv, row 1" in str(errors[0])
     assert "'email'" in str(errors[0])
 
 
-def test_missing_required_column_is_reported(store) -> None:
-    write_raw(store.contractor_facets.path, "contractor_id,area\nC1,Data\n")
-    _, errors = store.contractor_facets.check()
-    assert any("facet_id" in str(e) for e in errors)
+def test_missing_required_column_is_reported(areas) -> None:
+    write_raw(areas.path, "person_id,area\nC1,Data\n")
+    _, errors = areas.check()
+    assert any("area_id" in str(e) for e in errors)
 
 
-def test_bad_row_reports_row_number_and_keeps_good_rows(store) -> None:
-    text = CONTRACTOR_HEADER + "\nC1,A,,,,,21231,,,,\nC2,B,,,,,123,,,,\n"
-    write_raw(store.contractors.path, text)
-    rows, errors = store.contractors.check()
-    assert [r.contractor_id for r in rows] == ["C1"]
+def test_bad_row_reports_row_number_and_keeps_good_rows(people) -> None:
+    text = PERSON_HEADER + "\nC1,A,,21231,\nC2,B,,123,\n"
+    write_raw(people.path, text)
+    rows, errors = people.check()
+    assert [r.person_id for r in rows] == ["C1"]
     assert len(errors) == 1
     assert errors[0].row == 3
     assert "noc_codes" in errors[0].message
-    with pytest.raises(CsvValidationError, match=r"contractors\.csv, row 3"):
-        store.contractors.read_all()
+    with pytest.raises(CsvValidationError, match=r"people\.csv, row 3"):
+        people.read_all()
 
 
-def test_validation_errors_do_not_echo_cell_values(store) -> None:
-    text = CONTRACTOR_HEADER + "\nC1,Secret Name,,,,,,not-a-number,,,\n"
-    write_raw(store.contractors.path, text)
-    _, errors = store.contractors.check()
+def test_validation_errors_do_not_echo_cell_values(people) -> None:
+    text = PERSON_HEADER + "\nC1,Secret Name,,,not-a-number\n"
+    write_raw(people.path, text)
+    _, errors = people.check()
     assert errors
     assert all("Secret Name" not in str(e) for e in errors)
 
 
-def test_duplicate_key_is_reported(store) -> None:
-    text = "contractor_id,facet_id,area\nC1,data,Data\nC1,data,Data again\n"
-    write_raw(store.contractor_facets.path, text)
-    _, errors = store.contractor_facets.check()
+def test_duplicate_key_is_reported(areas) -> None:
+    text = "person_id,area_id,area\nC1,data,Data\nC1,data,Data again\n"
+    write_raw(areas.path, text)
+    _, errors = areas.check()
     assert len(errors) == 1
     assert errors[0].row == 3
     assert "duplicate" in errors[0].message
 
 
-def test_blank_lines_are_ignored(store) -> None:
-    write_raw(store.contractor_facets.path, "contractor_id,facet_id,area\n\nC1,data,Data\n,,\n")
-    rows, errors = store.contractor_facets.check()
+def test_blank_lines_are_ignored(areas) -> None:
+    write_raw(areas.path, "person_id,area_id,area\n\nC1,data,Data\n,,\n")
+    rows, errors = areas.check()
     assert errors == []
     assert len(rows) == 1
 
@@ -171,11 +215,11 @@ def test_blank_lines_are_ignored(store) -> None:
 # ---- write rules ----
 
 
-def test_human_maintained_tables_are_never_written(store) -> None:
+def test_human_maintained_tables_are_never_written(people, areas) -> None:
     with pytest.raises(ReadOnlyTableError):
-        store.contractors.append([])
+        people.append([])
     with pytest.raises(ReadOnlyTableError):
-        store.contractor_facets.rewrite([])
+        areas.rewrite([])
 
 
 def test_reviews_are_append_only(store) -> None:

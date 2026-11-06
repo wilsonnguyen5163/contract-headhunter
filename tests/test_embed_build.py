@@ -42,6 +42,7 @@ def make_profile(**fields: Any) -> ContractorProfile:
         "weekly_hours": 40,
         "rate_expectation": "150",
         "target_titles": ["Sr. Digital Project Manager", "Program Manager"],
+        "search_keywords": ["Drupal", "program delivery", "gestion de projet"],
     }
     base.update(fields)
     return ContractorProfile(**base)
@@ -103,9 +104,12 @@ def test_contractor_text_shares_the_job_vocabulary_and_leaves_out_personal_field
     assert lines[0] == "Title: Senior Digital & Technical Project Manager"
     assert lines[1] == "Target titles: Sr. Digital Project Manager; Program Manager"
     assert [line.split(":")[0] for line in lines] == [
-        "Title", "Target titles", "Seniority", "Skills", "Industries", "Summary", "Proof points",
+        "Title", "Target titles", "Seniority", "Skills", "Keywords", "Industries", "Summary",
+        "Proof points",
     ]  # fmt: skip
     assert text.count("roject management") == 1  # the core strength is not repeated
+    # Keywords already given as skills or strengths are not repeated
+    assert lines[4] == "Keywords: Drupal; gestion de projet"
     for private in ("Sample Person A", "Calgary", "150", "TAL-1"):
         assert private not in text
 
@@ -114,6 +118,7 @@ def test_thin_contractor_profile_still_has_a_text() -> None:
     profile = make_profile(
         executive_summary=None, core_strengths=[], proof_points=[], main_industry=[],
         seniority=None, standardized_headline="Writer", target_titles=["Writer"],
+        search_keywords=[],
     )  # fmt: skip
     assert contractor_text(profile, []) == "Title: Writer\nTarget titles: Writer"
 
@@ -212,6 +217,26 @@ CLEANER = TitleCleaner(load_normalization_rules(CONFIG_DIR).seniority)
 )
 def test_title_cleaning(title: str, brackets: bool, cleaned: str) -> None:
     assert CLEANER.clean(title, drop_brackets=brackets) == cleaned
+
+
+_RULES = load_normalization_rules(CONFIG_DIR)
+ENGAGEMENT_CLEANER = TitleCleaner(_RULES.seniority, _RULES.title_engagement_words)
+
+
+@pytest.mark.parametrize(
+    ("title", "cleaned"),
+    [
+        ("Fractional HR Manager", "hr manager"),
+        ("Fractional CFO/COO & Finance Operations Leader", "cfo/coo & finance operations leader"),
+        ("Interim Head of Marketing", "head of marketing"),
+        ("Freelance Senior Copywriter", "copywriter"),
+        ("Rédactrice pigiste", "redactrice"),
+        ("Directeur marketing par intérim", "directeur marketing"),
+        ("Contract Manager", "contract manager"),  # a role: bare "contract" is kept
+    ],
+)
+def test_engagement_words_are_removed_from_titles(title: str, cleaned: str) -> None:
+    assert ENGAGEMENT_CLEANER.clean(title) == cleaned
 
 
 def test_contractor_titles_are_headline_then_targets_without_duplicates() -> None:

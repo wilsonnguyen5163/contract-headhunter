@@ -14,6 +14,9 @@ from jobmatch.schemas import Commitment
 _HOURS_PER_WEEK = re.compile(
     r"\b(\d{1,2}(?:[.,]\d{1,2})?)\s*(?:-\s*\d{1,2}(?:[.,]\d{1,2})?\s*)?"
     r"(?:hours?|hrs?|heures?|h)\s*(?:per|a|an|/|par|each|every)\s*(?:week|wk|semaine)\b"
+    # "a 37.5-hour work week"; French "semaine de 35 heures"
+    r"|\b(\d{1,2}(?:[.,]\d{1,2})?)\s*-?\s*(?:hours?|hrs?)\s+(?:work\s*)?(?:week|wk)\b"
+    r"|\bsemaine\s+(?:de\s+travail\s+)?de\s+(\d{1,2}(?:[.,]\d{1,2})?)\s*(?:heures?|h)\b"
 )
 
 
@@ -33,7 +36,8 @@ class CommitmentDetector:
         for text in present:
             hours = _HOURS_PER_WEEK.search(fold(text))
             if hours:
-                value = float(hours.group(1).replace(",", "."))
+                number = next(g for g in hours.groups() if g)
+                value = float(number.replace(",", "."))
                 if value >= self._full_time_min_hours:
                     return Commitment.FULL_TIME
                 return Commitment.PART_TIME

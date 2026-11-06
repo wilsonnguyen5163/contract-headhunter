@@ -31,7 +31,8 @@ The shell scripts in `scripts/` call the container for you. Run them from the re
 
 | Command | What it does |
 |---|---|
-| `python -m jobmatch build-contractors data/contractors/contractors_master_list.xlsx` | Builds `data/contractors/contractors.csv` from the master workbook. It keeps confirmed contract talent only and backs up the old file first. It also learns new skills into `skills_learned.yaml`. |
+| `python -m jobmatch build-contractors data/contractors/contractor-master-list.xlsx` | Builds `data/contractors/contractors.csv` from the master workbook. It keeps confirmed contract talent whose profile has an Executive Summary or Core Strengths (others come back once their profile is filled in), and backs up the old file first. It also learns new skills into `skills_learned.yaml`. |
+| `bash scripts/update_contractors.sh [workbook] [--dry-run]` | **Use this when profiles are added or edited.** It runs `build-contractors`. If new skills were learned, it re-imports the jobs (`reset_reimport.sh -y`) so they get the new tags. Then it runs `embed-contractors`, `embed-jobs`, `match` and `export-trial-run`. The default workbook is `data/contractors/contractor-master-list.xlsx`. |
 
 ### Matching
 
@@ -72,7 +73,7 @@ After the download, keep `HF_HUB_OFFLINE=1` in `.env` so the container never con
 If the contractor list isn't built yet:
 
 ```
-docker compose run --rm app python -m jobmatch build-contractors data/contractors/contractors_master_list.xlsx
+docker compose run --rm app python -m jobmatch build-contractors data/contractors/contractor-master-list.xlsx
 ```
 
 ### Step 1: import jobs
@@ -114,6 +115,8 @@ bash scripts/reset_reimport.sh -y
 
 After a reset, run all of step 3 again, including `embed-contractors`.
 
+When the change is new or edited contractor profiles, `bash scripts/update_contractors.sh` does all of this for you. It resets only when new skills were learned.
+
 ### Step 3: run the model
 
 ```
@@ -131,7 +134,8 @@ How a match is scored (weights are in `config/settings.yaml`, all are first gues
 - **Title:** the job title against the contractor's closest title.
 - **Skills:** the share of the job's skills the contractor lists.
 - **Type of work / industry:** the job's field against the contractor's.
-- **Bands:** high from 0.70, medium from 0.50, low below that. Scores below `min_score` (0.40) aren't shortlisted.
+- **Shared words:** how many words the posting and profile share, rare words counting more (TF-IDF, no skill list).
+- **Bands:** high from 0.70, medium from 0.60, low below that. Scores below `min_score` (0.45) aren't shortlisted.
 - **Flagged:** a match that fails a rule check, such as a seniority gap of two or more levels, goes to the flagged list with the reason.
 
 ### Step 4: where the results are stored
@@ -161,7 +165,7 @@ The notebook runs on your own machine, not in the container. It needs Jupyter (o
 | `job_title`, `company` | The job, shown once per job. |
 | `option` | 1 = best contractor for this job, 2 = second best. |
 | `score` | 0 to 1; higher is a closer fit. |
-| `band` | `high` (0.70 and above), `medium` (0.50 to 0.70), `low` (0.40 to 0.50), or `no match` (no contractor reached 0.40). |
+| `band` | `high` (0.70 and above), `medium` (0.60 to 0.70), `low` (0.45 to 0.60), or `no match` (no contractor reached 0.45). |
 | `talent_name`, `talent_title` | The contractor and their headline. |
 | `shared_skills` | Skills found in both the job and the profile, joined with `\|`. |
 
@@ -174,10 +178,11 @@ view_trial_run(band='no match')            # jobs nobody in our pool fits
 view_trial_run('exports/trial-run-20261028T014250Z.csv')   # an older run
 ```
 
-4. `view_talent_details('TAL-BC-001')` shows a contractor's profile: location, summary, industry, strengths, proof points and target titles. Use it to check why someone was suggested. A thin profile (no summary or strengths) often means good fits get missed.
+4. `view_talent_details('TAL-BC-001')` shows a contractor's profile: location, summary, industry, strengths, search keywords, proof points and target titles. Use it to check why someone was suggested. Contractors with no summary and no strengths are left out of matching entirely; fill in their profile in the workbook and rebuild to bring them back.
 
 **How to read it:**
 - Treat a high band as a good first guess, medium as "check it", and low as a weak fit.
 - Check `shared_skills` against the job: an empty or very generic list (such as "go-to-market" alone) means the match rests on wording, not skills.
+- **Check `profession`.** "different", for example `job: recruiting · talent: sales (different)`, is the most common reason the blind judges rejected a match. It's a hint from `config/professions.yaml`, not part of the score, and "unclear" means the posting's profession couldn't be told.
 - For details the notebook doesn't show (missing must-have skills, flags, why a match was flagged), open `exports/matches-<time>.csv` from `export-matches` in Excel.
 - The tool only recommends. A person makes every decision.

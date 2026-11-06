@@ -32,6 +32,10 @@ NOW = datetime(2026, 10, 20, 12, 0, tzinfo=UTC)
         ("20-25 hours a week", PART),
         ("35 h/semaine", FULL),
         ("Horaire de 21 heures par semaine", PART),
+        ("hybrid schedule (1 day per week onsite), 37.5-hour work week", FULL),
+        ("a 20 hour week", PART),
+        ("Semaine de travail de 35 heures", FULL),
+        ("semaine de 21 h", PART),
         ("6-month contract", UNKNOWN),
     ],
 )

@@ -211,47 +211,6 @@ class Job(Record):
         return self
 
 
-class Contractor(Record):
-    """One contractor (data/contractors.csv, human-maintained, read-only for jobmatch).
-
-    display_name and profile text are personal data: never log them.
-    """
-
-    contractor_id: NonEmptyStr
-    display_name: NonEmptyStr = Field(repr=False)
-    profile_text_raw: str | None = Field(default=None, repr=False)
-    languages: list[LanguageCode] = []
-    regions: list[Region] = []
-    remote_preference: RemotePreference | None = None
-    noc_codes: list[NocCode] = []
-    rate_min: float | None = Field(default=None, ge=0)
-    rate_max: float | None = Field(default=None, ge=0)
-    rate_unit: PayUnit | None = None
-    rate_currency: CurrencyCode | None = None
-
-    @model_validator(mode="after")
-    def _rate_range(self) -> "Contractor":
-        if (
-            self.rate_min is not None
-            and self.rate_max is not None
-            and self.rate_min > self.rate_max
-        ):
-            raise ValueError("rate_min is greater than rate_max")
-        return self
-
-
-class ContractorFacet(Record):
-    """One area of expertise of a contractor (data/contractor_facets.csv, human-maintained)."""
-
-    contractor_id: NonEmptyStr
-    facet_id: NonEmptyStr
-    area: NonEmptyStr
-    skills: list[str] = []
-    years: float | None = Field(default=None, ge=0)
-    seniority: str | None = None
-    domains: list[str] = []
-
-
 class Match(Record):
     """One shortlisted (job, contractor, facet) pair. Append-only: data/matches.csv when every
     rule check passed, data/matches_flagged.csv when one failed (reasons in gates_failed).
@@ -332,6 +291,7 @@ class ContractorProfile(BaseModel):
     core_strengths: list[str] = []
     proof_points: list[str] = Field(default=[], repr=False)
     main_industry: list[str] = []
+    search_keywords: list[str] = []  # the workbook's Search Keywords
     seniority: str | None = None
     weekly_hours: float | None = Field(default=None, ge=0)
     rate_expectation: NonEmptyStr  # hourly figure ("150", "52.5") or the default text

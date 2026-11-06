@@ -3,7 +3,12 @@
 # Each alias may belong to one skill only (checked on load).
 # Ambiguous everyday words are left out on purpose (go, swift, spring, vue, node, tableau,
 # lean, safe, docker containers...): add a longer, unambiguous alias instead.
-# Fields are diverse; extend this file as real contractor profiles and postings come in.
+# POLICY since 2026-11-02 (doc/PROTOTYPES.md): this list is frozen for ranking. TF-IDF word
+# overlap (matching.weights.lexical) covers vocabulary without aliases and ranked fits better
+# than this list on its own. Its job now is the explanation shown to reviewers ("matched
+# skills", "missing must-haves") and the type-of-work categories. Add or fix an entry only
+# when a wrong or missing tag misleads a reviewer on a real posting, with a test; do not add
+# aliases just to move a score.
 version: 1
 skills:
   # ---------------- software development ----------------
@@ -56,12 +61,14 @@ skills:
   nosql: { category: data, aliases: [cassandra, dynamodb] }
   etl: { category: data, aliases: [elt, data pipeline, data pipelines, pipelines de données, ssis, informatica] }
   data engineering: { category: data, aliases: [data engineer, ingénierie des données, ingénieur de données, ingénieure de données] }
-  data analysis: { category: data, aliases: [data analyst, analyse de données, analyste de données] }
+  data analysis: { category: data, aliases: [data analyst, analyse de données, analyste de données, trend analysis, analyse des tendances] }
+  # Not French "tableau de bord": it is everyday business wording for any report.
+  data visualization: { category: data, aliases: [data visualisation, dashboards, interactive dashboards, dashboard development, dashboard design, visualisation de données, visualisation des données] }
   data science: { category: data, aliases: [data scientist, science des données, scientifique des données] }
   machine learning: { category: data, aliases: [apprentissage automatique, deep learning, apprentissage profond, scikit-learn, tensorflow, pytorch] }
   generative ai: { category: data, aliases: [genai, large language models, llm, llms, ia générative] }
   nlp: { category: data, aliases: [natural language processing, traitement du langage naturel] }
-  power bi: { category: data, aliases: [powerbi, dax] }
+  power bi: { category: data, aliases: [powerbi, dax, power business intelligence] }
   tableau software: { category: data, aliases: [tableau desktop, tableau server] }
   excel: { category: data, aliases: [microsoft excel, ms excel, advanced excel, excel avancé, vba], not_when: [excel at, excel in] }
   spark: { category: data, aliases: [apache spark, pyspark] }
@@ -148,8 +155,10 @@ skills:
   cost accounting: { category: finance, aliases: [comptabilité de coûts, prix de revient] }
 
   # ---------------- human resources ----------------
-  # not_when: hiring-process boilerplate ("an accessible recruitment experience").
-  recruitment: { category: hr, aliases: [recruiting, talent acquisition, recrutement, acquisition de talents, recruiter, recruteur, recruteuse], not_when: [recruitment process, recruiting process, recruitment experience, recruitment and selection process, processus de recrutement] }
+  # not_when: hiring-process boilerplate ("an accessible recruitment experience"), and
+  # recruiting research participants, program participants or influencers, which is not HR.
+  recruitment: { category: hr, aliases: [recruiting, talent acquisition, recrutement, acquisition de talents, recruiter, recruteur, recruteuse], not_when: [recruitment process, recruiting process, recruitment experience, recruitment and selection process, processus de recrutement, participant recruitment, recruiting participants, recruitment campaign, recruitment campaigns, recruiting and onboarding creators, recrutement de participants, campagne de recrutement, campagnes de recrutement] }
+  workforce planning: { category: hr, aliases: [workforce management, workforce analytics, planification de la main-d'oeuvre, planification de la main-d'œuvre, planification des effectifs] }
   human resources: { category: hr, aliases: [hr, rh, hr generalist, hr strategy, stratégie rh, people operations, people and culture, talent strategy, ressources humaines, conseiller en ressources humaines, conseillère en ressources humaines, hr business partner, hrbp, partenaire d'affaires rh] }
   labour relations: { category: hr, aliases: [labor relations, relations de travail, collective agreement, convention collective] }
   compensation: { category: hr, aliases: [total rewards, rémunération globale, compensation analyst] }
@@ -160,6 +169,8 @@ skills:
   # ---------------- marketing, communications, translation ----------------
   digital marketing: { category: marketing, aliases: [marketing numérique, online marketing, google ads, paid media, sem] }
   seo: { category: marketing, aliases: [search engine optimization, référencement, référencement naturel, keyword research, recherche de mots-clés, recherche de mots clés] }
+  # No bare "influencer": in French it is the verb "to influence".
+  influencer marketing: { category: marketing, aliases: [influencers, influencer initiatives, influencer strategy, influencer strategies, influencer campaigns, influencer relations, influencer partnerships, creator partnerships, creator partnership program, creator program, content creators, marketing d'influence, influenceurs, influenceuses, créateurs de contenu] }
   social media: { category: marketing, aliases: [social media marketing, médias sociaux, réseaux sociaux, community management, gestion de communauté, social strategy, social media strategy, social execution, stratégie sociale] }
   copywriting: { category: marketing, aliases: [content writing, rédaction web, rédaction publicitaire, content creation, création de contenu] }
   corporate communications: { category: marketing, aliases: [internal communications, communications internes, communications d'entreprise, public relations, relations publiques] }
@@ -305,10 +316,13 @@ skills:
   inventory management: { category: supply_chain, aliases: [gestion des stocks, gestion d'inventaire, inventory control, contrôle des stocks] }
   warehouse operations: { category: supply_chain, aliases: [warehouse management, wms, gestion d'entrepôt] }
   demand planning: { category: supply_chain, aliases: [demand forecasting, prévision de la demande, planification de la demande] }
+  # Used in finance, operations and data roles alike, so it says nothing about the type of work.
+  forecasting: { category: business, aliases: [forecasting models, forecast models, capacity models, capacity modelling, capacity modeling, modèles de prévision, prévisions financières] }
 
   # ---------------- healthcare and social services ----------------
   nursing: { category: healthcare, aliases: [registered nurse, infirmière, infirmier, infirmière auxiliaire, registered practical nurse, licensed practical nurse] }
-  patient care: { category: healthcare, aliases: [soins aux patients, soins infirmiers, triage] }
+  # not_when: triage of software defects or support tickets is not patient care.
+  patient care: { category: healthcare, aliases: [soins aux patients, soins infirmiers, triage], not_when: [defect triage, bug triage, incident triage, ticket triage, issue triage, triage des anomalies, triage des incidents] }
   medical office administration: { category: healthcare, aliases: [medical office assistant, adjointe médicale, adjoint médical, medical billing, facturation médicale, unit clerk] }
   pharmacy: { category: healthcare, aliases: [pharmacist, pharmacien, pharmacienne, pharmacy technician, technicien en pharmacie] }
   health informatics: { category: healthcare, aliases: [electronic medical records, emr, ehr, dossier médical électronique, epic systems, meditech] }

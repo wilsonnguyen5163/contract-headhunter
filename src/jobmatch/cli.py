@@ -25,7 +25,7 @@ from jobmatch.storage.vector_store import NpzVectorStore
 if TYPE_CHECKING:
     from jobmatch.embed.build import EmbedReport
     from jobmatch.ingest import IngestReport
-    from jobmatch.schemas import ContractorProfile, ReviewedMatch
+    from jobmatch.schemas import ContractorProfile, Job, ReviewedMatch
     from jobmatch.storage.csv_store import CsvTable
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
@@ -76,24 +76,14 @@ def validate_data(
             problems.append(f"config ({loader.__name__}): {exc}")
 
     store = CsvStore(root, lock_timeout=settings.storage.lock_timeout_seconds)
-    loaded: dict[str, list] = {}
     for table in store.all_tables():
         if not table.path.exists():
             typer.echo(f"-- {table.path.name}: not present")
             continue
         rows, errors = table.check()
-        loaded[table.path.name] = rows
         problems.extend(str(e) for e in errors)
         status = "OK" if not errors else f"{len(errors)} problem(s)"
         typer.echo(f"{status:>14} {table.path.name}: {len(rows)} valid row(s)")
-
-    contractor_ids = {c.contractor_id for c in loaded.get("contractors.csv", [])}
-    for facet in loaded.get("contractor_facets.csv", []):
-        if facet.contractor_id not in contractor_ids:
-            problems.append(
-                f"contractor_facets.csv: facet {facet.facet_id!r} refers to unknown "
-                f"contractor_id {facet.contractor_id!r}"
-            )
 
     vectors = NpzVectorStore(
         root / "embeddings", lock_timeout=settings.storage.lock_timeout_seconds
@@ -293,6 +283,7 @@ def build_contractors_command(
     )
     typer.echo(
         f"  excluded: {report.not_contract} not confirmed as contract · "
+        f"{report.no_profile_text} with no summary or core strengths · "
         f"{report.profile_without_talent} profile(s) with no Talent row"
     )
     typer.echo(
@@ -386,7 +377,8 @@ def embed_contractors(
     extractor = SkillExtractor(
         load_skills_taxonomy(settings.config_dir, settings.paths.learned_skills)
     )
-    cleaner = TitleCleaner(load_normalization_rules(settings.config_dir).seniority)
+    rules = load_normalization_rules(settings.config_dir)
+    cleaner = TitleCleaner(rules.seniority, rules.title_engagement_words)
     encoder = Encoder(settings.embedding)  # one model load for both vector sets
     store = _vector_store(settings)
     for namespace, items, template in (
@@ -417,17 +409,22 @@ def embed_contractors(
 
 @app.command("embed-jobs")
 def embed_jobs(ctx: typer.Context) -> None:
-    """Embed active jobs in jobs.csv (new, matched, no_match), plus each job title;
-    filtered-out jobs and stubs without text are skipped. Only changed jobs are re-embedded."""
-    from jobmatch.config import load_normalization_rules
+    """Embed active jobs in jobs.csv (new, matched, no_match), plus each job title, each
+    job's core (title and first responsibilities) and the profession descriptions in
+    config/professions.yaml (for profession notes); filtered-out jobs and stubs without text
+    are skipped. Only changed texts are re-embedded."""
+    from jobmatch.config import load_normalization_rules, load_professions
     from jobmatch.embed.build import TextItem, embed_items
-    from jobmatch.embed.encoder import Encoder
+    from jobmatch.embed.encoder import Encoder, TextKind
     from jobmatch.embed.texts import (
+        PROFESSION_TEMPLATE_HASH,
         TEMPLATE_HASH,
         TITLE_TEMPLATE_HASH,
         TitleCleaner,
+        job_core_text,
         job_text,
         job_title_text,
+        profession_text,
     )
     from jobmatch.schemas import JobStatus
     from jobmatch.storage.csv_store import CsvJobRepository
@@ -436,20 +433,42 @@ def embed_jobs(ctx: typer.Context) -> None:
     store = CsvStore(settings.paths.data_dir, lock_timeout=settings.storage.lock_timeout_seconds)
     active = {JobStatus.NEW, JobStatus.MATCHED, JobStatus.NO_MATCH}
     jobs = [j for j in CsvJobRepository(store).list_all() if j.status in active]
-    cleaner = TitleCleaner(load_normalization_rules(settings.config_dir).seniority)
+    rules = load_normalization_rules(settings.config_dir)
+    cleaner = TitleCleaner(rules.seniority, rules.title_engagement_words)
     titles = [(j.job_id, job_title_text(j, cleaner)) for j in jobs]
-    encoder = Encoder(settings.embedding)  # one model load for both vector sets
+    encoder = Encoder(settings.embedding)  # one model load for every vector set
     vectors = _vector_store(settings)
-    for namespace, items, template in (
-        ("jobs", [TextItem(id=j.job_id, text=job_text(j)) for j in jobs], TEMPLATE_HASH),
+    sets: list[tuple[str, list[TextItem], str, TextKind]] = [
+        ("jobs", [TextItem(id=j.job_id, text=job_text(j)) for j in jobs], TEMPLATE_HASH, "job"),
         (
             "job_titles",
             [TextItem(id=job_id, text=text) for job_id, text in titles if text],
             TITLE_TEMPLATE_HASH,
+            "job",
         ),
-    ):
+    ]
+    professions = load_professions(settings.config_dir)
+    if professions is not None:
+        sets += [
+            (
+                "job_cores",
+                [TextItem(id=j.job_id, text=job_core_text(j)) for j in jobs],
+                PROFESSION_TEMPLATE_HASH,
+                "job",
+            ),
+            (
+                "professions",
+                [
+                    TextItem(id=name, text=profession_text(name, description))
+                    for name, description in professions.professions.items()
+                ],
+                PROFESSION_TEMPLATE_HASH,
+                "facet",
+            ),
+        ]
+    for namespace, items, template, kind in sets:
         report = embed_items(
-            namespace, items, kind="job", encoder=encoder, store=vectors, template_hash=template
+            namespace, items, kind=kind, encoder=encoder, store=vectors, template_hash=template
         )
         _print_embed_report(report)
         log.info("embed_jobs", extra={"fields": report.model_dump()})
@@ -470,7 +489,9 @@ def match(
 ) -> None:
     """Shortlist contractors for every active job from the stored vectors. Matches that pass
     every rule check go to matches.csv, the others to matches_flagged.csv with the reason."""
-    from jobmatch.match.run import MatchError, run_matching
+    from jobmatch.match.professions import profession_notes
+    from jobmatch.match.run import ACTIVE_STATUSES, MatchError, run_matching
+    from jobmatch.storage.csv_store import CsvJobRepository
 
     settings: Settings = ctx.obj
     try:
@@ -478,6 +499,9 @@ def match(
     except MatchError as exc:
         typer.echo(str(exc))
         raise typer.Exit(1) from exc
+    store = CsvStore(settings.paths.data_dir, lock_timeout=settings.storage.lock_timeout_seconds)
+    active = [j for j in CsvJobRepository(store).list_all() if j.status in ACTIVE_STATUSES]
+    notes, no_notes = profession_notes(settings, active, list(profiles.values()))
 
     for result in results:
         typer.echo(f"\n{result.title}  [{result.job_id}]")
@@ -493,11 +517,15 @@ def match(
                 parts.append(f"title {c.title_cosine:.3f} ({c.matched_title})")
             if c.skill_overlap is not None:
                 parts.append(f"skills {c.skill_overlap:.2f}")
+            if c.lexical is not None:
+                parts.append(f"words {c.lexical:.3f}")
             typer.echo(f"       {' · '.join(parts)}")
             for reason in c.gates_failed:
                 typer.echo(f"       - {reason}")
             if c.missing_must_have:
                 typer.echo(f"       - missing must-have: {', '.join(c.missing_must_have)}")
+            if note := notes.get((result.job_id, c.contractor_id)):
+                typer.echo(f"       - profession (hint): {note.text()}")
     prefix = "[dry run] " if report.dry_run else ""
     typer.echo(
         f"\n{prefix}{report.jobs} job(s) × {report.contractors} contractor(s) · "
@@ -509,6 +537,8 @@ def match(
             f"{report.unchanged} unchanged · {report.status_changes} job status change(s)"
         )
     typer.echo(f"scoring version {report.scoring_version}")
+    if no_notes:
+        typer.echo(f"Profession notes left out: {no_notes}")
     log.info("match", extra={"fields": report.model_dump()})
 
 
@@ -519,6 +549,7 @@ def export_matches(ctx: typer.Context) -> None:
     from datetime import UTC, datetime
 
     from jobmatch.match.export import build_rows, write_export
+    from jobmatch.match.run import ACTIVE_STATUSES
     from jobmatch.storage.csv_store import (
         CsvContractorProfileRepository,
         CsvJobRepository,
@@ -534,11 +565,15 @@ def export_matches(ctx: typer.Context) -> None:
         if path.exists()
         else []
     )
+    jobs = {j.job_id: j for j in CsvJobRepository(store).list_all()}
     rows = build_rows(
         CsvMatchRepository(store).list_all(),
         CsvMatchRepository(store, flagged=True).list_all(),
-        {j.job_id: j for j in CsvJobRepository(store).list_all()},
+        jobs,
         {p.talent_id: p for p in profiles},
+        _profession_notes(
+            settings, [j for j in jobs.values() if j.status in ACTIVE_STATUSES], profiles
+        ),
     )
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     dest = settings.paths.exports_dir / f"matches-{stamp}.csv"
@@ -571,11 +606,14 @@ def export_trial_run(ctx: typer.Context) -> None:
         if path.exists()
         else []
     )
+    active = [j for j in CsvJobRepository(store).list_all() if j.status in ACTIVE_STATUSES]
     rows = build_trial_rows(
         CsvMatchRepository(store).list_all(),
-        [j for j in CsvJobRepository(store).list_all() if j.status in ACTIVE_STATUSES],
+        active,
         {p.talent_id: p for p in profiles},
         settings.exports.trial_run_per_job,
+        CsvMatchRepository(store, flagged=True).list_all(),
+        _profession_notes(settings, active, profiles),
     )
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     dest = settings.paths.exports_dir / f"trial-run-{stamp}.csv"
@@ -583,6 +621,18 @@ def export_trial_run(ctx: typer.Context) -> None:
     jobs = len({r.job_url for r in rows})
     typer.echo(f"Wrote {count} row(s) for {jobs} job(s) to {dest}")
     log.info("export_trial_run", extra={"fields": {"rows": count, "jobs": jobs}})
+
+
+def _profession_notes(
+    settings: Settings, jobs: list["Job"], profiles: list["ContractorProfile"]
+) -> dict[tuple[str, str], str]:
+    """Profession notes for the exports, or none (with the reason) when vectors are missing."""
+    from jobmatch.match.professions import profession_notes
+
+    notes, reason = profession_notes(settings, jobs, profiles)
+    if reason:
+        typer.echo(f"Profession notes left out: {reason}")
+    return {pair: note.text() for pair, note in notes.items()}
 
 
 def _reviewed_table(settings: Settings, path: Path | None = None) -> "CsvTable[ReviewedMatch]":

@@ -27,21 +27,14 @@ def test_empty_data_dir_is_valid(data_dir: Path) -> None:
 
 
 def test_invalid_data_fails_with_row_reference(data_dir: Path) -> None:
-    (data_dir / "contractor_facets.csv").write_text(
-        "contractor_id,facet_id,area,years\nC9,data,Data,-3\n", encoding="utf-8"
+    (data_dir / "reviews.csv").write_text(
+        "match_id,decision,reason_code,notes,reviewer,reviewed_at\n"
+        "M1,maybe,,,R1,2026-11-04T00:00:00Z\n",
+        encoding="utf-8",
     )
     result = invoke("validate-data", "--data-dir", str(data_dir))
     assert result.exit_code == 1
-    assert "contractor_facets.csv, row 2" in result.output
-
-
-def test_facet_with_unknown_contractor_is_reported(data_dir: Path) -> None:
-    (data_dir / "contractor_facets.csv").write_text(
-        "contractor_id,facet_id,area\nC9,data,Data\n", encoding="utf-8"
-    )
-    result = invoke("validate-data", "--data-dir", str(data_dir))
-    assert result.exit_code == 1
-    assert "unknown contractor_id 'C9'" in result.output
+    assert "reviews.csv, row 2" in result.output
 
 
 def test_unbuilt_commands_exit_with_code_2() -> None:

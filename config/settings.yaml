@@ -22,7 +22,10 @@ embedding:
   model_name: BAAI/bge-m3
   model_revision: 5617a9f61b028005a4858fdac845db406aefb181 # main commit at first download, 2026-10-22
   batch_size: 8 # GUESS: a bigger model, so smaller batches on the client's 1.4 GHz CPU
-  max_seq_length: 512 # GUESS: bge-m3 reads up to 8192 tokens; 512 keeps CPU time down
+  # bge-m3 reads up to 8192 tokens. 512 until 2026-11-03, when it cut 35% of job texts
+  # (median 440 tokens, longest 948). 1024 covers them all for ~15% more CPU time per job
+  # (doc/PROTOTYPES.md). Part of the stored model version: changing it re-embeds everything.
+  max_seq_length: 1024
   normalize_embeddings: true
   # bge-m3 dense vectors need no instruction prefix on either side.
   job_prefix: ""
@@ -46,23 +49,38 @@ matching: # phase 4. Every number here is a hyperparameter, to be tuned on revie
   # GUESS: contractors scoring below this are not shortlisted. Raised from 0.30 on 2026-10-27:
   # on 111 judged pairs (data/eval/llm_judge_labels.csv, not blind) it removes 27 non-fits,
   # 6 partial fits and 1 fit; no reviewer A/B pair in data/eval scores below 0.40.
-  min_score: 0.40
+  # Raised to 0.45 on 2026-11-02: of 168 judged shortlist pairs (not blind), the 29 between
+  # 0.40 and 0.45 held no fit (19 no, 10 partial); the lowest reviewer A/B pair scores 0.50.
+  min_score: 0.45
   # Raw bge-m3 cosines sit in a narrow range; they are stretched to 0-1 between floor and
   # ceiling. Full texts and short titles score differently, so each has its own pair.
   cosine_floor: 0.45 # GUESS: about the least related pair seen on 2026-10-22
   cosine_ceiling: 0.80 # GUESS: about the closest pair seen on 2026-10-22
   title_floor: 0.50 # GUESS: job title vs the contractor's closest title
   title_ceiling: 0.85 # GUESS
+  # Checked 2026-11-04 on 155 blind labels (data/eval/blind_consensus.csv; scripts/prototypes/
+  # tune.py): 432 weight combinations, 20 x 5-fold cross-validation by job. The best weights
+  # on the training jobs did worse than these on the held-out jobs (mean -0.005, worse in 56%
+  # of folds), so these stay. Today: within-job fit>no 0.919, across jobs 0.927.
   weights: # a part with nothing to compare (no skills, no titles) is left out of the average
     cosine: 0.45 # GUESS: full job text vs full profile
     title: 0.30 # GUESS: job title vs the contractor's closest title
     skill_overlap: 0.25 # GUESS: share of the job's skills the contractor has
     field: 0.20 # GUESS (0.10 until 2026-10-26: too light to keep sales profiles off an HR role)
+    # GUESS: TF-IDF word overlap of the raw posting and profile, no skill list (2026-11-02,
+    # doc/PROTOTYPES.md). Sweep on 381 judged pairs: 0.2 is the best balance; more helps
+    # no-match detection a little but hurts the order within a job. Gains are within noise.
+    lexical: 0.20
   # Skill categories used across every type of work, so they say nothing about it.
   field_ignore_categories: [management, business, learned]
   bands: # on the final score
     high: 0.70 # GUESS
-    medium: 0.50 # GUESS
+    # GUESS: 0.50 until 2026-11-02. On 381 judged pairs, 4% of pairs below 0.60 are fits,
+    # 21% at 0.60-0.65 and 45-93% above, so "medium" now starts at 0.60.
+    medium: 0.60
+    # 2026-11-04, 155 blind labels: 80% of pairs scoring 0.60+ are fits (0.60-0.70: 74%,
+    # 0.70+: 86%), 10% at 0.45-0.60 and 3% below 0.45. The sheet over-samples hard pairs, so
+    # read these as relative, not absolute.
   # A posting's skill tags can run to a dozen; sharing 3 of 12 should still count. The skill
   # part is shared skills / min(job's skill count, this cap), so at most 1.
   skill_overlap_cap: 4 # GUESS
@@ -77,6 +95,13 @@ matching: # phase 4. Every number here is a hyperparameter, to be tuned on revie
   assume_all_remote: true
   hours_per_year: 2080 # converts yearly/monthly/weekly/daily job pay to hourly (40 h weeks)
   rate_tolerance: 1.25 # GUESS: note when a contractor's rate is above the job's top hourly pay times this
+  # TF-IDF cosines run low: on 2026-11-02 the median pair was 0.022, the median labelled fit
+  # 0.096 and the 99th percentile 0.127. Stretched from [floor, ceiling] to [0, 1].
+  lexical_floor: 0.0
+  lexical_ceiling: 0.10 # GUESS: about a typical fit gets full credit
+  # Words too common to say anything (EN/FR, accent-insensitive). Rare words already count
+  # more; this list only drops the commonest.
+  lexical_stopwords: [the, and, for, with, you, our, are, will, this, that, your, from, have, has, who, all, can, not, des, les, une, pour, avec, dans, sur, par, aux, est, vous, nous, qui, que, job, role, team, work]
 
 exports:
   trial_run_per_job: 2 # contractors per job in exports/trial-run-<time>.csv (export-trial-run)

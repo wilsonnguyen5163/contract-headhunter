@@ -229,6 +229,13 @@ def test_skills_come_only_from_job_sections() -> None:
          (70000, 85000, PayUnit.YEAR, None)),  # "Hourly" contradicts the amounts
         ("Salary\n$650 per day", "", (650, None, PayUnit.DAY, "CAD")),
         ("", "Salary: $75,000 to $75,000 per year", (75000, None, PayUnit.YEAR, "CAD")),
+        # A date after the pay is not the low end of a range.
+        ("Salary: $46.90 hourly. Advertised until 2026-11-15.", "",
+         (46.90, None, PayUnit.HOUR, "CAD")),
+        ("Salaire : 46,90 $ de l'heure. Affiché jusqu'au 2026-11-15.", "",
+         (46.90, None, PayUnit.HOUR, "CAD")),
+        ("", "Salary: $46.08 to $61.64 hourly. Advertised until 2026-11-28.",
+         (46.08, 61.64, PayUnit.HOUR, "CAD")),
     ],
 )  # fmt: skip
 def test_pay_parsing(pay_text: str, body: str, expected: tuple) -> None:
@@ -480,6 +487,30 @@ def test_permanent_role_about_contracts_is_permanent() -> None:
         ("Full-time FTC until March 2027", EmploymentType.CONTRACT),
         ("Our FTCs are paid weekly", EmploymentType.CONTRACT),  # plural still counts
         ("Great team, great culture.", EmploymentType.UNKNOWN),
+        # Other fields (2026-11-04)
+        ("Family Physician - Locum, 3 months", EmploymentType.CONTRACT),
+        ("Médecin remplaçant en GMF, été 2027", EmploymentType.CONTRACT),
+        ("Grade 4 Teacher - LTO until June", EmploymentType.CONTRACT),
+        ("Enseignante suppléante, école primaire", EmploymentType.CONTRACT),
+        ("Sessional Instructor, Accounting (Winter term)", EmploymentType.CONTRACT),
+        ("Chargé de cours en droit des affaires", EmploymentType.CONTRACT),
+        ("Policy Analyst - specified period employment, 12 months", EmploymentType.CONTRACT),
+        ("Analyste en politiques, emploi pour une période déterminée", EmploymentType.CONTRACT),
+        ("Electrician, for the duration of the project", EmploymentType.CONTRACT),
+        ("Charpentier, pour la durée du projet à Laval", EmploymentType.CONTRACT),
+        ("Travel nurse, 13-week assignments", EmploymentType.CONTRACT),
+        ("Commis de bureau, poste temporaire", EmploymentType.CONTRACT),
+        ("Registered Nurse, regular full-time, days", EmploymentType.PERMANENT),
+        ("Assistant Professor, tenure-track", EmploymentType.PERMANENT),
+        ("Infirmière, poste régulier à temps plein", EmploymentType.PERMANENT),
+        # The employer or a perk, not the job: no signal
+        (
+            "Site Supervisor at a general contractor. Business casual office.",
+            EmploymentType.UNKNOWN,
+        ),
+        ("Lab Technician at a contract research organization", EmploymentType.UNKNOWN),
+        ("Nurse - we offer seasonal flu shots", EmploymentType.UNKNOWN),
+        ("Per diem shifts available", EmploymentType.UNKNOWN),  # weak alone
     ],
 )
 def test_contract_phrases(text: str, expected: EmploymentType) -> None:
@@ -493,6 +524,9 @@ def test_contract_phrases(text: str, expected: EmploymentType) -> None:
         ("Great team", "fixed_term", EmploymentType.CONTRACT),
         ("Great team", "Temporaire", EmploymentType.TEMPORARY),
         ("Contrat de 6 mois", "full_time", EmploymentType.CONTRACT),  # unknown value: phrases
+        ("Great team", "Term or contract", EmploymentType.CONTRACT),  # Job Bank wording
+        ("Great team", "Locum", EmploymentType.CONTRACT),
+        ("Great team", "Per diem", EmploymentType.TEMPORARY),
     ],
 )
 def test_structured_field_wins_over_phrases(
@@ -534,6 +568,30 @@ def test_duration_parsing(text: str, months: float | None) -> None:
     ],
 )
 def test_duration_written_as_words(text: str, months: float | None) -> None:
+    assert parse_duration_months(text, RULES.number_words) == months
+
+
+@pytest.mark.parametrize(
+    ("text", "months"),
+    [
+        # Words between the length and the contract word.
+        ("This position is a 2-year temporary full-time contract opportunity.", 24.0),
+        ("Type: Full-time, one-year parental leave contract position", 12.0),
+        ("Poste de 1 an en contrat temporaire", 12.0),
+        # A probation period is skipped; the real length comes next.
+        ("1 year term contract. Full time (with 3 months probationary period).", 12.0),
+        ("6-month contract after a 3-month trial period", 6.0),
+        ("Contrat de 6 mois; 3 mois de probation", 6.0),
+        # Experience, not a contract length.
+        ("5 years in a contract role", None),
+        ("5 years of long-term care", None),
+        ("3 years experience in contract law", None),
+        ("Deux ans d'expérience en gestion de contrats", None),
+    ],
+)
+def test_duration_skips_probation_and_reads_across_short_gaps(
+    text: str, months: float | None
+) -> None:
     assert parse_duration_months(text, RULES.number_words) == months
 
 
@@ -618,7 +676,7 @@ def test_asides_are_never_bullets() -> None:
         ("C#/.NET Core, ASP.NET", ["c#", ".net"]),
         ("Node.js and React.js", ["node.js", "react"]),
         ("Tableau de bord mensuel", []),  # French "tableau" is not the BI tool
-        ("Power BI dashboards, Excel avancé", ["power bi", "excel"]),
+        ("Power BI dashboards, Excel avancé", ["power bi", "data visualization", "excel"]),
         (
             "Comptabilité, paie et conciliation bancaire",
             ["accounting", "payroll", "reconciliation"],
@@ -651,6 +709,33 @@ def test_asides_are_never_bullets() -> None:
         ("Coordination d'événements corporatifs", ["event planning"]),
         ("PeopleSoft FSCM and Workday Financials", ["erp implementation"]),
         ("Senior Webflow Digital Producer", ["content management systems", "digital production"]),
+        # 2026-11-02: data strategy and influencer postings had no tags
+        (
+            "Design interactive dashboards using Power Business Intelligence (BI)",
+            ["data visualization", "power bi"],
+        ),
+        (
+            "Develop forecasting and capacity models for workforce planning",
+            [
+                "forecasting",
+                "workforce planning",
+            ],
+        ),
+        (
+            "Visualisation de données et planification de la main-d'œuvre",
+            [
+                "data visualization",
+                "workforce planning",
+            ],
+        ),
+        ("Lead influencer initiatives with content creators", ["influencer marketing"]),
+        ("Gérer les relations avec les influenceurs", ["influencer marketing"]),
+        ("Influencer les décisions de la direction", []),  # French verb, not the skill
+        # 2026-11-02: words that tagged the wrong skill
+        ("User research from participant recruitment to synthesis", ["ux research"]),
+        ("Promotional materials and recruitment campaigns", []),
+        ("Sprint planning, defect triage and acceptance testing", []),
+        ("Triage et soins aux patients à l'urgence", ["patient care"]),
         ("", []),
     ],
 )
@@ -671,6 +756,27 @@ def test_skill_extraction(text: str, expected: list[str]) -> None:
         ("Tech Lead / Senior Engineer", "lead"),
         ("Data Analyst II", "intermediate"),
         ("Project Manager", None),
+        # Creative-industry director titles are lead, not executive (longest phrase wins).
+        ("Creative Director, Media Centre", "lead"),
+        ("Senior Art Director", "lead"),
+        ("Directrice de création", "lead"),
+        ("Directeur artistique", "lead"),
+        ("Executive Creative Director", "executive"),
+        ("Director of Finance", "executive"),
+        ("Directeur des finances", "executive"),
+        # Trades, health and schools (2026-11-04)
+        ("Electrical Apprentice (2nd year)", "junior"),
+        ("Apprentie plombière", "junior"),
+        ("Journeyperson Electrician", "intermediate"),
+        ("Charpentier compagnon", "intermediate"),
+        ("Site Foreman, Commercial Construction", "lead"),
+        ("Contremaître de chantier", "lead"),
+        ("Charge Nurse, Emergency", "lead"),
+        ("Infirmière-chef, soins intensifs", "lead"),
+        ("Elementary School Principal", "executive"),
+        ("Vice-Principal, Secondary", "lead"),
+        ("Internal Auditor", None),  # "intern" only as a whole word
+        ("Student Success Advisor", None),  # "student" is not a level
     ],
 )
 def test_seniority(title: str, expected: str | None) -> None:

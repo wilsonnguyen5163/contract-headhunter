@@ -65,6 +65,61 @@ contract:
   - { phrase: "congé parental", lang: fr, weight: 0.7 }
   - { phrase: "possibilité de prolongation", lang: fr, weight: 0.6 }
   - { phrase: "prolongation possible", lang: fr, weight: 0.6 }
+  # Other fields (2026-11-04): how contract work is worded outside marketing and tech.
+  # Weights are GUESSES, like the rest; tests in tests/test_normalize_fields.py.
+  # Staffing and assignments (any field)
+  - { phrase: "temp-to-perm", lang: en, weight: 0.6 }
+  - { phrase: "temp to hire", lang: en, weight: 0.6 }
+  - { phrase: "short-term assignment", lang: en, weight: 0.8 }
+  - { phrase: "long-term assignment", lang: en, weight: 0.8 }
+  - { phrase: "length of assignment", lang: en, weight: 0.6 }
+  - { phrase: "assignment length", lang: en, weight: 0.6 }
+  - { phrase: "acting assignment", lang: en, weight: 0.8 }
+  - { phrase: "poste temporaire", lang: fr, weight: 0.8 }
+  - { phrase: "emploi temporaire", lang: fr, weight: 0.8 }
+  - { phrase: "affectation temporaire", lang: fr, weight: 0.8 }
+  - { phrase: "affectation intérimaire", lang: fr, weight: 0.8 }
+  - { phrase: "mandat temporaire", lang: fr, weight: 1.0 }
+  # Public sector (federal "specified period", provincial "term", Quebec "occasionnel")
+  - { phrase: "specified period", lang: en, weight: 1.0 }
+  - { phrase: "determinate", lang: en, weight: 1.0 } # whole word: never inside "indeterminate"
+  - { phrase: "term employment", lang: en, weight: 0.9 }
+  - { phrase: "term appointment", lang: en, weight: 0.8 }
+  - { phrase: "limited-term", lang: en, weight: 0.8 }
+  - { phrase: "limited-term appointment", lang: en, weight: 1.0 }
+  - { phrase: "période déterminée", lang: fr, weight: 1.0 }
+  - { phrase: "emploi occasionnel", lang: fr, weight: 0.8 }
+  - { phrase: "liste de rappel", lang: fr, weight: 0.6 }
+  # Healthcare
+  - { phrase: "locum", lang: en, weight: 1.0 }
+  - { phrase: "locum tenens", lang: en, weight: 1.0 }
+  - { phrase: "travel nurse", lang: en, weight: 0.8 }
+  - { phrase: "travel nursing", lang: en, weight: 0.8 }
+  - { phrase: "agency nurse", lang: en, weight: 0.6 }
+  - { phrase: "per diem", lang: en, weight: 0.4 }
+  - { phrase: "relief position", lang: en, weight: 0.6 }
+  - { phrase: "médecin remplaçant", lang: fr, weight: 1.0 }
+  - { phrase: "médecin remplaçante", lang: fr, weight: 1.0 }
+  - { phrase: "infirmière d'agence", lang: fr, weight: 0.6 }
+  # Education (Ontario "LTO", college and university sessionals, Quebec "chargé de cours")
+  - { phrase: "long-term occasional", lang: en, weight: 1.0 }
+  - { phrase: "LTO", lang: en, weight: 1.0 }
+  - { phrase: "occasional teacher", lang: en, weight: 0.8 }
+  - { phrase: "supply teacher", lang: en, weight: 0.8 }
+  - { phrase: "sessional", lang: en, weight: 0.9 }
+  - { phrase: "sessional instructor", lang: en, weight: 1.0 }
+  - { phrase: "contract faculty", lang: en, weight: 1.0 }
+  - { phrase: "chargé de cours", lang: fr, weight: 0.9 }
+  - { phrase: "chargée de cours", lang: fr, weight: 0.9 }
+  - { phrase: "suppléance", lang: fr, weight: 0.8 }
+  - { phrase: "enseignant suppléant", lang: fr, weight: 0.8 }
+  - { phrase: "enseignante suppléante", lang: fr, weight: 0.8 }
+  # Construction and trades: hired for one project
+  - { phrase: "for the duration of the project", lang: en, weight: 0.8 }
+  - { phrase: "until project completion", lang: en, weight: 0.8 }
+  - { phrase: "project duration", lang: en, weight: 0.5 }
+  - { phrase: "pour la durée du projet", lang: fr, weight: 0.8 }
+  - { phrase: "jusqu'à la fin du projet", lang: fr, weight: 0.8 }
 
 permanent:
   - { phrase: "permanent", lang: en, weight: 1.0 }
@@ -79,6 +134,14 @@ permanent:
   - { phrase: "emploi régulier", lang: fr, weight: 0.8 }
   - { phrase: "CDI", lang: fr, weight: 1.0 }
   - { phrase: "durée indéterminée", lang: fr, weight: 1.0 }
+  # Other fields (2026-11-04): unionized "regular" posts, tenure track
+  - { phrase: "regular full-time", lang: en, weight: 0.8 }
+  - { phrase: "regular part-time", lang: en, weight: 0.8 }
+  - { phrase: "permanent part-time", lang: en, weight: 1.0 }
+  - { phrase: "tenure-track", lang: en, weight: 1.0 }
+  - { phrase: "tenure track", lang: en, weight: 1.0 }
+  - { phrase: "menant à la permanence", lang: fr, weight: 0.8 }
+  - { phrase: "poste régulier à temps plein", lang: fr, weight: 1.0 }
 
 # Phrases containing a signal word that do NOT describe the job's employment type.
 false_positives:
@@ -109,12 +172,31 @@ false_positives:
   - { phrase: "travailleur étranger temporaire", lang: fr }
   - { phrase: "notre mandat", lang: fr }
   - { phrase: "votre mandat", lang: fr }
+  # Other fields (2026-11-04): the employer, the industry or a benefit, not the job
+  - { phrase: "general contractor", lang: en }
+  - { phrase: "electrical contractor", lang: en }
+  - { phrase: "mechanical contractor", lang: en }
+  - { phrase: "contractor safety", lang: en }
+  - { phrase: "contractor management", lang: en }
+  - { phrase: "contract manufacturing", lang: en }
+  - { phrase: "contract manufacturer", lang: en }
+  - { phrase: "contract research organization", lang: en }
+  - { phrase: "contracting authority", lang: en }
+  - { phrase: "autorité contractante", lang: fr }
+  - { phrase: "business casual", lang: en }
+  - { phrase: "casual dress", lang: en }
+  - { phrase: "seasonal flu", lang: en }
+  - { phrase: "seasonal influenza", lang: en }
+  - { phrase: "temporary resident", lang: en }
+  - { phrase: "résident temporaire", lang: fr }
+  - { phrase: "per diem allowance", lang: en }
+  - { phrase: "travel per diem", lang: en }
 
 # Values of a source's own employment-type field (compared case-insensitively,
 # with "_", "-" and spaces treated alike). The structured field wins over phrases.
 structured_types:
-  contract: [contract, contractor, freelance, fixed term, fixed term contract, ftc, contrat, contractuel, cdd]
-  temporary: [temporary, temp, temporaire, seasonal, saisonnier, casual, occasionnel]
+  contract: [contract, contractor, freelance, fixed term, fixed term contract, ftc, contrat, contractuel, cdd, term or contract, term, locum]
+  temporary: [temporary, temp, temporaire, seasonal, saisonnier, casual, occasionnel, per diem, sessional]
   permanent: [permanent, permanent full time, permanent part time, regular, régulier, indeterminate, cdi]
 
 # Commitment (hours), recorded separately from employment type: a contract can be
