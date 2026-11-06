@@ -6,6 +6,7 @@ Contract roles are often filled first-come, first-served, and checking job board
 
 > **Status:** v0 prototype complete (2026-11-04). Job intake, normalization, embeddings, matching, profession notes, spreadsheet exports and evaluation against 331 blind-labelled pairs work. Next, in v1: an LLM judge for the matching itself. The review UI, automatic job-board feeds and the scheduler are not built yet.
 
+> **Current:** v1 prototype is now underway. An LLM judge for the matching itself. The review UI, automatic job-board feeds and the scheduler are not built yet.
 ---
 
 ## What this repo contributes

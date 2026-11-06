@@ -108,3 +108,40 @@ exports:
 
 logging:
   level: INFO
+
+# v1: matching with the Gemini API (doc/V1_PLAN.md). Free tier only. The key is read from the
+# environment variable named in api_key_env (set it in .env, never here).
+llm:
+  provider: gemini
+  model: gemini-3.5-flash-lite
+  base_url: https://generativelanguage.googleapis.com/v1beta
+  api_key_env: GEMINI_API_KEY
+  temperature: 0
+  max_output_tokens: 4096 # GUESS: one job's verdicts plus 5 detailed matches use about 1-1.5k
+  # For Gemini 3 models set thinking_budget: null and thinking_level: low instead.
+  # 2026-11-05: gemini-3.5-flash-lite is a Gemini 3 model, so thinking_level (GUESS: minimal).
+  thinking_budget: null
+  thinking_level: minimal
+  timeout_seconds: 120
+  max_retries: 3 # per-minute 429, 5xx and network errors; a daily-limit 429 is never retried
+  retry_base_seconds: 5 # GUESS: doubles each try unless Google says how long to wait
+  top_k: 5 # contractors described in detail per job (every contractor still gets a verdict)
+  jobs_per_call: 1 # >1 packs several jobs of one profession per call (only if RPD is tight)
+  limits:
+    # GUESS until copied from AI Studio for our project and model (doc/V1_PLAN.md Q1).
+    rpm: 15
+    tpm: 250000
+    rpd: 500
+    tpd: null
+  budget:
+    drain_warn_share: 0.8 # GUESS: stop a run that would use more than 80% of what is left today
+    call_max_tpm_share: 0.5 # GUESS: never send one call estimated above 50% of tpm
+  payload:
+    chars_per_token: 4 # GUESS: local estimate; the API's own count is logged after each call
+    max_job_tokens: 1200 # GUESS: v0 job texts were 440 tokens median, 948 at most
+    summary_max_words: 80 # GUESS
+    max_list_items: 15 # GUESS: per contractor list (skills, keywords, titles)
+    expected_output_tokens: 1500 # GUESS: for budget estimates only
+  prefilter:
+    enabled: false # stays off until the offline recall check passes (V1_PLAN section 7)
+    min_roster: 3 # GUESS: fewer eligible contractors than this widens the roster

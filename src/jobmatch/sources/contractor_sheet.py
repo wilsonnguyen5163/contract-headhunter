@@ -50,6 +50,11 @@ class ProfileColumns(StrictModel):
     seniority: str
     rate: str
     target_titles: list[str]
+    # v1 (2026-11-05), optional: workbooks without these columns still build.
+    primary_profession: str | None = None
+    secondary_professions: str | None = None
+    years_experience: str | None = None
+    languages: str | None = None
 
 
 class ImportColumns(StrictModel):
@@ -137,6 +142,27 @@ def _hours(value: str | None) -> float | None:
     return number if number is not None and number >= 0 else None
 
 
+_LANGUAGE_CODES = {
+    "en": "en", "english": "en", "anglais": "en",
+    "fr": "fr", "french": "fr", "francais": "fr", "français": "fr",
+}  # fmt: skip
+
+
+def _profession(value: str | None) -> str | None:
+    """Profession names are stored lowercase, as in config/professions.yaml."""
+    cleaned = _clean(value)
+    return cleaned.casefold() if cleaned else None
+
+
+def _languages(value: str | None, separators: list[str]) -> list[str]:
+    items = split_list(value, [*separators, ",", "/"])
+    return list(dict.fromkeys(_LANGUAGE_CODES.get(i.casefold(), i.casefold()) for i in items))
+
+
+def _optional(row: Mapping[str, Any], column: str | None) -> Any:
+    return row.get(column) if column else None
+
+
 def _unique_titles(titles: list[str | None]) -> list[str]:
     seen: dict[str, str] = {}
     for title in titles:
@@ -214,6 +240,16 @@ def build_contractors(
                 target_titles=_unique_titles(
                     [primary_role, *(profile.get(c) for c in p_cols.target_titles)]
                 ),
+                primary_profession=_profession(_optional(profile, p_cols.primary_profession)),
+                secondary_professions=[
+                    p.casefold()
+                    for p in split_list(
+                        _optional(profile, p_cols.secondary_professions),
+                        rules.list_separators,
+                    )
+                ],
+                years_experience=_hours(_clean(_optional(profile, p_cols.years_experience))),
+                languages=_languages(_optional(profile, p_cols.languages), rules.list_separators),
             )
         )
 

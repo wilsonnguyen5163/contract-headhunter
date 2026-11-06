@@ -23,8 +23,11 @@ from jobmatch.storage.csv_store import CsvStore
 from jobmatch.storage.vector_store import NpzVectorStore
 
 if TYPE_CHECKING:
+    from jobmatch.config import LlmSettings
     from jobmatch.embed.build import EmbedReport
     from jobmatch.ingest import IngestReport
+    from jobmatch.llm.anonymize import Roster
+    from jobmatch.llm.gemini import GeminiProvider
     from jobmatch.schemas import ContractorProfile, Job, ReviewedMatch
     from jobmatch.storage.csv_store import CsvTable
 
@@ -750,3 +753,500 @@ def evaluate_matches(ctx: typer.Context) -> None:
             }
         },
     )
+
+
+# ---- v1: Gemini matching (doc/V1_PLAN.md) ----
+
+
+def _llm_inputs(
+    settings: Settings,
+) -> "tuple[LlmSettings, CsvStore, list[Job], list[ContractorProfile], Roster]":
+    """The llm settings, active jobs, contractor list and anonymized roster, or exit 1 with
+    the reason. Prints counts only (talent IDs, never names)."""
+    from jobmatch.config import load_professions
+    from jobmatch.llm.anonymize import build_roster
+    from jobmatch.llm.payload import ACTIVE_STATUSES
+    from jobmatch.llm.preview import profession_problems
+    from jobmatch.storage.csv_store import (
+        CsvContractorProfileRepository,
+        CsvJobRepository,
+        CsvStoreError,
+    )
+
+    llm = settings.llm
+    if llm is None:
+        typer.echo("settings.yaml has no llm section.")
+        raise typer.Exit(1)
+    contractors_csv = settings.paths.contractors_csv
+    if not contractors_csv.exists():
+        typer.echo(f"No contractor list at {contractors_csv}. Run build-contractors first.")
+        raise typer.Exit(1)
+    store = CsvStore(settings.paths.data_dir, lock_timeout=settings.storage.lock_timeout_seconds)
+    try:
+        jobs = [j for j in CsvJobRepository(store).list_all() if j.status in ACTIVE_STATUSES]
+        profiles = CsvContractorProfileRepository(
+            contractors_csv, lock_timeout=settings.storage.lock_timeout_seconds
+        ).list_all()
+    except CsvStoreError as exc:
+        typer.echo(f"Cannot read data: {exc}")
+        raise typer.Exit(1) from exc
+
+    roster = build_roster(profiles, llm.payload)
+    typer.echo(f"{len(jobs)} active job(s) · {len(roster.cards)} contractor card(s)")
+    for ex in roster.excluded:
+        typer.echo(f"  left out: {ex.talent_id} ({ex.reason})")
+    professions = load_professions(settings.config_dir)
+    missing, unknown = profession_problems(profiles, professions.professions if professions else [])
+    if missing:
+        typer.echo(f"  {missing} contractor(s) have no primary profession yet (prefilter input)")
+    if unknown:
+        typer.echo(f"  profession not in professions.yaml: {', '.join(unknown)}")
+    return llm, store, jobs, profiles, roster
+
+
+def _gemini(llm: "LlmSettings") -> "GeminiProvider":
+    """The Gemini client, or exit 1 when the key is missing (nothing is sent)."""
+    from jobmatch.llm.gemini import GeminiProvider
+    from jobmatch.llm.provider import LlmConfigError
+
+    try:
+        return GeminiProvider.from_settings(llm)
+    except LlmConfigError as exc:
+        typer.echo(f"{exc}. Nothing was sent.")
+        raise typer.Exit(1) from exc
+
+
+@app.command("llm-preview")
+def llm_preview(
+    ctx: typer.Context,
+    job_ids: Annotated[
+        list[str] | None,
+        typer.Option("--job-id", help="Job to preview (repeatable). Default: the first --limit."),
+    ] = None,
+    limit: Annotated[int, typer.Option("--limit", min=1, help="Jobs to preview.")] = 3,
+    stats: Annotated[
+        bool,
+        typer.Option("--stats", help="Token estimates for every active job; writes nothing."),
+    ] = False,
+) -> None:
+    """Build the Gemini requests a run would send, WITHOUT sending anything. Writes each
+    request body to data/llm_preview/<time>/ so a person can check what would leave the
+    machine (contractors appear only as anonymized cards). --stats prints token estimates
+    and how many requests and days a full run needs at the limits in settings.yaml."""
+    from jobmatch.llm.preview import (
+        preview_calls,
+        preview_folder,
+        preview_stats,
+        write_preview,
+    )
+    from jobmatch.llm.usage import UsageLedger, check_run
+
+    settings: Settings = ctx.obj
+    llm, store, jobs, profiles, roster = _llm_inputs(settings)
+
+    if stats:
+        s = preview_stats(jobs, roster, llm)
+        typer.echo(
+            f"\nModel {llm.model} · limits {llm.limits.rpm} RPM, {llm.limits.tpm:,} TPM, "
+            f"{llm.limits.rpd} RPD (from settings.yaml; estimates use "
+            f"{llm.payload.chars_per_token:g} characters per token)"
+        )
+        typer.echo(f"Roster: about {s.roster_tokens:,} tokens for {s.contractors} contractor(s)")
+        typer.echo(
+            f"Job text: median {s.job_tokens.median:,} · p90 {s.job_tokens.p90:,} · "
+            f"max {s.job_tokens.max:,} tokens"
+        )
+        typer.echo(
+            f"Per call input: median {s.call_input_tokens.median:,} · "
+            f"p90 {s.call_input_tokens.p90:,} · max {s.call_input_tokens.max:,} tokens "
+            f"(largest: {s.largest_call_job}), plus about {s.output_tokens_per_call:,} output"
+        )
+        typer.echo(
+            f"Full run: {s.calls} call(s) · about {s.total_tokens:,} tokens · "
+            f"{s.days_at_rpd} day(s) of requests at {llm.limits.rpd} RPD"
+        )
+        tokens_per_call = s.call_input_tokens.median + s.output_tokens_per_call
+        check = check_run(
+            llm.limits, llm.budget, UsageLedger(store).today(), s.calls, tokens_per_call
+        )
+        typer.echo(f"Budget today: {check.verdict.upper()} · {check.message}")
+        log.info("llm_preview_stats", extra={"fields": s.model_dump()})
+        return
+
+    if job_ids:
+        by_id = {j.job_id: j for j in jobs}
+        absent = [i for i in job_ids if i not in by_id]
+        if absent:
+            typer.echo(f"Not an active job: {', '.join(absent)}")
+            raise typer.Exit(1)
+        selected = [by_id[i] for i in job_ids]
+    else:
+        selected = jobs[:limit]
+    if not selected:
+        typer.echo("No active jobs to preview.")
+        raise typer.Exit(1)
+    calls = preview_calls(selected, roster, llm)
+    folder = preview_folder(settings.paths.data_dir)
+    write_preview(calls, llm, folder)
+    for call in calls:
+        typer.echo(
+            f"  {call.job_ids[0]}: about {call.estimated_input_tokens:,} input tokens "
+            f"(+{llm.payload.expected_output_tokens:,} output expected)"
+        )
+    typer.echo(f"Wrote {len(calls)} request(s) and aliases.json to {folder}")
+    typer.echo("Nothing was sent. Read the files before approving any API call.")
+    log.info("llm_preview", extra={"fields": {"calls": len(calls), "folder": str(folder)}})
+
+
+@app.command("suggest-professions")
+def suggest_professions(ctx: typer.Context) -> None:
+    """ONE Gemini call: suggest a primary profession (and up to 2 secondary ones) from
+    config/professions.yaml for every contractor, from the anonymized cards. Writes
+    data/contractors/profession_suggestions-<time>.csv for a person to check; apply it with
+    apply-professions. Prints the call's token usage."""
+    from datetime import UTC, datetime
+
+    from jobmatch.config import load_professions
+    from jobmatch.llm.professions import parse_answer, prepare_profession_call, write_suggestions
+    from jobmatch.llm.runner import send
+    from jobmatch.llm.usage import UsageLedger, check_run
+
+    settings: Settings = ctx.obj
+    llm, store, _, _, roster = _llm_inputs(settings)
+    professions = load_professions(settings.config_dir)
+    if professions is None or not roster.cards:
+        typer.echo("Nothing to ask: professions.yaml or contractor cards are missing.")
+        raise typer.Exit(1)
+    call = prepare_profession_call(roster, professions, llm)
+    ledger = UsageLedger(store)
+    check = check_run(llm.limits, llm.budget, ledger.today(), 1, call.estimated_total_tokens)
+    typer.echo(f"Budget: {check.verdict.upper()} · {check.message}")
+    if check.verdict == "exceeds":
+        raise typer.Exit(1)
+    outcome = send(
+        _gemini(llm), ledger, llm, call.request,
+        purpose="classify_contractors", estimated_tokens=call.estimated_total_tokens,
+    )  # fmt: skip
+    typer.echo(outcome.line)
+    log.info("llm_call", extra={"fields": outcome.usage.model_dump(mode="json")})
+    if outcome.response is None:
+        typer.echo(f"Call failed: {outcome.usage.note}")
+        raise typer.Exit(1)
+    now = datetime.now(UTC)
+    try:
+        parsed = parse_answer(
+            outcome.response.text, roster, professions, model=outcome.response.model, now=now
+        )
+    except ValueError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(1) from exc
+    for problem in parsed.problems:
+        typer.echo(f"  problem: {problem}")
+    dest = settings.paths.contractors_csv.parent / (
+        f"profession_suggestions-{now.strftime('%Y%m%dT%H%M%SZ')}.csv"
+    )
+    write_suggestions(parsed.suggestions, dest)
+    for s in parsed.suggestions:
+        extra = f" (+ {', '.join(s.secondary_professions)})" if s.secondary_professions else ""
+        typer.echo(f"  {s.talent_id}: {s.primary_profession}{extra} [{s.confidence}]")
+    typer.echo(f"Wrote {len(parsed.suggestions)} suggestion(s) to {dest}")
+    typer.echo("Check them, then: apply-professions <that file>")
+
+
+@app.command("apply-professions")
+def apply_professions(
+    ctx: typer.Context,
+    suggestions: Annotated[Path, typer.Argument(help="A profession_suggestions-*.csv file.")],
+) -> None:
+    """Write suggested professions into contractors.csv (primary and secondary professions
+    only), after a timestamped backup in data/contractors/backups/. No API call.
+    build-contractors rebuilds contractors.csv from the workbook, so put the same values in
+    the workbook's profession columns to keep them."""
+    from jobmatch.llm.professions import apply_suggestions, read_suggestions
+    from jobmatch.storage.csv_store import CsvContractorProfileRepository, CsvStoreError
+
+    settings: Settings = ctx.obj
+    dest = settings.paths.contractors_csv
+    try:
+        rows = read_suggestions(suggestions)
+        profiles = CsvContractorProfileRepository(
+            dest, lock_timeout=settings.storage.lock_timeout_seconds
+        ).list_all()
+    except (OSError, ValueError, CsvStoreError) as exc:
+        typer.echo(f"Cannot read: {exc}")
+        raise typer.Exit(1) from exc
+    report = apply_suggestions(profiles, rows, dest)
+    if report.backup:
+        typer.echo(f"Previous file copied to {report.backup}")
+    typer.echo(f"Updated {report.updated} contractor(s) · {report.unchanged} unchanged · {dest}")
+    if report.not_in_list:
+        typer.echo(f"  not in the contractor list: {', '.join(report.not_in_list)}")
+    typer.echo("Reminder: add the same values to the workbook, or build-contractors drops them.")
+    log.info("apply_professions", extra={"fields": report.model_dump(mode="json")})
+
+
+@app.command("llm-try")
+def llm_try(
+    ctx: typer.Context,
+    job_id: Annotated[
+        str | None, typer.Option("--job-id", help="Job to judge. Default: the first active job.")
+    ] = None,
+) -> None:
+    """Phase 4: judge ONE job with ONE real Gemini call (the whole anonymized roster).
+    Prints the token usage, the verdicts (talent IDs and headlines only) and any problem with
+    the answer, and saves everything to data/llm_results/<time>/. Changes no match data."""
+    from datetime import UTC, datetime
+
+    from jobmatch.llm.payload import job_card, render_job
+    from jobmatch.llm.preview import safe_name
+    from jobmatch.llm.prompt import prepare_call
+    from jobmatch.llm.runner import send
+    from jobmatch.llm.trial import TrialResult, judge_answer, write_result
+    from jobmatch.llm.usage import UsageLedger, check_run
+
+    settings: Settings = ctx.obj
+    llm, store, jobs, profiles, roster = _llm_inputs(settings)
+    if job_id is None:
+        if not jobs:
+            typer.echo("No active jobs.")
+            raise typer.Exit(1)
+        job = jobs[0]
+    else:
+        found = [j for j in jobs if j.job_id == job_id]
+        if not found:
+            typer.echo(f"Not an active job: {job_id}")
+            raise typer.Exit(1)
+        job = found[0]
+    card = job_card(job, llm.payload)
+    call = prepare_call(card, roster, llm)
+    ledger = UsageLedger(store)
+    check = check_run(llm.limits, llm.budget, ledger.today(), 1, call.estimated_total_tokens)
+    typer.echo(f"Budget: {check.verdict.upper()} · {check.message}")
+    if check.verdict == "exceeds":
+        raise typer.Exit(1)
+    outcome = send(
+        _gemini(llm), ledger, llm, call.request,
+        purpose="judge_try", job_ids=call.job_ids, estimated_tokens=call.estimated_total_tokens,
+    )  # fmt: skip
+    typer.echo(outcome.line)
+    log.info("llm_call", extra={"fields": outcome.usage.model_dump(mode="json")})
+
+    judged = None
+    if outcome.response is not None:
+        judged = judge_answer(outcome.response.text, render_job(card), roster, llm.top_k)
+    result = TrialResult(
+        job_id=job.job_id,
+        model=outcome.response.model if outcome.response else llm.model,
+        judge_key=call.judge_key(llm.model),
+        usage=outcome.usage,
+        aliases=roster.aliases,
+        judged=judged,
+        raw_text=outcome.response.text if outcome.response else None,
+    )
+    folder = settings.paths.data_dir / "llm_results" / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    path = write_result(result, folder, safe_name(job.job_id))
+
+    typer.echo(f"\n{card.title}  [{job.job_id}]")
+    if outcome.response is None:
+        typer.echo(f"Call failed: {outcome.usage.note}")
+    elif judged is None or judged.output is None:
+        typer.echo(f"Answer not usable: {judged.error if judged else 'empty'}")
+    else:
+        headline = {p.talent_id: p.standardized_headline or "" for p in profiles}
+        out = judged.output
+        counts = {
+            v: sum(1 for x in out.verdicts if x.verdict == v) for v in ("fit", "partial", "no")
+        }
+        typer.echo(
+            f"Verdicts: {counts['fit']} fit · {counts['partial']} partial · {counts['no']} no"
+            + (" · no_fit" if out.no_fit else "")
+        )
+        for rank, m in enumerate(out.top, start=1):
+            tid = roster.aliases.get(m.alias, m.alias)
+            verdict = next((v.verdict for v in out.verdicts if v.alias == m.alias), "?")
+            typer.echo(f"  {rank}. {m.fit_score:>3} {verdict:<7} {tid}  {headline.get(tid, '')}")
+            if m.requirements_missing:
+                typer.echo(f"       missing: {'; '.join(m.requirements_missing)}")
+            for flag in m.red_flags:
+                typer.echo(f"       flag ({flag.kind}): {flag.detail}")
+            typer.echo(f"       evidence kept: {len(m.evidence)}")
+        for problem in judged.problems:
+            typer.echo(f"  problem: {problem}")
+        for alias, quotes in judged.unverified.items():
+            tid = roster.aliases.get(alias, alias)
+            typer.echo(f"  unverified evidence removed for {tid}: {len(quotes)} quote(s)")
+    typer.echo(f"Saved to {path}")
+    if outcome.response is None or judged is None or judged.output is None:
+        raise typer.Exit(1)
+
+
+def _default_labels(settings: Settings) -> Path:
+    return settings.paths.data_dir / "eval" / "blind_consensus.csv"
+
+
+@app.command("llm-judge")
+def llm_judge(
+    ctx: typer.Context,
+    labelled: Annotated[
+        bool, typer.Option("--labelled", help="Only jobs that have blind labels (phase 5).")
+    ] = False,
+    labels: Annotated[
+        Path | None,
+        typer.Option("--labels", help="Label file (default data/eval/blind_consensus.csv)."),
+    ] = None,
+    job_ids: Annotated[list[str] | None, typer.Option("--job-id", help="Repeatable.")] = None,
+    exclude_language: Annotated[
+        list[str] | None,
+        typer.Option("--exclude-language", help="Skip postings in this language (en, fr…)."),
+    ] = None,
+    max_calls: Annotated[
+        int | None, typer.Option("--max-calls", min=1, help="Stop after this many calls.")
+    ] = None,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Plan and estimate only.")] = False,
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", help="Go ahead even if the run would use most of today's quota."),
+    ] = False,
+) -> None:
+    """Judge active jobs with Gemini, one call per job, paced and logged. Answers are cached in
+    data/llm_results/judgments/ (a re-run only pays for jobs whose text, roster, model or
+    prompt changed). Changes no job or match file."""
+    import statistics
+
+    from jobmatch.llm.compare import read_labels
+    from jobmatch.llm.judge import judge_jobs, judgments_dir, plan_jobs
+    from jobmatch.llm.usage import UsageLedger, check_run
+
+    settings: Settings = ctx.obj
+    llm, store, jobs, _, roster = _llm_inputs(settings)
+    if labelled:
+        path = labels or _default_labels(settings)
+        wanted = {p.job_id for p in read_labels(path)}
+        absent = wanted - {j.job_id for j in jobs}
+        jobs = [j for j in jobs if j.job_id in wanted]
+        typer.echo(
+            f"Labelled jobs: {len(wanted)} · active: {len(jobs)} · not active: {len(absent)}"
+        )
+    if job_ids:
+        jobs = [j for j in jobs if j.job_id in set(job_ids)]
+    if exclude_language:
+        skip = set(exclude_language)
+        before = len(jobs)
+        jobs = [j for j in jobs if not (j.language and j.language.value in skip)]
+        typer.echo(f"Left out {before - len(jobs)} job(s) in {', '.join(sorted(skip))}")
+    if not jobs:
+        typer.echo("No jobs to judge.")
+        raise typer.Exit(1)
+    folder = judgments_dir(settings.paths.data_dir)
+    plan = plan_jobs(jobs, roster, llm, folder)
+    todo = [p for p in plan if not p.cached]
+    calls = min(len(todo), max_calls) if max_calls else len(todo)
+    per_call = int(statistics.median(p.call.estimated_total_tokens for p in plan))
+    ledger = UsageLedger(store)
+    check = check_run(llm.limits, llm.budget, ledger.today(), calls, per_call)
+    typer.echo(
+        f"{len(plan)} job(s): {len(plan) - len(todo)} already judged (cached) · {calls} call(s) "
+        f"to make · about {per_call:,} tokens each, {calls * per_call:,} in all"
+    )
+    typer.echo(f"Budget: {check.verdict.upper()} · {check.message}")
+    if dry_run:
+        typer.echo("Dry run: nothing was sent.")
+        return
+    if check.verdict == "exceeds":
+        typer.echo(f"Stopped. Use --max-calls {check.calls_that_fit} to run what fits today.")
+        raise typer.Exit(1)
+    if check.verdict == "warn" and not yes:
+        typer.echo("Stopped. Add --yes to go ahead, or --max-calls to run fewer.")
+        raise typer.Exit(1)
+    report = judge_jobs(
+        jobs, roster, llm, _gemini(llm), ledger, folder, max_calls=max_calls, echo=typer.echo
+    )
+    typer.echo(
+        f"\n{report.sent} call(s) sent · {report.ok} usable answer(s) · {report.failed} failed · "
+        f"{report.cached} cached · tokens in {report.input_tokens:,} · out "
+        f"{report.output_tokens:,} · total {report.total_tokens:,}"
+    )
+    today = ledger.today()
+    typer.echo(f"Today: {today.requests}/{llm.limits.rpd} requests · {today.tokens:,} tokens")
+    if report.stopped:
+        typer.echo(f"Stopped early: {report.stopped}")
+    log.info("llm_judge", extra={"fields": report.model_dump()})
+
+
+@app.command("llm-compare")
+def llm_compare(
+    ctx: typer.Context,
+    labels: Annotated[
+        Path | None,
+        typer.Option("--labels", help="Label file (default data/eval/blind_consensus.csv)."),
+    ] = None,
+) -> None:
+    """Compare Gemini's cached verdicts (current prompt version) with the blind labels and with
+    v0's latest stored run (matches.csv + matches_flagged.csv, newest scoring version; v0 is
+    not re-run). No API call. Writes the pair-by-pair table to data/llm_results/."""
+    import json
+    from datetime import UTC, datetime
+
+    from jobmatch.llm.compare import compare, latest_v0, read_labels
+    from jobmatch.llm.judge import judgments_dir
+    from jobmatch.llm.prompt import PROMPT_VERSION
+    from jobmatch.llm.trial import TrialResult
+    from jobmatch.storage.csv_store import CsvStoreError, export_csv
+
+    settings: Settings = ctx.obj
+    store = CsvStore(settings.paths.data_dir, lock_timeout=settings.storage.lock_timeout_seconds)
+    try:
+        v0 = latest_v0(store.matches.read_all(), store.matches_flagged.read_all())
+    except CsvStoreError as exc:
+        typer.echo(f"Cannot read v0 matches: {exc}")
+        raise typer.Exit(1) from exc
+    newest: dict[str, TrialResult] = {}
+    for path in sorted(judgments_dir(settings.paths.data_dir).glob("*.json")):
+        r = TrialResult.model_validate_json(path.read_text(encoding="utf-8"))
+        if r.prompt_version != PROMPT_VERSION or r.judged is None or r.judged.output is None:
+            continue
+        if r.job_id not in newest or r.usage.at > newest[r.job_id].usage.at:
+            newest[r.job_id] = r
+    result, rows = compare(read_labels(labels or _default_labels(settings)), newest.values(), v0)
+
+    typer.echo(f"v0: latest scoring version {result.v0_version} ({result.v0_created_at})")
+    typer.echo(f"Gemini: prompt {PROMPT_VERSION} · {len(newest)} job(s) judged")
+    typer.echo(
+        f"Labelled pairs in judged jobs: {result.labelled_pairs} in {result.jobs_judged} job(s)"
+        f" · without a Gemini verdict: {result.pairs_without_verdict}"
+    )
+    typer.echo("\nLabel -> Gemini verdict (fit / partial / no / missing)")
+    for label, counts in result.confusion.items():
+        typer.echo(f"  {label:<8} " + " / ".join(str(counts[k]) for k in counts))
+    typer.echo(
+        f"Exact agreement {result.exact_agreement} · kappa {result.kappa} "
+        f"(labels both AI judges agreed on: {result.kappa_agreed_labels})"
+    )
+    typer.echo("\nPut in front of the reviewer (surfaced / labelled), by label")
+    for s in (result.gemini_surfaced, result.v0_surfaced, result.v0_surfaced_with_flagged):
+        detail = " · ".join(f"{k} {a}/{b}" for k, (a, b) in s.by_label.items())
+        typer.echo(
+            f"  {s.system:<26} {detail} · fits among surfaced {s.fit_share} · "
+            f"'no' among surfaced {s.no_share}"
+        )
+    d = result.within_job_difference
+    typer.echo(
+        f"\nWithin a job, fit ranked above 'no' ({result.within_job_pairs} pairs): Gemini "
+        f"{result.within_job_gemini} · v0 shortlist {result.within_job_v0_shortlist}"
+        + (f" · difference {d.mean} (95% {d.low} to {d.high}, by job)" if d else "")
+    )
+    j = result.jobs
+    typer.echo(
+        f"\nJobs: {j.jobs} · with a labelled fit {j.with_labelled_fit} (Gemini shows nothing for "
+        f"{j.gemini_nothing_but_fit}, v0 for {j.v0_nothing_but_fit}) · without "
+        f"{j.without_labelled_fit} (Gemini shows nothing for {j.gemini_nothing_and_no_fit}, v0 "
+        f"for {j.v0_nothing_and_no_fit})"
+    )
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    out = settings.paths.data_dir / "llm_results" / f"compare-{stamp}"
+    from jobmatch.llm.compare import PairRow
+
+    export_csv(PairRow, rows, out.with_suffix(".csv"))
+    out.with_suffix(".json").write_text(result.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    typer.echo(f"\nWrote {out}.csv (pairs, talent IDs only) and {out}.json")
+    log.info("llm_compare", extra={"fields": json.loads(result.model_dump_json())})

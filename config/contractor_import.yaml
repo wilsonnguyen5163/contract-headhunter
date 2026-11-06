@@ -43,3 +43,11 @@ columns:
     seniority: Seniority
     rate: Rate Expectation
     target_titles: [Target Title 1, Target Title 2, Target Title 3, Target Title 4, Target Title 5]
+    # v1 (2026-11-05): columns to add to the Talent Profiles tab. Optional: a workbook without
+    # them still builds. Professions must be names from config/professions.yaml (a dropdown
+    # in the workbook keeps them exact); they decide the v1 prefilter. Secondary professions:
+    # up to 2, separated by ";". Years: a number. Languages: English, French or both (";").
+    primary_profession: Primary Profession
+    secondary_professions: Secondary Professions
+    years_experience: Years Experience
+    languages: Languages

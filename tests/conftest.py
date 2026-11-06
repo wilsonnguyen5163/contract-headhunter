@@ -31,6 +31,13 @@ def repo_settings() -> Settings:
     return settings.model_copy(update={"paths": paths})
 
 
+@pytest.fixture(autouse=True)
+def _no_llm_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docker Compose loads .env into the container. Remove the Gemini key for every test,
+    so no test can ever reach the real API, even through a mistake in a fake."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+
 @pytest.fixture(scope="session")
 def normalizer() -> Normalizer:
     return Normalizer.from_settings(repo_settings())

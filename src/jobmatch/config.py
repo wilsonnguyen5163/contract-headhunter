@@ -22,6 +22,7 @@ NORMALIZATION_FILE = "normalization.yaml"
 CANADA_LOCATIONS_FILE = "canada_locations.yaml"
 SOURCES_FILE = "sources.yaml"
 PROFESSIONS_FILE = "professions.yaml"
+PROFESSION_TITLES_FILE = "profession_titles.yaml"
 
 
 def _fold(text: str) -> str:
@@ -136,6 +137,66 @@ class LoggingSettings(StrictModel):
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
 
+# ---- v1: LLM matching (doc/V1_PLAN.md) ----
+
+
+class LlmLimits(StrictModel):
+    """Free-tier limits for our project and model, copied from AI Studio. Never assumed in code."""
+
+    rpm: int = Field(gt=0)  # requests per minute
+    tpm: int = Field(gt=0)  # tokens per minute
+    rpd: int = Field(gt=0)  # requests per day (resets at midnight Pacific time)
+    tpd: int | None = Field(default=None, gt=0)  # tokens per day, when the model has one
+
+
+class LlmBudget(StrictModel):
+    # Stop a run that would use more than this share of what is left today.
+    drain_warn_share: float = Field(gt=0, le=1)
+    # Do not send a single call estimated above this share of the per-minute token limit.
+    call_max_tpm_share: float = Field(gt=0, le=1)
+
+
+class LlmPayloadSettings(StrictModel):
+    chars_per_token: float = Field(gt=0)  # local token estimate before a call
+    max_job_tokens: int = Field(gt=0)  # job text cap; lists are cut from the end past it
+    summary_max_words: int = Field(gt=0)  # contractor summary sent to the API
+    max_list_items: int = Field(gt=0)  # per contractor list (skills, keywords, titles)
+    expected_output_tokens: int = Field(gt=0)  # for budget estimates only
+
+
+class LlmPrefilterSettings(StrictModel):
+    enabled: bool
+    min_roster: int = Field(ge=1)
+
+
+class LlmSettings(StrictModel):
+    provider: Literal["gemini"]
+    model: str = Field(min_length=1)
+    base_url: str = Field(min_length=1)
+    api_key_env: str = Field(min_length=1)  # name of the variable in .env, never the key
+    temperature: float = Field(ge=0, le=2)
+    max_output_tokens: int = Field(gt=0)
+    # Gemini 2.5 models take a thinking budget (0 = off); Gemini 3 models a thinking level.
+    # Leave both null to use the model's default.
+    thinking_budget: int | None = Field(default=None, ge=0)
+    thinking_level: Literal["minimal", "low", "medium", "high"] | None = None
+    timeout_seconds: float = Field(gt=0)
+    max_retries: int = Field(ge=0)  # per call, on per-minute 429s, 5xx and network errors
+    retry_base_seconds: float = Field(ge=0)
+    top_k: int = Field(gt=0)
+    jobs_per_call: int = Field(gt=0)
+    limits: LlmLimits
+    budget: LlmBudget
+    payload: LlmPayloadSettings
+    prefilter: LlmPrefilterSettings
+
+    @model_validator(mode="after")
+    def _one_thinking_setting(self) -> "LlmSettings":
+        if self.thinking_budget is not None and self.thinking_level is not None:
+            raise ValueError("set llm.thinking_budget or llm.thinking_level, not both")
+        return self
+
+
 class Settings(StrictModel):
     schema_version: Literal[1]
     config_dir: Path
@@ -146,6 +207,7 @@ class Settings(StrictModel):
     matching: MatchingSettings
     exports: ExportSettings = ExportSettings()
     logging: LoggingSettings
+    llm: LlmSettings | None = None  # v1; None when settings.yaml has no llm section
 
 
 # ---- taxonomies ----
@@ -484,6 +546,40 @@ def load_professions(config_dir: Path) -> Professions | None:
     """None when the file is missing: profession notes are optional."""
     path = config_dir / PROFESSIONS_FILE
     return Professions.model_validate(_read_yaml(path)) if path.exists() else None
+
+
+class ProfessionTitles(StrictModel):
+    """config/profession_titles.yaml (v1): title phrases that place a job in a profession
+    without any model. Keys must be professions.yaml names."""
+
+    version: int
+    titles: dict[str, list[str]]
+
+    @model_validator(mode="after")
+    def _phrases_unique(self) -> "ProfessionTitles":
+        owners: dict[str, str] = {}
+        for profession, phrases in self.titles.items():
+            for phrase in phrases:
+                owner = owners.setdefault(_fold(phrase), profession)
+                if owner != profession:
+                    raise ValueError(
+                        f"title phrase {phrase!r} is listed under both {owner!r} and {profession!r}"
+                    )
+        return self
+
+
+def load_profession_titles(config_dir: Path) -> ProfessionTitles:
+    """The title phrases, checked against the profession names in professions.yaml."""
+    titles = ProfessionTitles.model_validate(_read_yaml(config_dir / PROFESSION_TITLES_FILE))
+    professions = load_professions(config_dir)
+    if professions is None:
+        raise ValueError(f"{PROFESSION_TITLES_FILE} needs {PROFESSIONS_FILE}")
+    unknown = sorted(set(titles.titles) - set(professions.professions))
+    if unknown:
+        raise ValueError(
+            f"{PROFESSION_TITLES_FILE} names unknown profession(s): {', '.join(unknown)}"
+        )
+    return titles
 
 
 def load_canada_locations(config_dir: Path) -> CanadaLocations:
