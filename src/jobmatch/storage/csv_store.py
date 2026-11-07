@@ -32,8 +32,8 @@ from jobmatch.schemas import (
     ContractorProfile,
     Job,
     JobStatus,
+    LlmMatch,
     LlmUsage,
-    Match,
     Review,
     Run,
 )
@@ -134,14 +134,14 @@ def sanitize_cell(cell: str) -> str:
     return cell
 
 
-def _is_list_annotation(annotation: Any) -> bool:
+def is_list_annotation(annotation: Any) -> bool:
     origin = get_origin(annotation)
     if origin in (list, tuple, set, frozenset):
         return True
     if origin is Annotated:
-        return _is_list_annotation(get_args(annotation)[0])
+        return is_list_annotation(get_args(annotation)[0])
     if origin in (Union, types.UnionType):
-        return any(_is_list_annotation(a) for a in get_args(annotation) if a is not type(None))
+        return any(is_list_annotation(a) for a in get_args(annotation) if a is not type(None))
     return False
 
 
@@ -183,7 +183,7 @@ class CsvTable[M: BaseModel]:
         self.unique_key = unique_key
         self.columns = list(model.model_fields)
         self._list_fields = {
-            name for name, f in model.model_fields.items() if _is_list_annotation(f.annotation)
+            name for name, f in model.model_fields.items() if is_list_annotation(f.annotation)
         }
         self._required = {name for name, f in model.model_fields.items() if f.is_required()}
         # Reentrant within this object, so callers can hold it around read + write.
@@ -337,17 +337,19 @@ class CsvTable[M: BaseModel]:
             self._ensure_sidecar()
         return len(cells)
 
-    def rewrite(self, rows: Iterable[M]) -> None:
-        """Replace the whole file atomically, after a timestamped backup of the old one."""
+    def rewrite(self, rows: Iterable[M]) -> Path | None:
+        """Replace the whole file atomically, after a timestamped backup of the old one.
+        Returns the backup's path (None when there was no file yet)."""
         self._require_writable(rewrite=True)
         cells = [self._to_cells(r) for r in rows]
         with self.lock:
-            self._backup()
+            backup = self._backup()
             with atomic_open(self.path) as f:
                 writer = csv.writer(f, lineterminator="\n")
                 writer.writerow(self.columns)
                 writer.writerows(cells)
             self._ensure_sidecar()
+        return backup
 
     def update(self, change: Callable[[list[M]], list[M]]) -> list[M]:
         """Read-modify-write under one lock. `change` may raise to abort without writing."""
@@ -441,23 +443,20 @@ class CsvStore:
             )
 
         self.jobs = table("jobs.csv", Job, TableMode.READ_WRITE, ("job_id",))
-        self.matches = table("matches.csv", Match, TableMode.READ_WRITE, ("match_id",))
-        self.matches_flagged = table(
-            "matches_flagged.csv", Match, TableMode.READ_WRITE, ("match_id",)
-        )
         self.reviews = table("reviews.csv", Review, TableMode.APPEND_ONLY)
         self.runs = table("runs.csv", Run, TableMode.APPEND_ONLY, ("run_id",))
         # v1: one row per LLM API call (token counts only), read by the daily budget guard.
         self.llm_usage = table("llm_usage.csv", LlmUsage, TableMode.APPEND_ONLY, ("call_id",))
+        # v1: Gemini's shortlists (run-once). Rows are only added, never changed.
+        self.llm_matches = table("llm_matches.csv", LlmMatch, TableMode.APPEND_ONLY, ("match_id",))
 
     def all_tables(self) -> list[CsvTable[Any]]:
         return [
             self.jobs,
-            self.matches,
-            self.matches_flagged,
             self.reviews,
             self.runs,
             self.llm_usage,
+            self.llm_matches,
         ]
 
 
@@ -547,29 +546,34 @@ class CsvRunRepository:
         return self._table.read_all()
 
 
-class CsvMatchRepository:
-    """matches.csv, or with flagged=True matches_flagged.csv (a rule check failed)."""
+class CsvLlmMatchRepository:
+    """data/llm_matches.csv (v1). Append-only: re-adding a known match_id does nothing."""
 
-    def __init__(self, store: CsvStore, *, flagged: bool = False) -> None:
-        self._table = store.matches_flagged if flagged else store.matches
+    def __init__(self, store: CsvStore) -> None:
+        self._table = store.llm_matches
 
-    def list_all(self) -> list[Match]:
+    def list_all(self) -> list[LlmMatch]:
         return self._table.read_all()
 
-    def list_for_job(self, job_id: str) -> list[Match]:
-        return [m for m in self.list_all() if m.job_id == job_id]
-
-    def add_many(self, matches: Iterable[Match]) -> list[Match]:
-        """Append matches whose match_id is not stored yet (safe to re-run)."""
+    def add_many(self, matches: Iterable[LlmMatch]) -> list[LlmMatch]:
         with self._table.lock:
             ids = {m.match_id for m in self._table.read_all()}
-            added: list[Match] = []
+            added: list[LlmMatch] = []
             for match in matches:
                 if match.match_id not in ids:
                     ids.add(match.match_id)
                     added.append(match)
             self._table.append(added)
         return added
+
+    def current(self, judge_keys: Mapping[str, str]) -> dict[str, list[LlmMatch]]:
+        """Each job's current shortlist, best first: the rows of the judge_key the job has
+        now (job_id -> judge_key). A job judged "no fit" has no rows, so it maps to []."""
+        out: dict[str, list[LlmMatch]] = {job_id: [] for job_id in judge_keys}
+        for m in self.list_all():
+            if judge_keys.get(m.job_id) == m.judge_key:
+                out[m.job_id].append(m)
+        return {job_id: sorted(rows, key=lambda r: r.rank) for job_id, rows in out.items()}
 
 
 class CsvReviewRepository:
@@ -593,13 +597,15 @@ class CsvReviewRepository:
 
 
 class CsvContractorProfileRepository:
-    """Read-only access to data/contractors/contractors.csv (built by build-contractors)."""
+    """data/contractors/contractors.csv, the app's contractor list (paths.contractors_csv):
+    built from the workbook (build-contractors) or upserted from a loaded file. Every
+    replacement keeps the previous file in data/contractors/backups/ first."""
 
     def __init__(self, path: Path, *, lock_timeout: float) -> None:
         self._table = CsvTable(
             path,
             ContractorProfile,
-            TableMode.READ_ONLY,
+            TableMode.READ_WRITE,
             backups_dir=path.parent / "backups",
             lock_timeout=lock_timeout,
             unique_key=("talent_id",),
@@ -609,5 +615,26 @@ class CsvContractorProfileRepository:
     def path(self) -> Path:
         return self._table.path
 
+    def exists(self) -> bool:
+        return self._table.path.exists()
+
     def list_all(self) -> list[ContractorProfile]:
+        return self._table.read_all()
+
+    def replace_all(self, profiles: Iterable[ContractorProfile]) -> str | None:
+        self._table.path.parent.mkdir(parents=True, exist_ok=True)
+        backup = self._table.rewrite(profiles)
+        return str(backup) if backup else None
+
+
+class CsvUsageRepository:
+    """data/llm_usage.csv (append-only): one row per LLM API call, token counts only."""
+
+    def __init__(self, store: CsvStore) -> None:
+        self._table = store.llm_usage
+
+    def record(self, usage: LlmUsage) -> None:
+        self._table.append([usage])
+
+    def list_all(self) -> list[LlmUsage]:
         return self._table.read_all()

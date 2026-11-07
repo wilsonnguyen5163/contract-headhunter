@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -9,6 +9,9 @@ from jobmatch.config import Settings, load_settings
 from jobmatch.normalize.pipeline import Normalizer
 from jobmatch.schemas import Job
 from jobmatch.storage.csv_store import CsvStore
+
+if TYPE_CHECKING:
+    from jobmatch.app.service import AppService
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_DIR = PROJECT_ROOT / "config"
@@ -75,3 +78,40 @@ def make_job() -> Callable[..., Job]:
         return Job(**fields)
 
     return factory
+
+
+# ---- the desktop app (tests/test_app_service.py, tests/test_app_ui.py) ----
+
+
+@pytest.fixture
+def app_settings(settings: Settings, data_dir: Path) -> Settings:
+    """Repo settings pointed at a temp data folder; fast pacing so tests do not sleep."""
+    assert settings.llm is not None
+    paths = settings.paths.model_copy(
+        update={
+            "data_dir": data_dir,
+            "exports_dir": data_dir.parent / "exports",
+            "contractors_csv": data_dir / "contractors" / "contractors.csv",
+        }
+    )
+    limits = settings.llm.limits.model_copy(update={"rpm": 60_000})
+    llm = settings.llm.model_copy(update={"limits": limits})
+    return settings.model_copy(update={"paths": paths, "llm": llm})
+
+
+@pytest.fixture
+def env() -> dict[str, str]:
+    """The app service's environment (never the real one)."""
+    return {}
+
+
+@pytest.fixture
+def service(app_settings: Settings, tmp_path: Path, env: dict[str, str]) -> "AppService":
+    """The app service with a fake Gemini (test_pipeline.FakeGemini) and a temp .env."""
+    from jobmatch.app.service import AppService
+    from test_pipeline import FakeGemini
+
+    fake = FakeGemini()
+    return AppService(
+        app_settings, tmp_path / "app.env", provider_factory=lambda: fake, environ=env
+    )

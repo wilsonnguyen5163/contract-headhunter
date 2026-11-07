@@ -128,12 +128,16 @@ def test_suggestions_round_trip_and_apply_with_backup(tmp_path: Path) -> None:
 
     contractors = tmp_path / "contractors.csv"
     export_csv(ContractorProfile, PROFILES, contractors)
-    report = apply_suggestions(PROFILES, rows, contractors, now=NOW)
+    report = apply_suggestions(
+        PROFILES, rows, CsvContractorProfileRepository(contractors, lock_timeout=5)
+    )
     assert (report.updated, report.unchanged) == (2, 0)
     assert report.backup is not None and report.backup.exists()
     after = CsvContractorProfileRepository(contractors, lock_timeout=5).list_all()
     assert after[0].primary_profession == "content writing and editing"
     assert after[0].secondary_professions == ["events"]
     assert after[0].talent_name == "Person TAL-1"  # every other cell kept
-    again = apply_suggestions(after, rows, contractors, now=NOW)
+    again = apply_suggestions(
+        after, rows, CsvContractorProfileRepository(contractors, lock_timeout=5)
+    )
     assert (again.updated, again.unchanged) == (0, 2)

@@ -1,6 +1,6 @@
 # Quick start
 
-How to import jobs, run the matcher and read the results. For background, see [README.md](../README.md). Technical details are in [DEVELOPMENT.md](DEVELOPMENT.md).
+How to import jobs, load contractors, run matching with Gemini and read the results. For background, see [README.md](../README.md). Technical details are in [DEVELOPMENT.md](DEVELOPMENT.md).
 
 Every `jobmatch` command runs inside the Docker container:
 
@@ -8,51 +8,48 @@ Every `jobmatch` command runs inside the Docker container:
 docker compose run --rm app python -m jobmatch <command>
 ```
 
-The shell scripts in `scripts/` call the container for you. Run them from the repo root.
+The shell scripts in `scripts/` call the container for you. Run them from the repo root. (A desktop app for end users is planned; this guide is for running it from the repo.)
 
 ---
 
 ## 1. Important commands
 
-### Importing jobs
+### The whole run
 
 | Command | What it does |
 |---|---|
-| `bash scripts/fetch_and_import.sh` | Fetches every new link in `data/inbox/links/*.txt`, imports the paste and saved files in `data/inbox/manual/`, and stores them in `data/jobs.csv`. Links fetched before are read from the cache in `data/raw/`, with no network. |
+| `python -m jobmatch run-once` | **The main command.** Imports new jobs from `data/inbox/`, asks Gemini to judge every active job not judged yet (one call each), and stores the shortlists in `data/llm_matches.csv`. Cached answers cost nothing, so re-running is free. |
+| `python -m jobmatch run-once --contractors <file>` | Same, after loading a contractor file (`.xlsx` master workbook or `.csv`): new talent IDs are added, changed ones updated, others kept. |
+| `python -m jobmatch run-once --yes` | Goes ahead when the run would use most of today's Gemini quota (or, if it can't finish today, sends what fits). Without it, the run stops and asks. |
+| `python -m jobmatch run-once --max-calls N` | Sends at most N calls. |
+| `python -m jobmatch export-llm-matches` | Writes the current shortlists, with contractor names, to `exports/llm-matches-<time>.csv` for Excel. |
+
+### Importing jobs only
+
+| Command | What it does |
+|---|---|
+| `bash scripts/fetch_and_import.sh` | Fetches every new link in `data/inbox/links/*.txt`, imports the paste and saved files in `data/inbox/manual/`, and stores them in `data/jobs.csv`. Links fetched before are read from the cache in `data/raw/`, with no network. `run-once` does this too. |
 | `bash scripts/fetch_and_import.sh --dry-run` | Shows what would be imported and writes nothing. |
 | `bash scripts/fetch_and_import.sh --refresh` | Fetches every link again, ignoring the cache. |
-| `bash scripts/fetch_and_import.sh --links-only` | Imports the links only and skips `data/inbox/manual/`. |
 | `bash scripts/reset_reimport.sh` | Rebuilds `jobs.csv` from scratch. It asks first, `-y` skips the question, `--dry-run` only shows what would happen, and `--refetch` also drops the page cache. |
 | `bash scripts/rename_manual_templates.sh [--dry-run]` | Renames filled-in `_TEMPLATE copy*.txt` files to their job title so they get imported. |
-| `python -m jobmatch ingest-links data/inbox/links [--dry-run] [--refresh]` | The links half of `fetch_and_import.sh`. |
-| `python -m jobmatch ingest-manual data/inbox/manual [--dry-run]` | The paste-file half: `.txt`, `.html` and `.pdf`. |
 
 ### Contractors
 
 | Command | What it does |
 |---|---|
-| `python -m jobmatch build-contractors data/contractors/contractor-master-list.xlsx` | Builds `data/contractors/contractors.csv` from the master workbook. It keeps confirmed contract talent whose profile has an Executive Summary or Core Strengths (others come back once their profile is filled in), and backs up the old file first. It also learns new skills into `skills_learned.yaml`. |
-| `bash scripts/update_contractors.sh [workbook] [--dry-run]` | **Use this when profiles are added or edited.** It runs `build-contractors`. If new skills were learned, it re-imports the jobs (`reset_reimport.sh -y`) so they get the new tags. Then it runs `embed-contractors`, `embed-jobs`, `match` and `export-trial-run`. The default workbook is `data/contractors/contractor-master-list.xlsx`. |
+| `python -m jobmatch build-contractors data/contractors/contractor-master-list.xlsx` | Rebuilds `data/contractors/contractors.csv` from the master workbook (replaces it, after a backup). `run-once --contractors` updates it instead. |
+| `python -m jobmatch suggest-professions` / `apply-professions <file>` | One Gemini call suggests a profession for every contractor; a person checks the file, then applies it. |
 
-### Matching
-
-| Command | What it does |
-|---|---|
-| `python -m jobmatch embed-contractors` | Turns each contractor profile and title into vectors. Only changed profiles are redone. Run it after the contractor list changes. |
-| `python -m jobmatch embed-jobs` | Turns each active job and its title into vectors. Only new or changed jobs are redone. |
-| `python -m jobmatch match --dry-run` | Scores every job against every contractor and prints the shortlists. It stores nothing. |
-| `python -m jobmatch match` | Same as the dry run, but stores the results in `data/matches.csv` and `data/matches_flagged.csv`. |
-| `python -m jobmatch export-trial-run` | Writes the best 2 contractors per job to `exports/trial-run-<time>.csv`. **This is the file the notebook reads.** |
-| `python -m jobmatch export-matches` | Writes every current match (shortlist and flagged) with all scores to `exports/matches-<time>.csv`. |
-
-### Evaluation and checks
+### Gemini tools and checks
 
 | Command | What it does |
 |---|---|
-| `python -m jobmatch import-reviewed-matches <sheet.csv>` | Imports a human-reviewed match sheet into `data/eval/reviewed_matches.csv`. |
-| `python -m jobmatch evaluate-matches` | Compares the matcher's scores with the human reviews and writes `exports/evaluation-<time>.csv`. Read-only. |
-| `python -m jobmatch validate-data` | Checks config, every CSV and the vector files against their schemas. |
-| `python -m jobmatch smoke-embed` | Loads the embedding model and encodes a few test texts. |
+| `python -m jobmatch llm-judge --dry-run` | How many Gemini calls the active jobs still need, and whether today's quota allows them. Sends nothing. |
+| `python -m jobmatch llm-preview` | Writes the exact requests that would be sent to `data/llm_preview/<time>/`, so you can check what leaves the machine. Sends nothing. |
+| `python -m jobmatch llm-try --job-id <id>` | One real call for one job, printed in full. |
+| `python -m jobmatch llm-compare` | Compares Gemini's cached verdicts with the blind labels in `data/eval/`. No API call. |
+| `python -m jobmatch validate-data` | Checks config and every CSV against their schemas. |
 | `pytest` / `ruff check .` | Tests and lint. |
 
 ---
@@ -62,127 +59,73 @@ The shell scripts in `scripts/` call the container for you. Run them from the re
 ### Step 0: one-time setup
 
 ```
-cp .env.example .env
+cp .env.example .env      # then put your Gemini key after GEMINI_API_KEY=
 docker compose build
-# Downloads the embedding model once (BAAI/bge-m3, about 4.5 GB) into the hf-cache Docker volume:
-docker compose run --rm -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 app python -m jobmatch smoke-embed
 ```
 
-After the download, keep `HF_HUB_OFFLINE=1` in `.env` so the container never contacts Hugging Face again.
+The key comes from Google AI Studio (free tier). Never put it anywhere but `.env`.
 
-If the contractor list isn't built yet:
-
-```
-docker compose run --rm app python -m jobmatch build-contractors data/contractors/contractor-master-list.xlsx
-```
-
-### Step 1: import jobs
-
-There are two ways to add a job.
+### Step 1: add jobs
 
 **A. Paste a link** (most job boards, company career pages, LinkedIn job links):
-1. Open or create any `.txt` file in `data/inbox/links/`, for example `2026-10-28.txt`.
+1. Open or create any `.txt` file in `data/inbox/links/`, for example `2026-11-06.txt`.
 2. Add one URL per line. Lines starting with `#` are comments.
-3. Indeed links are always skipped. Use option B for those.
 
-**B. Paste the posting by hand.** Use this for Indeed, and for pages the tool can't read: login walls, or pages that need JavaScript such as Workday, Zoho Recruit and BambooHR.
+**B. Paste the posting by hand.** Use this for pages the tool can't read: login walls, or pages that need JavaScript such as Workday, Zoho Recruit and BambooHR.
 - **Text:** copy `data/inbox/manual/_TEMPLATE.txt` and fill in `url:` and `title:` (other fields are optional). Paste the posting text below the `---` line and save it as UTF-8. Files whose names start with `_` are never imported, so either rename the copy or run `bash scripts/rename_manual_templates.sh`.
 - **Saved page:** in the browser, use "Save page as" to save a `.html` file into `data/inbox/manual/`.
 - **PDF:** "Print > Save as PDF" with headers and footers on, saved into `data/inbox/manual/`.
 
-Then import:
+### Step 2: run
 
 ```
-bash scripts/fetch_and_import.sh --dry-run   # optional: look first
-bash scripts/fetch_and_import.sh
+docker compose run --rm app python -m jobmatch llm-judge --dry-run    # optional: how many calls
+docker compose run --rm app python -m jobmatch run-once               # add --contractors <file> when the list changed
+docker compose run --rm app python -m jobmatch export-llm-matches
 ```
 
-The summary shows each posting as new, duplicate, filtered out (not Canadian or not a contract), needs details, or error. Re-running is safe: jobs that are already stored are skipped.
+`run-once` prints one line per Gemini call with its token use and today's total, then a summary: jobs with matches, jobs with none, jobs not judged yet (for example when the quota ran out; the next run picks them up).
 
-### Step 2 (when needed): reset and re-import
+### Step 3: read the results
 
-Rebuild `jobs.csv` after you change the rules in `config/` (skills, normalization, contract phrases), after `build-contractors` learns new skills, or after the jobs schema changes:
+Open `exports/llm-matches-<time>.csv` in Excel. What each job shows (rule in `llm.shortlist` in `config/settings.yaml`):
+- **Jobs with clear fits:** the fits only, up to 3, best first.
+- **Jobs with no clear fit:** the single best partial fit, for you to check by hand.
+- **Jobs with neither:** one `no match` row.
+
+Gemini still judges every contractor; the others stay in its cached answer, so changing the rule needs no new call. One row per suggested contractor:
+
+| Column | Meaning |
+|---|---|
+| `result` | `match`, `no match` (Gemini judged nobody fit), or `not judged yet`. |
+| `rank` | 1 = best for this job. |
+| `verdict` | `fit` (could do the core of the job now) or `partial` (part of it, or a clear gap). |
+| `detail` | `full`, or `reason only` when Gemini judged the contractor without describing them (rare). **Check these by hand.** |
+| `fit_score` | 0 to 100, Gemini's ordering number (empty for `reason only`). |
+| `reason` | Gemini's one-line reason. |
+| `requirements_met`, `requirements_missing`, `red_flags` | From the posting, as Gemini read it. |
+| `evidence` | Quotes from the posting and profile, each checked word for word against the text sent. `evidence_check` says if one was removed. |
+
+**The export contains contractor names.** Keep it on your machine and don't share it outside the team. The tool only recommends: a person makes every decision.
+
+### When needed: reset and re-import
+
+Rebuild `jobs.csv` after you change the rules in `config/` (normalization, contract phrases) or after the jobs schema changes:
 
 ```
 bash scripts/reset_reimport.sh --dry-run   # shows what would be moved
 bash scripts/reset_reimport.sh -y
 ```
 
-- It moves `jobs.csv` and `runs.csv` into `data/backups/reset-<time>/`. Nothing is deleted.
-- It then re-imports everything in `data/inbox/`. Pages already fetched come from the cache, so no network is needed. Add `--refetch` to fetch them again.
-- It never touches `data/inbox/`, `data/samples/` or the contractor files.
-- Don't run it while another import is running.
+It moves `jobs.csv` and `runs.csv` into `data/backups/reset-<time>/` (nothing is deleted) and re-imports everything in `data/inbox/` from the page cache. Jobs whose text is unchanged keep their cached Gemini answers.
 
-After a reset, run all of step 3 again, including `embed-contractors`.
-
-When the change is new or edited contractor profiles, `bash scripts/update_contractors.sh` does all of this for you. It resets only when new skills were learned.
-
-### Step 3: run the model
-
-```
-docker compose run --rm app python -m jobmatch embed-contractors   # only after the contractor list or skills change
-docker compose run --rm app python -m jobmatch embed-jobs
-docker compose run --rm app python -m jobmatch match --dry-run     # optional: look first
-docker compose run --rm app python -m jobmatch match
-docker compose run --rm app python -m jobmatch export-trial-run
-```
-
-`match` prints each job's shortlist with talent IDs (never names), the score, the band and any missing must-have skills.
-
-How a match is scored (weights are in `config/settings.yaml`, all are first guesses):
-- **Overall meaning:** the whole job text against the whole profile.
-- **Title:** the job title against the contractor's closest title.
-- **Skills:** the share of the job's skills the contractor lists.
-- **Type of work / industry:** the job's field against the contractor's.
-- **Shared words:** how many words the posting and profile share, rare words counting more (TF-IDF, no skill list).
-- **Bands:** high from 0.70, medium from 0.60, low below that. Scores below `min_score` (0.45) aren't shortlisted.
-- **Flagged:** a match that fails a rule check, such as a seniority gap of two or more levels, goes to the flagged list with the reason.
-
-### Step 4: where the results are stored
+### Where things are stored
 
 | File | What's in it |
 |---|---|
 | `data/jobs.csv` | Every imported job, normalized, with its status (`new`, `matched`, `no_match`, `filtered_out`, `needs_details`). |
-| `data/matches.csv` | Shortlisted matches that passed every check. Append-only: a re-run with the same settings adds nothing, and changed settings add a new set of rows. |
-| `data/matches_flagged.csv` | Matches that failed a check, with the reason in `gates_failed`. |
-| `data/embeddings/*.npz` | Vectors for jobs and contractors. Not human-readable. |
-| `exports/trial-run-<time>.csv` | The best 2 contractors per job, for the notebook. |
-| `exports/matches-<time>.csv` | Every current match with all scores and contractor details, for Excel. |
-| `exports/evaluation-<time>.csv` | Matcher compared with the human reviews. |
-
-**The exports contain contractor names.** Keep them on your machine and don't share them outside the team.
-
-### Step 5: read the results in `data_visualizer.ipynb`
-
-The notebook runs on your own machine, not in the container. It needs Jupyter (or VS Code with the Jupyter extension) and `pandas`. Its file paths are absolute (`/home/wilson/Work/do_good/contract-headhunter/...`), so change them to your copy of the repo first.
-
-1. Run `export-trial-run` (step 3) so there is a fresh `exports/trial-run-*.csv`.
-2. Open `data_visualizer.ipynb` and run all cells.
-3. `view_trial_run()` shows the newest trial run. It prints one table with up to 2 contractors per job:
-
-| Column | Meaning |
-|---|---|
-| `job_title`, `company` | The job, shown once per job. |
-| `option` | 1 = best contractor for this job, 2 = second best. |
-| `score` | 0 to 1; higher is a closer fit. |
-| `band` | `high` (0.70 and above), `medium` (0.60 to 0.70), `low` (0.45 to 0.60), or `no match` (no contractor reached 0.45). |
-| `talent_name`, `talent_title` | The contractor and their headline. |
-| `shared_skills` | Skills found in both the job and the profile, joined with `\|`. |
-
-Filters:
-
-```python
-view_trial_run(band='high')                # strong fits only
-view_trial_run(band=['high', 'medium'])    # strong and possible fits
-view_trial_run(band='no match')            # jobs nobody in our pool fits
-view_trial_run('exports/trial-run-20261028T014250Z.csv')   # an older run
-```
-
-4. `view_talent_details('TAL-BC-001')` shows a contractor's profile: location, summary, industry, strengths, search keywords, proof points and target titles. Use it to check why someone was suggested. Contractors with no summary and no strengths are left out of matching entirely; fill in their profile in the workbook and rebuild to bring them back.
-
-**How to read it:**
-- Treat a high band as a good first guess, medium as "check it", and low as a weak fit.
-- Check `shared_skills` against the job: an empty or very generic list (such as "go-to-market" alone) means the match rests on wording, not skills.
-- **Check `profession`.** "different", for example `job: recruiting · talent: sales (different)`, is the most common reason the blind judges rejected a match. It's a hint from `config/professions.yaml`, not part of the score, and "unclear" means the posting's profession couldn't be told.
-- For details the notebook doesn't show (missing must-have skills, flags, why a match was flagged), open `exports/matches-<time>.csv` from `export-matches` in Excel.
-- The tool only recommends. A person makes every decision.
+| `data/llm_matches.csv` | Each job's shortlist (up to 3 fits, or the best partial), per judgment. Rows are only added. |
+| `data/llm_results/judgments/` | Gemini's answers, cached. A job is asked again only when its text, the contractor list, the model or the prompt changes. |
+| `data/llm_usage.csv` | One row per Gemini call: tokens and status, never text. Read by the quota check. |
+| `data/contractors/contractors.csv` | The contractor list (personal data: stays local). |
+| `exports/llm-matches-<time>.csv` | The spreadsheet for people. |

@@ -1,14 +1,11 @@
 # Professions: what a person is accountable for and produces, not the industry or domain
 # they work in ("UX" is a domain: a UX writer and a UX designer are different professions).
-# Used for the reviewer note "profession: job X · talent Y (same / close / different)" in
-# the exports and the match output. The note never changes a score (2026-11-04).
-#
-# Job profession: from the job title and its first 3 responsibilities. Contractor
-# professions: one per title (headline and target titles). Each is the closest description
-# below by embedding similarity, so descriptions say what the work is, in plain words,
-# without seniority. Editing this file re-embeds the descriptions on the next embed-jobs.
+# v1: the shared profession vocabulary. suggest-professions asks Gemini to pick from these
+# names for each contractor (a person checks, then apply-professions), the names are sent to
+# Gemini on the contractor cards, and the planned prefilter uses the `close` groups.
+# Descriptions say what the work is, in plain words, without seniority.
 # Keep entries broad: two titles in the same profession should be able to do each other's
-# core work. Prototype and results: scripts/prototypes/professions.py, doc/PROTOTYPES.md.
+# core work. min_margin was used by the removed v0 classifier; the loader still requires it.
 version: 1
 
 # How much better the best profession must fit than the second for a title to count.

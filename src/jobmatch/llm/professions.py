@@ -9,9 +9,8 @@ by build-contractors, so the same values belong in the workbook's profession col
 
 import csv
 import json
-import shutil
 from collections.abc import Iterable
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -23,6 +22,7 @@ from jobmatch.llm.payload import estimate_tokens, neutralize
 from jobmatch.llm.provider import LlmRequest
 from jobmatch.schemas import ContractorProfile
 from jobmatch.storage.csv_store import export_csv, split_multi
+from jobmatch.storage.repositories import ContractorProfileRepository
 
 PROFESSIONS_PROMPT_VERSION = "2026-11-05.v1"
 MAX_SECONDARY = 2
@@ -231,12 +231,10 @@ class ApplyReport(BaseModel):
 def apply_suggestions(
     profiles: list[ContractorProfile],
     suggestions: list[ProfessionSuggestion],
-    dest: Path,
-    *,
-    now: datetime | None = None,
+    repo: ContractorProfileRepository,
 ) -> ApplyReport:
-    """Write the suggested professions into contractors.csv, after a timestamped backup.
-    Only primary_profession and secondary_professions change; every other cell is kept."""
+    """Write the suggested professions into the contractor list (the repository keeps the old
+    one first). Only primary_profession and secondary_professions change."""
     by_id = {s.talent_id: s for s in suggestions}
     updated = unchanged = 0
     rows: list[ContractorProfile] = []
@@ -258,14 +256,7 @@ def apply_suggestions(
                 }
             )
         )
-    backup: Path | None = None
-    if dest.exists():
-        backups = dest.parent / "backups"
-        backups.mkdir(parents=True, exist_ok=True)
-        stamp = (now or datetime.now(UTC)).strftime("%Y%m%dT%H%M%S%fZ")
-        backup = backups / f"{dest.stem}.{stamp}{dest.suffix}"
-        shutil.copy2(dest, backup)
-    export_csv(ContractorProfile, rows, dest)
+    backup = repo.replace_all(rows)
     known = {p.talent_id for p in profiles}
     return ApplyReport(
         updated=updated,

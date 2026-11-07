@@ -4,6 +4,244 @@ What each change solves, for the team. Newest first. Add an entry with every com
 
 ---
 
+## 2026-11-07 · DataLoader factory: one place decides where records are kept
+
+### What this solves
+Storage can move from CSV files to a database (MongoDB was asked for) without touching the rest of the code.
+- **`storage/loader.py`:**
+  - **`create_loader(settings)`** returns a **DataLoader** with every repository: jobs, contractors, Gemini shortlists, reviews, runs and the Gemini usage log.
+  - **`storage.backend`** in `config/settings.yaml` picks the backend: `csv` (default, the same files as before) or `mongodb`.
+- **MongoDB is a placeholder for now** (user decision). Choosing it stops with "MongoDB storage isn't available yet: set storage.backend to csv". Nothing is installed or sent anywhere. Where it would run (a local server, or a hosted one, which needs CLAUDE.md rule 4 and a privacy decision) is still open.
+- **Rewired code:**
+  - The CLI, `run-once`, the desktop app, ingest and the export now use the loader.
+  - Contractor writes (`build-contractors`, contractor upserts, `apply-professions`) also go through it.
+  - A test fails if code outside `storage/` starts building CSV stores again (`validate-data` excepted, since it's a CSV checker).
+- **Unchanged:** the CSV files (same names, columns and backups). The raw page cache and Gemini's cached answers stay as files.
+- **One small difference:** when `build-contractors` writes the app's own contractor list, it's now a normal internal CSV, not the Excel-style export it was before (no byte-order mark or formula protection). The content is the same. Writing to any other `--out` file is still an export.
+
+### How to use
+Nothing to change. `storage.backend: csv` is the default.
+
+### Checks run
+- `pytest`: 724 passed (7 new for the loader). `ruff check .` and `ruff format --check .`: pass.
+- Also fixed a flaky screen test: it could check a different contractor box from the one it clicked.
+
+---
+
+## 2026-11-06 · Desktop app builds (G3): Mac .app and Windows .exe on GitHub Actions
+
+### What this solves
+End users get a real app to install. There's no Mac here to build one, so GitHub Actions builds both platforms.
+- **`.github/workflows/build-app.yml`** builds on `macos-15-intel` (GitHub's last Intel Mac runner, until fall 2027) and `windows-latest`. Each build:
+  1. installs exactly what `uv.lock` pins;
+  2. runs the tests, with Gemini faked and no key;
+  3. builds with PyInstaller;
+  4. runs the finished app with `--check`;
+  5. uploads **`jobmatch-mac-intel.dmg`** and **`jobmatch-windows.zip`**, kept 14 days.
+- **`packaging/jobmatch.spec`** bundles the code, NiceGUI's and pywebview's files and `config/`. It never bundles `data/`, `exports/` or `.env`.
+- **`--check`:** the app loads its config and every module, opens no window, writes `check.txt` and exits 0 or 1. A missing piece fails the build, not the user's first launch.
+- **[FIRST_LAUNCH.md](FIRST_LAUNCH.md)**, for end users:
+  - installing;
+  - the one-time "unidentified app" confirmation (Mac: System Settings › Privacy & Security › Open Anyway; Windows: More info › Run anyway);
+  - the Gemini key, a first run, reviewing results, where data lives, and troubleshooting.
+
+### How to use
+1. Push the branch.
+2. On GitHub, go to **Actions › build-app › Run workflow**.
+3. When it finishes, download the two files from the run's **Artifacts** section.
+
+### Known limits
+- Built and checked on GitHub's machines only. The real window, the file dialog and the first-launch prompt still need one check on the client's 2019 MacBook and on a Windows PC.
+- Unsigned: macOS and Windows ask for a one-time confirmation (see FIRST_LAUNCH.md).
+- The first runs may need 1–3 fixes (a missing hidden import or file). The build log shows which.
+
+### Checks run
+- `pytest` (Linux, Docker): 717 passed (3 new for `--check`). `ruff check .` and `ruff format --check .`: pass. The build machines also run the tests on macOS and Windows.
+
+---
+
+## 2026-11-06 · Desktop app: design pass on results and Find matches
+
+### What this solves
+Clearer results cards, a visible progress bar, and decisions that can be undone.
+- **Job cards:**
+  - The job title is shown in Title Case. Words with capitals, like UX or SQL, are kept, and the stored data doesn't change.
+  - The title band is a light shade: green for clear fits, yellow for best-partial jobs, none for no match.
+  - **Open posting** is a button with an icon.
+- **Decision buttons:** **Approve / Reject / Needs info** have light green / red / yellow backgrounds.
+- **Decision tag and Reset:** once you decide, the decision tag and a **Reset** button appear at the top right of the contractor's box.
+  - Reset adds a `cleared` row to `reviews.csv`. The file stays append-only, so the history is kept, and the match counts as undecided again.
+- **Details:** **Profile** opens a read-only pop-up of the contractor's row in `contractors.csv` (column name | value). **Resume** is a placeholder for a later version.
+- **Find matches:**
+  - The button is centred.
+  - A progress bar shows each stage: contractors, job import (one step), one step per Gemini call, then saving.
+  - `run_once` reports the stages through a new `progress` callback; the CLI ignores it.
+
+### Checks run
+- `pytest`: 714 passed. `ruff check .` and `ruff format --check .`: pass.
+
+### Follow-up tweaks (same day)
+- The contractor's header row has a fixed height, so the decision tag and Reset appear without pushing anything down.
+- **Open posting** is an icon-only button, with a tooltip and a screen-reader label.
+- Approve / Reject / Needs info backgrounds are two steps lighter. The decision tag keeps the stronger shade.
+- **Sizing follows the window:**
+  - Screens use the full window width, with side padding that grows with the window, up to 1600 px; Settings goes up to 900 px.
+  - The progress log is a third of the window height.
+  - The Profile pop-up is up to 90% of the window wide and 80% high.
+  - Titles, badges and decision buttons wrap on narrow windows. Contractors stay one per row (user choice).
+  - Past those caps, each screen stays centred in the window; the header keeps the full width.
+- **Job card layout:**
+  - The title band holds only the job title, shaded green for clear fits and yellow for best-partial jobs.
+  - Company, location and the matching result are three chips below it; only the result chip is tinted.
+- **Contractor box border:** its left border shows **your decision**: green for approved, red for rejected, yellow for needs info, and none when undecided. It updates on Approve / Reject / Needs info / Reset. The text doesn't shift sideways when the colour appears.
+
+---
+
+## 2026-11-06 · Desktop app screens (G2)
+
+### What this solves
+End users get screens instead of commands (`src/jobmatch/app/`):
+- **Find matches.** Pick a contractor file (optional) and a jobs file, then click **Find matches**.
+  - A jobs file with only links goes to `inbox/links/`; anything else is treated as a pasted or saved posting. Copies never overwrite.
+  - Progress shows live, one line per Gemini call with its tokens, plus today's quota.
+  - If the run would use most of the quota, a dialog asks first.
+- **Results.** One card per job:
+  - **Clear fits** (up to 3), **No clear fit: best partial, check by hand**, **No match**, or **Not judged yet**.
+  - For each contractor: name, verdict, score, reason, and details (requirements met and missing, flags, checked evidence).
+  - **Approve / Reject (with a reason) / Needs info**, saved to `reviews.csv`. The latest decision shows on the card.
+  - **Export to Excel**, and **Add jobs / new search**, which goes back to the first screen.
+- **Settings.** The Gemini key is saved to the app's `.env` and never shown back. Also the reviewer name, and where the data folder is.
+
+The logic is in `app/service.py` (no UI code, tested directly); `app/ui.py` only lays out the screens. `export-llm-matches` and the Export button share `llm/export.export_current`.
+
+### How to use (preview, before the packaged app)
+```
+docker compose build
+docker compose run --rm --service-ports app python -m jobmatch.app --browser --host 0.0.0.0
+```
+Then open http://localhost:8080. The preview uses the repo's `data/`, so **Find matches is a real run**: jobs judged before cost nothing, new jobs cost one Gemini call each, and the quota dialog appears first.
+- The file pickers are upload boxes in the preview; the packaged app uses the normal Mac/Windows file dialog.
+- A key saved in the preview's Settings lives only inside that container; Docker already reads the key from `.env`.
+
+### Checks run
+- `pytest`: 709 passed (17 new: the service, and three screens through NiceGUI's simulated user). `ruff check .` and `ruff format --check .`: pass.
+- The image installs the `app` extra: 491 MB, previously 383 MB.
+- The preview served `/`, `/results` and `/settings` (HTTP 200) with no errors in its log.
+
+---
+
+## 2026-11-06 · Desktop app groundwork (G1): no Docker, Mac and Windows
+
+### What this solves
+The desktop app runs without Docker. This change prepares the code for that; the app's screens come next (G2).
+- **Dependencies for the app** are an optional `app` extra: `nicegui` (the UI) and `pywebview` (a native window). `pyinstaller` is in a `build` group. Docker installs neither, so the image is unchanged.
+- **`uv.lock` now covers Intel Mac and Windows** as well as Linux, with the same 2026-10-05 cutoff. The base packages kept their versions; 57 packages were added for the app and the build.
+  - **Every compiled package has an Intel Mac wheel** (the oldest requires macOS 10.12–10.15).
+  - **Every package the app needs on Windows has a Windows wheel.** `uvloop` is skipped there by design.
+  - `proxy-tools` (needed by pywebview) is source-only but pure Python, so it installs without a compiler.
+- **The app's own folder** (`app_paths.py`) holds `data/`, `exports/` and `.env`:
+  - Mac: `~/Library/Application Support/jobmatch/`;
+  - Windows: `%APPDATA%\jobmatch\`.
+  
+  The config ships read-only inside the app.
+- **`load_settings(..., data_root=...)`**, or `JOBMATCH_DATA_DIR`, points `data/` and `exports/` at that folder. The CLI and Docker behave as before.
+- **`.env` without Docker** (`secrets_file.py`, no new dependency): reads the Gemini key at startup and saves it from the app. The file is readable by its owner only, and the key is never logged or shown.
+
+### How to use
+Nothing new to run. After pulling, `docker compose build` is optional (the lock changed, but not the packages the image installs).
+
+### Checks run
+- `pytest`: 692 passed. `ruff check .`: pass.
+
+---
+
+## 2026-11-06 · Shortlist rule: up to 3 fits, else the best partial
+
+### What this solves
+Keeping every fit and partial made shortlists too long: a median of 7 contractors per job and up to 20. The reviewer now sees what matters:
+- **A job with clear fits** shows the fits only, up to 3, best first.
+- **A job with no clear fit** shows its single best partial fit, for a person to check.
+- **A job with neither** shows 0 ("no match").
+
+"Best" is Gemini's detailed order, then any contractor it judged without describing them, so a self-contradicting answer still can't hide a fit. Gemini still judges every contractor, and the rest stay in its cached answer. Changing the numbers (`llm.shortlist` in `config/settings.yaml`) needs no new API call.
+
+### How to use
+Nothing new to run. `run-once` and `export-llm-matches` apply the rule.
+
+### Results on our data (82 active jobs, 0 Gemini calls)
+- `llm_matches.csv` was rebuilt from the cached answers (the old file is in `data/backups/llm_matches.before-shortlist-rule.20261106T222251Z.csv`): **97 rows**, previously 384.
+- **37 jobs with clear fits:** 17 show 3 fits, 5 show 2 and 15 show 1.
+- **21 jobs with only partial fits** show their best partial.
+- **24 jobs** show no match.
+- 3 of the 97 rows are "reason only", where Gemini didn't describe the contractor.
+
+### Checks run
+- `pytest`: 679 passed. `ruff format --check .` and `ruff check .`: pass.
+
+---
+
+## 2026-11-06 · v0 matcher removed; fits Gemini didn't describe are kept
+
+### What this solves
+- **One matcher, a much lighter app.** v0 (local embeddings with bge-m3) is gone from this branch; it lives on a separate local branch. That removes torch, transformers, sentence-transformers and numpy, the 4.5 GB model download and the Hugging Face cache volume, and makes a desktop app without Docker possible.
+- **No hidden candidates.** Gemini sometimes judges a contractor fit or partial but leaves them out of its detailed list (one real answer said "nobody fits" while rating two people fit or partial). Those contractors are now stored too, after the detailed ones, as **reason only** rows (no score or evidence), so a person can check them.
+
+### What changed for you
+- **Removed commands:** `smoke-embed`, `embed-contractors`, `embed-jobs`, `match`, `export-matches`, `export-trial-run`, `import-reviewed-matches`, `evaluate-matches`. Also `scripts/update_contractors.sh`, `scripts/eval/` and `data_visualizer.ipynb`. Use `run-once` and `export-llm-matches` instead ([quick_start.md](quick_start.md)).
+- **`llm-compare`** now compares Gemini with the blind labels only (no v0 columns).
+- **`exports/llm-matches-*.csv`** has a new `detail` column: `full`, or `reason only`.
+- **Old v0 data** (`data/matches.csv`, `data/matches_flagged.csv`, `data/embeddings/`) is left in place and no longer read. Delete it whenever you like.
+- `.env`: `HF_HUB_OFFLINE` is no longer needed. The `hf-cache` Docker volume can be removed (`docker volume rm`, about 4.5 GB).
+
+### How to use
+After pulling: `docker compose build`, then `run-once` as usual. Answers already cached are reused, so no new Gemini calls.
+
+### Results on our data (82 active jobs, 0 Gemini calls)
+- `llm_matches.csv` was rebuilt from the cached answers (the old file is in `data/backups/llm_matches.before-detailed.20261106T221351Z.csv`): 384 rows, previously 214.
+  - **Described (unchanged):** 214 rows, 89 fit and 125 partial.
+  - **Reason only (new):** 170 rows, 5 fit and 165 partial. Mostly partial fits beyond the 5 Gemini describes per job (`llm.top_k`), in 36 jobs.
+- **3 jobs moved from "no match" to "matched"** because Gemini had rated someone fit or partial while saying nobody fits. 58 jobs now have a shortlist and 24 have none.
+- Shortlists have a median of 7 contractors per job and a maximum of 20.
+
+### Checks run
+- `pytest`: 676 passed (809 before: 135 v0 tests removed with v0, 2 added for reason-only rows). `ruff format` and `ruff check .`: pass.
+- `uv lock`: 33 packages, previously 57. Every remaining package kept its version, and none was added.
+- Docker image `jobmatch:dev`: 383 MB, previously 2.08 GB. The `hf-cache` volume (5.1 GB) was removed.
+
+---
+
+## 2026-11-06 · v1 phase 6: one-button run with Gemini (`run-once`)
+
+### What this solves
+One command now runs the whole v1 pipeline. It is also the backend for the planned desktop app's "Find matches" button. v0's matcher is not used anywhere in it.
+- **`run-once`**:
+  1. optionally loads a contractor file (`--contractors`);
+  2. imports links and pasted postings from `data/inbox/`;
+  3. checks today's Gemini quota;
+  4. judges every active job that hasn't been judged yet, one call each (cached answers cost nothing);
+  5. stores the shortlists and sets each job to `matched` or `no_match`.
+  
+  If the run would use most of today's quota, it asks first. `--yes` goes ahead (or, if the run can't finish today, sends only what fits); `--max-calls N` caps it.
+- **Loading contractors (upsert).** A `.xlsx` master workbook or a `.csv` in the contractor list's columns. New talent IDs are added and changed ones are updated. Contractors missing from the file are kept, so removal is still to be decided. The list is backed up before every change.
+- **`data/llm_matches.csv`**: one row per shortlisted contractor with the verdict, fit score, reason, requirements met and missing, red flags and verified evidence. Rows are never changed. A job's current shortlist is the rows of its current judgment.
+- **`export-llm-matches`**: a spreadsheet of the current shortlists with contractor names (keep it local). Jobs with no match, or not judged yet, get one row saying so.
+
+### How to use
+```
+docker compose run --rm app python -m jobmatch run-once --contractors data/contractors/contractor-master-list.xlsx
+docker compose run --rm app python -m jobmatch export-llm-matches
+```
+
+### Known limits
+- Skills are not learned from a loaded contractor file. That fed v0's embeddings only.
+- The intake form's file format is not known yet. A `.csv` must use the contractor list's columns.
+
+### Checks run
+- `pytest`: 809 passed, 1 deselected. `ruff format --check .` and `ruff check .`: pass.
+- The old CLI test that ran `run-once` against the real `data/` was replaced by one using a temp config and data folder. Before that fix, a test run added two ingest rows to `data/runs.csv` (2026-11-06): 0 pages fetched, 0 new jobs, no API call.
+
+---
+
 ## 2026-11-05 · v1 phase 5: Gemini pilot on the blind-labelled jobs
 
 ### What this solves

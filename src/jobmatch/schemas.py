@@ -7,8 +7,7 @@ IDs and NOC codes are always strings (Excel strips leading zeros).
 from enum import StrEnum
 from typing import Annotated, Any
 
-import numpy as np
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 SCHEMA_VERSION = 3  # 2: responsibilities, nice_to_have, years_experience_min; 3: commitment
 
@@ -82,16 +81,13 @@ class PayUnit(StrEnum):
     YEAR = "year"
 
 
-class Band(StrEnum):
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
-
-
 class Decision(StrEnum):
     APPROVED = "approved"
     REJECTED = "rejected"
     NEEDS_INFO = "needs_info"
+    # The reviewer reset their decision (app "Reset"): the match counts as undecided again.
+    # reviews.csv is append-only, so a reset is a new row, and the history stays.
+    CLEARED = "cleared"
 
 
 class ReasonCode(StrEnum):
@@ -211,33 +207,6 @@ class Job(Record):
         return self
 
 
-class Match(Record):
-    """One shortlisted (job, contractor, facet) pair. Append-only: data/matches.csv when every
-    rule check passed, data/matches_flagged.csv when one failed (reasons in gates_failed).
-    A new scoring_version (model, template or matching settings) adds new rows; the newest
-    row per (job, contractor) is current, and reviews keep pointing at the row they saw."""
-
-    match_id: NonEmptyStr
-    job_id: NonEmptyStr
-    contractor_id: NonEmptyStr
-    facet: NonEmptyStr
-    cosine: float
-    title_cosine: float | None = None  # job title vs the contractor's closest title
-    matched_title: str | None = None  # that title, cleaned (lowercase, no seniority words)
-    skill_overlap: float | None = Field(default=None, ge=0, le=1)  # None: job lists no skills
-    score: float
-    band: Band
-    rank: int = Field(ge=1)  # 1 = closest contractor for this job (passed and flagged together)
-    matched_skills: list[str] = []
-    missing_must_have: list[str] = []
-    gates_failed: list[
-        str
-    ] = []  # e.g. "seniority: under-qualified (job senior, contractor junior)"
-    flags: list[str] = []  # information only, never filters, e.g. "rate above posted pay"
-    scoring_version: NonEmptyStr
-    created_at: AwareDatetime
-
-
 class Review(Record):
     """One reviewer decision (data/reviews.csv, append-only).
 
@@ -334,82 +303,34 @@ class LlmUsage(Record):
     note: str | None = None
 
 
-class ReviewedMatch(BaseModel):
-    """One human-reviewed (posting, talent) pair in data/eval/reviewed_matches.csv, imported
-    from a reviewed-match sheet (import-reviewed-matches). Contract-type engagements only.
-    The reviewers' 100-point score is the sum of the six sub-scores. Free text may mention
-    the talent by first name: keep the file local and never log it."""
+class LlmVerdict(StrEnum):
+    FIT = "fit"
+    PARTIAL = "partial"
 
-    model_config = ConfigDict(extra="forbid")
+
+class LlmMatch(Record):
+    """One contractor Gemini judged fit or partial for a job (data/llm_matches.csv, v1). Added by
+    run-once from the cached judgment; a row is never changed. match_id = judge_key + talent
+    ID, so re-runs add nothing, and a re-judged job (new text, roster, model or prompt) gets a
+    new judge_key. A job's current shortlist is the rows of its newest judge_key. Reviews
+    point at match_id. Everything here comes from the answer, checked locally."""
 
     match_id: NonEmptyStr
+    job_id: NonEmptyStr
     talent_id: NonEmptyStr
-    company: str | None = None
-    role: str | None = None
-    work_setting: str | None = None
-    engagement: NonEmptyStr
-    posting_url: str | None = None
-    posting_status: str | None = None
-    match_score: float | None = None
-    match_tier: str | None = None  # A, B, C or reject
-    skills: float | None = None  # out of 30
-    availability: float | None = None  # out of 15
-    location: float | None = None  # out of 15
-    contract_likelihood: float | None = None  # out of 20
-    posting_age: float | None = None  # out of 10
-    buyer_urgency: float | None = None  # out of 10
-    rationale: str | None = Field(default=None, repr=False)
-    gaps: str | None = Field(default=None, repr=False)
-    notes: str | None = Field(default=None, repr=False)
-
-
-# ---- embeddings (stored as .npz plus meta.json, never in CSV) ----
-
-
-class EmbeddingMeta(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    model_name: NonEmptyStr
-    model_version: NonEmptyStr
-    dim: int = Field(gt=0)
-    text_template_hash: NonEmptyStr
-    count: int = Field(ge=0)
-    updated_at: AwareDatetime
-
-
-class VectorSet(BaseModel):
-    """A block of float32 vectors with their ids, content hashes and model identity."""
-
-    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
-
-    ids: list[str]
-    content_hashes: list[str]
-    vectors: np.ndarray
-    model_name: NonEmptyStr
-    model_version: NonEmptyStr
-    text_template_hash: NonEmptyStr
-
-    @field_validator("vectors", mode="before")
-    @classmethod
-    def _as_float32_matrix(cls, value: Any) -> np.ndarray:
-        array = np.asarray(value, dtype=np.float32)
-        if array.ndim != 2 or array.shape[1] == 0:
-            raise ValueError(f"vectors must be a 2-D array with dim > 0, got shape {array.shape}")
-        if not np.isfinite(array).all():
-            raise ValueError("vectors contain NaN or infinite values")
-        return array
-
-    @model_validator(mode="after")
-    def _consistent(self) -> "VectorSet":
-        rows = self.vectors.shape[0]
-        if len(self.ids) != rows or len(self.content_hashes) != rows:
-            raise ValueError(
-                f"{rows} vectors but {len(self.ids)} ids and {len(self.content_hashes)} hashes"
-            )
-        if len(set(self.ids)) != len(self.ids):
-            raise ValueError("ids must be unique")
-        return self
-
-    @property
-    def dim(self) -> int:
-        return int(self.vectors.shape[1])
+    rank: int = Field(ge=1)  # 1 = best: Gemini's detailed order, then undetailed fits/partials
+    verdict: LlmVerdict
+    # False: Gemini judged this contractor fit or partial but did not describe them (it left
+    # them out of "top"). Kept for a person to check; only the one-line reason is known.
+    detailed: bool = True
+    fit_score: int | None = Field(default=None, ge=0, le=100)  # for ordering only
+    reason: str | None = None
+    requirements_met: list[str] = []
+    requirements_missing: list[str] = []
+    red_flags: list[str] = []  # "kind: detail"
+    evidence: list[str] = []  # "job: quote" or "contractor: quote", verified quotes only
+    unverified_evidence: bool = False  # a quote was not found in the text sent and was removed
+    model: NonEmptyStr
+    prompt_version: NonEmptyStr
+    judge_key: NonEmptyStr
+    created_at: AwareDatetime

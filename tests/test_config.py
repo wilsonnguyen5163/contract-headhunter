@@ -24,8 +24,7 @@ from jobmatch.config import (
 def test_repo_settings_load_and_paths_resolve() -> None:
     settings = load_settings(CONFIG_DIR)
     assert settings.paths.data_dir == CONFIG_DIR.parent / "data"
-    assert settings.embedding.model_name == "BAAI/bge-m3"
-    assert settings.matching.bands.medium <= settings.matching.bands.high
+    assert settings.llm is not None and settings.llm.provider == "gemini"
 
 
 def test_unknown_setting_is_rejected(tmp_path: Path) -> None:

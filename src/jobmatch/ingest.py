@@ -32,8 +32,9 @@ from jobmatch.sources.paste import PasteFormatError, canonical_url, read_paste_f
 from jobmatch.sources.saved_files import SAVED_SUFFIXES, read_saved_file
 from jobmatch.sources.web import FetchError, PageFetcher
 from jobmatch.sources.web_page import PageData, PageError, extract_page, raw_job_from_page
-from jobmatch.storage.csv_store import CsvJobRepository, CsvRunRepository, CsvStore
+from jobmatch.storage.loader import CsvDataLoader
 from jobmatch.storage.raw_store import RawStore
+from jobmatch.storage.repositories import DataLoader
 
 log = logging.getLogger("jobmatch.ingest")
 
@@ -114,6 +115,7 @@ def ingest_paste_files(
     normalizer: Normalizer,
     now: datetime | None = None,
     dry_run: bool = False,
+    loader: DataLoader | None = None,
 ) -> IngestReport:
     now = now or datetime.now(UTC)
     started = perf_counter()
@@ -135,6 +137,7 @@ def ingest_paste_files(
     return _store(
         items, outcomes, data_dir=data_dir, lock_timeout=lock_timeout, normalizer=normalizer,
         now=now, dry_run=dry_run, started=started, source_name="paste", fetched=0,
+        loader=loader,
     )  # fmt: skip
 
 
@@ -151,6 +154,7 @@ def ingest_links(
     now: datetime | None = None,
     dry_run: bool = False,
     refresh: bool = False,
+    loader: DataLoader | None = None,
 ) -> IngestReport:
     now = now or datetime.now(UTC)
     started = perf_counter()
@@ -251,7 +255,7 @@ def ingest_links(
     return _store(
         items, outcomes, data_dir=data_dir, lock_timeout=lock_timeout, normalizer=normalizer,
         now=now, dry_run=dry_run, started=started, source_name="links", fetched=fetched,
-        extra_records=gone_records,
+        extra_records=gone_records, loader=loader,
     )  # fmt: skip
 
 
@@ -299,12 +303,14 @@ def _store(
     source_name: str,
     fetched: int,
     extra_records: list[RawRecord] | None = None,
+    loader: DataLoader | None = None,
 ) -> IngestReport:
     run_id = f"ingest-{now:%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex[:6]}"
     data_dir.mkdir(parents=True, exist_ok=True)
     with FileLock(str(data_dir / RUN_LOCK_FILE), timeout=lock_timeout):
-        store = CsvStore(data_dir, lock_timeout=lock_timeout)
-        jobs_repo = CsvJobRepository(store)
+        # Records go through the storage backend; without one, the CSV files in data_dir.
+        loader = loader or CsvDataLoader(data_dir, lock_timeout=lock_timeout)
+        jobs_repo = loader.jobs
         jobs = [normalizer.normalize(item.raw_job, now=now) for item in items]
         result = dedupe(jobs_repo.list_all(), jobs, similarity=normalizer.title_similarity)
 
@@ -320,9 +326,7 @@ def _store(
             )
             jobs_repo.add_new(result.to_add)
             jobs_repo.replace(result.to_replace)
-            CsvRunRepository(store).append(
-                _run_row(report, now, perf_counter() - started, source_name)
-            )
+            loader.runs.append(_run_row(report, now, perf_counter() - started, source_name))
 
     counts = {outcome: report.count(outcome) for outcome in get_args(Outcome)}
     log.info(

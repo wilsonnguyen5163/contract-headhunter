@@ -18,26 +18,24 @@ ENV PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_NO_CACHE=1 \
-    PATH="/opt/jobmatch/venv/bin:${PATH}" \
-    HF_HOME=/cache/huggingface \
-    HF_HUB_DISABLE_TELEMETRY=1 \
-    TOKENIZERS_PARALLELISM=false
+    PATH="/opt/jobmatch/venv/bin:${PATH}"
 
 RUN groupadd --gid "${APP_GID}" app \
     && useradd --uid "${APP_UID}" --gid "${APP_GID}" --create-home app \
-    && mkdir -p /opt/jobmatch /cache/huggingface /app/data /app/exports \
-    && chown -R app:app /opt/jobmatch /cache /app
+    && mkdir -p /opt/jobmatch /app/data /app/exports \
+    && chown -R app:app /opt/jobmatch /app
 
 USER app
 WORKDIR /app
 
 # Dependencies first (cached layer), then the project itself. --frozen: install exactly uv.lock.
+# --extra app: the desktop app's UI packages, so its tests and the browser preview run here.
 COPY --chown=app:app pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-install-project
+RUN uv sync --frozen --extra app --no-install-project
 
 COPY --chown=app:app src ./src
 COPY --chown=app:app config ./config
 COPY --chown=app:app tests ./tests
-RUN uv sync --frozen
+RUN uv sync --frozen --extra app
 
 CMD ["python", "-m", "jobmatch", "--help"]
