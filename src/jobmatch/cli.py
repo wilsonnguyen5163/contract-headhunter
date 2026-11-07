@@ -20,19 +20,28 @@ from jobmatch.config import (
 )
 from jobmatch.logging_setup import configure_logging
 from jobmatch.storage.csv_store import CsvStore
-from jobmatch.storage.vector_store import NpzVectorStore
 
 if TYPE_CHECKING:
     from jobmatch.config import LlmSettings
-    from jobmatch.embed.build import EmbedReport
     from jobmatch.ingest import IngestReport
     from jobmatch.llm.anonymize import Roster
     from jobmatch.llm.gemini import GeminiProvider
-    from jobmatch.schemas import ContractorProfile, Job, ReviewedMatch
-    from jobmatch.storage.csv_store import CsvTable
+    from jobmatch.schemas import ContractorProfile, Job
+    from jobmatch.storage.repositories import DataLoader
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 log = logging.getLogger("jobmatch.cli")
+
+
+def _loader(settings: Settings, data_dir: Path | None = None) -> "DataLoader":
+    """The storage backend from settings (storage.backend), or exit 1 with the reason."""
+    from jobmatch.storage.loader import StorageBackendUnavailable, create_loader
+
+    try:
+        return create_loader(settings, data_dir=data_dir)
+    except StorageBackendUnavailable as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(1) from exc
 
 
 @app.callback()
@@ -59,7 +68,7 @@ def validate_data(
         typer.Option("--data-dir", help="Data folder to check (default: from settings)."),
     ] = None,
 ) -> None:
-    """Check config, every CSV and the embedding files against their schemas."""
+    """Check config and every CSV file against their schemas (the CSV storage backend)."""
     settings: Settings = ctx.obj
     root = data_dir or settings.paths.data_dir
     problems: list[str] = []
@@ -88,11 +97,6 @@ def validate_data(
         status = "OK" if not errors else f"{len(errors)} problem(s)"
         typer.echo(f"{status:>14} {table.path.name}: {len(rows)} valid row(s)")
 
-    vectors = NpzVectorStore(
-        root / "embeddings", lock_timeout=settings.storage.lock_timeout_seconds
-    )
-    problems.extend(f"embeddings/{p}" for p in vectors.validate())
-
     if problems:
         typer.echo(f"\n{len(problems)} problem(s):")
         for problem in problems:
@@ -101,37 +105,74 @@ def validate_data(
     typer.echo("\nAll data valid.")
 
 
-@app.command("smoke-embed")
-def smoke_embed(ctx: typer.Context) -> None:
-    """Load the embedding model and encode a few synthetic EN/FR texts (may download the model)."""
-    from jobmatch.embed.smoke import run_smoke
+@app.command("run-once")
+def run_once(
+    ctx: typer.Context,
+    contractors: Annotated[
+        Path | None,
+        typer.Option(
+            "--contractors",
+            help="Contractor file to load first (.xlsx workbook or .csv): new talent IDs are "
+            "added, changed ones updated, others kept.",
+        ),
+    ] = None,
+    max_calls: Annotated[
+        int | None, typer.Option("--max-calls", min=1, help="Send at most this many calls.")
+    ] = None,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            help="Go ahead when the run would use most of today's quota (or, if it cannot "
+            "finish today, send what fits).",
+        ),
+    ] = False,
+) -> None:
+    """v1 run: load contractors (optional), import jobs from data/inbox/, judge new jobs with
+    Gemini (one call per job, cached), store shortlists in data/llm_matches.csv. Never uses
+    the v0 matcher."""
+    from jobmatch.pipeline import PipelineError
+    from jobmatch.pipeline import run_once as run_pipeline
+    from jobmatch.sources.contractor_upsert import ContractorFileError
+    from jobmatch.storage.csv_store import CsvStoreError
+    from jobmatch.storage.loader import StorageBackendUnavailable
 
     settings: Settings = ctx.obj
-    result = run_smoke(settings.embedding)
-    log.info("smoke_embed", extra={"fields": result.model_dump()})
-    typer.echo(f"model:          {result.model_name} ({result.model_version})")
-    typer.echo(f"dimension:      {result.dim}")
-    typer.echo(f"load time:      {result.load_seconds} s")
-    typer.echo(f"encode time:    {result.encode_seconds} s ({result.ms_per_text} ms/text)")
-    rss = "n/a" if result.peak_rss_mb is None else f"{result.peak_rss_mb:.0f} MB"
-    typer.echo(f"peak memory:    {rss}")
-    for pair, value in result.similarities.items():
-        typer.echo(f"  {pair:<28} {value:.4f}")
-    if not result.passed:
-        typer.echo("FAILED: a job was closer to the unrelated facet than to the related one.")
+    llm = settings.llm
+    if llm is None:
+        typer.echo("settings.yaml has no llm section.")
         raise typer.Exit(1)
-    typer.echo("PASSED")
+    try:
+        report = run_pipeline(
+            settings,
+            provider_factory=lambda: _gemini(llm),
+            contractor_file=contractors,
+            confirm=lambda check: yes,
+            max_calls=max_calls,
+            echo=typer.echo,
+        )
+    except (PipelineError, ContractorFileError, CsvStoreError, StorageBackendUnavailable) as exc:
+        typer.echo(f"Stopped: {exc}")
+        raise typer.Exit(1) from exc
+    if report.budget and report.budget.verdict != "ok" and not report.confirmed:
+        typer.echo("Add --yes to go ahead, or --max-calls to send fewer.")
+    typer.echo(f"Run {report.run_id} · {report.seconds} s")
+    log.info("run_once", extra={"fields": report.model_dump(mode="json", exclude={"ingest"})})
+    if report.stopped or (report.judge and report.judge.failed):
+        raise typer.Exit(1)
 
 
-def _not_built(phase: int) -> None:
-    typer.echo(f"Not built yet (planned for phase {phase}).")
-    raise typer.Exit(2)
+@app.command("export-llm-matches")
+def export_llm_matches(ctx: typer.Context) -> None:
+    """Write each active job's current Gemini shortlist to exports/llm-matches-<time>.csv for
+    Excel (jobs with no match get one row). No API call. The file holds contractor names:
+    keep it local."""
+    from jobmatch.llm.export import export_current
 
-
-@app.command("run-once")
-def run_once() -> None:
-    """Fetch, normalize, embed, match and store (phase 6)."""
-    _not_built(6)
+    settings: Settings = ctx.obj
+    result = export_current(settings)
+    typer.echo(f"Wrote {result.rows} row(s) for {result.jobs} job(s) to {result.path}")
+    log.info("export_llm_matches", extra={"fields": {"rows": result.rows, "jobs": result.jobs}})
 
 
 _OUTCOME_LABELS = {
@@ -168,6 +209,7 @@ def ingest_manual(
     settings: Settings = ctx.obj
     report = ingest_paste_files(
         paths,
+        loader=_loader(settings, data_dir),
         data_dir=data_dir or settings.paths.data_dir,
         lock_timeout=settings.storage.lock_timeout_seconds,
         normalizer=Normalizer.from_settings(settings),
@@ -208,6 +250,7 @@ def ingest_links(
     try:
         report = run_ingest_links(
             paths,
+            loader=_loader(settings, data_dir),
             data_dir=data_dir or settings.paths.data_dir,
             lock_timeout=settings.storage.lock_timeout_seconds,
             normalizer=Normalizer.from_settings(settings),
@@ -272,14 +315,22 @@ def build_contractors_command(
         typer.echo(f"Cannot build contractors: {exc}")
         raise typer.Exit(1) from exc
     dest = out or default_output(workbook)
-    if dest.exists():
-        backups = dest.parent / "backups"
-        backups.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
-        backup = backups / f"{dest.stem}.{stamp}{dest.suffix}"
-        shutil.copy2(dest, backup)
-        typer.echo(f"Previous file copied to {backup}")
-    export_csv(ContractorRow, rows, dest)
+    if dest.resolve() == settings.paths.contractors_csv.resolve():
+        # The app's own contractor list: written through the storage backend.
+        from jobmatch.storage.loader import create_loader
+
+        saved = create_loader(settings).contractors.replace_all(rows)
+        if saved:
+            typer.echo(f"Previous list kept at {saved}")
+    else:  # any other file: a plain export, after a backup of the old one
+        if dest.exists():
+            backups = dest.parent / "backups"
+            backups.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+            backup = backups / f"{dest.stem}.{stamp}{dest.suffix}"
+            shutil.copy2(dest, backup)
+            typer.echo(f"Previous file copied to {backup}")
+        export_csv(ContractorRow, rows, dest)
     typer.echo(f"Wrote {report.exported} contractor(s) to {dest}")
     typer.echo(
         f"  with a profile: {report.with_profile} · without a profile: {report.without_profile}"
@@ -326,433 +377,9 @@ def _learn_contractor_skills(
     if report.learned:
         typer.echo(
             "  New skills tag jobs only after they are re-normalized: run "
-            "bash scripts/reset_reimport.sh, then embed-contractors, embed-jobs and match."
+            "bash scripts/reset_reimport.sh."
         )
     log.info("learn_contractor_skills", extra={"fields": report.model_dump()})
-
-
-def _print_embed_report(report: "EmbedReport") -> None:
-    typer.echo(
-        f"{report.namespace}: {report.total} vector(s) · {report.embedded} embedded · "
-        f"{report.reused} unchanged · {report.dropped} dropped"
-    )
-    per_text = ""
-    if report.embedded:
-        per_text = f" ({1000 * report.seconds / report.embedded:.0f} ms/text)"
-    typer.echo(
-        f"  model {report.model_name} ({report.model_version}) · {report.dim} dimensions · "
-        f"{report.seconds} s{per_text}"
-    )
-
-
-@app.command("embed-contractors")
-def embed_contractors(
-    ctx: typer.Context,
-    contractors_csv: Annotated[
-        Path | None,
-        typer.Option("--contractors", help="Contractor list (default: paths.contractors_csv)."),
-    ] = None,
-) -> None:
-    """Embed every contractor in the contractor list, plus each of their titles (only
-    changed ones are re-embedded). The first run downloads the embedding model."""
-    from jobmatch.config import load_normalization_rules, load_skills_taxonomy
-    from jobmatch.embed.build import TextItem, embed_items
-    from jobmatch.embed.encoder import Encoder
-    from jobmatch.embed.texts import (
-        TEMPLATE_HASH,
-        TITLE_TEMPLATE_HASH,
-        TitleCleaner,
-        contractor_skills,
-        contractor_text,
-        contractor_title_items,
-    )
-    from jobmatch.normalize.skills import SkillExtractor
-    from jobmatch.storage.csv_store import CsvContractorProfileRepository
-
-    settings: Settings = ctx.obj
-    path = contractors_csv or settings.paths.contractors_csv
-    if not path.exists():
-        typer.echo(f"Contractor list not found: {path}. Run build-contractors first.")
-        raise typer.Exit(1)
-    profiles = CsvContractorProfileRepository(
-        path, lock_timeout=settings.storage.lock_timeout_seconds
-    ).list_all()
-    extractor = SkillExtractor(
-        load_skills_taxonomy(settings.config_dir, settings.paths.learned_skills)
-    )
-    rules = load_normalization_rules(settings.config_dir)
-    cleaner = TitleCleaner(rules.seniority, rules.title_engagement_words)
-    encoder = Encoder(settings.embedding)  # one model load for both vector sets
-    store = _vector_store(settings)
-    for namespace, items, template in (
-        (
-            "contractors",
-            [
-                TextItem(id=p.talent_id, text=contractor_text(p, contractor_skills(p, extractor)))
-                for p in profiles
-            ],
-            TEMPLATE_HASH,
-        ),
-        (
-            "contractor_titles",
-            [
-                TextItem(id=item_id, text=text)
-                for p in profiles
-                for item_id, text in contractor_title_items(p, cleaner)
-            ],
-            TITLE_TEMPLATE_HASH,
-        ),
-    ):
-        report = embed_items(
-            namespace, items, kind="facet", encoder=encoder, store=store, template_hash=template
-        )
-        _print_embed_report(report)
-        log.info("embed_contractors", extra={"fields": report.model_dump()})
-
-
-@app.command("embed-jobs")
-def embed_jobs(ctx: typer.Context) -> None:
-    """Embed active jobs in jobs.csv (new, matched, no_match), plus each job title, each
-    job's core (title and first responsibilities) and the profession descriptions in
-    config/professions.yaml (for profession notes); filtered-out jobs and stubs without text
-    are skipped. Only changed texts are re-embedded."""
-    from jobmatch.config import load_normalization_rules, load_professions
-    from jobmatch.embed.build import TextItem, embed_items
-    from jobmatch.embed.encoder import Encoder, TextKind
-    from jobmatch.embed.texts import (
-        PROFESSION_TEMPLATE_HASH,
-        TEMPLATE_HASH,
-        TITLE_TEMPLATE_HASH,
-        TitleCleaner,
-        job_core_text,
-        job_text,
-        job_title_text,
-        profession_text,
-    )
-    from jobmatch.schemas import JobStatus
-    from jobmatch.storage.csv_store import CsvJobRepository
-
-    settings: Settings = ctx.obj
-    store = CsvStore(settings.paths.data_dir, lock_timeout=settings.storage.lock_timeout_seconds)
-    active = {JobStatus.NEW, JobStatus.MATCHED, JobStatus.NO_MATCH}
-    jobs = [j for j in CsvJobRepository(store).list_all() if j.status in active]
-    rules = load_normalization_rules(settings.config_dir)
-    cleaner = TitleCleaner(rules.seniority, rules.title_engagement_words)
-    titles = [(j.job_id, job_title_text(j, cleaner)) for j in jobs]
-    encoder = Encoder(settings.embedding)  # one model load for every vector set
-    vectors = _vector_store(settings)
-    sets: list[tuple[str, list[TextItem], str, TextKind]] = [
-        ("jobs", [TextItem(id=j.job_id, text=job_text(j)) for j in jobs], TEMPLATE_HASH, "job"),
-        (
-            "job_titles",
-            [TextItem(id=job_id, text=text) for job_id, text in titles if text],
-            TITLE_TEMPLATE_HASH,
-            "job",
-        ),
-    ]
-    professions = load_professions(settings.config_dir)
-    if professions is not None:
-        sets += [
-            (
-                "job_cores",
-                [TextItem(id=j.job_id, text=job_core_text(j)) for j in jobs],
-                PROFESSION_TEMPLATE_HASH,
-                "job",
-            ),
-            (
-                "professions",
-                [
-                    TextItem(id=name, text=profession_text(name, description))
-                    for name, description in professions.professions.items()
-                ],
-                PROFESSION_TEMPLATE_HASH,
-                "facet",
-            ),
-        ]
-    for namespace, items, template, kind in sets:
-        report = embed_items(
-            namespace, items, kind=kind, encoder=encoder, store=vectors, template_hash=template
-        )
-        _print_embed_report(report)
-        log.info("embed_jobs", extra={"fields": report.model_dump()})
-
-
-def _vector_store(settings: Settings) -> NpzVectorStore:
-    return NpzVectorStore(
-        settings.paths.data_dir / "embeddings", lock_timeout=settings.storage.lock_timeout_seconds
-    )
-
-
-@app.command("match")
-def match(
-    ctx: typer.Context,
-    dry_run: Annotated[
-        bool, typer.Option("--dry-run", help="Score and print, but store nothing.")
-    ] = False,
-) -> None:
-    """Shortlist contractors for every active job from the stored vectors. Matches that pass
-    every rule check go to matches.csv, the others to matches_flagged.csv with the reason."""
-    from jobmatch.match.professions import profession_notes
-    from jobmatch.match.run import ACTIVE_STATUSES, MatchError, run_matching
-    from jobmatch.storage.csv_store import CsvJobRepository
-
-    settings: Settings = ctx.obj
-    try:
-        report, results, profiles = run_matching(settings, dry_run=dry_run)
-    except MatchError as exc:
-        typer.echo(str(exc))
-        raise typer.Exit(1) from exc
-    store = CsvStore(settings.paths.data_dir, lock_timeout=settings.storage.lock_timeout_seconds)
-    active = [j for j in CsvJobRepository(store).list_all() if j.status in ACTIVE_STATUSES]
-    notes, no_notes = profession_notes(settings, active, list(profiles.values()))
-
-    for result in results:
-        typer.echo(f"\n{result.title}  [{result.job_id}]")
-        if not result.candidates:
-            typer.echo("  no contractor above min_score")
-        for c in result.candidates:
-            # Talent ID and headline only: names stay out of the terminal and logs.
-            headline = profiles[c.contractor_id].standardized_headline or ""
-            mark = "FLAGGED" if c.flagged else c.band.value
-            typer.echo(f"  {c.rank}. {c.score:.3f} {mark:<7} {c.contractor_id}  {headline}")
-            parts = [f"text {c.cosine:.3f}"]
-            if c.title_cosine is not None:
-                parts.append(f"title {c.title_cosine:.3f} ({c.matched_title})")
-            if c.skill_overlap is not None:
-                parts.append(f"skills {c.skill_overlap:.2f}")
-            if c.lexical is not None:
-                parts.append(f"words {c.lexical:.3f}")
-            typer.echo(f"       {' · '.join(parts)}")
-            for reason in c.gates_failed:
-                typer.echo(f"       - {reason}")
-            if c.missing_must_have:
-                typer.echo(f"       - missing must-have: {', '.join(c.missing_must_have)}")
-            if note := notes.get((result.job_id, c.contractor_id)):
-                typer.echo(f"       - profession (hint): {note.text()}")
-    prefix = "[dry run] " if report.dry_run else ""
-    typer.echo(
-        f"\n{prefix}{report.jobs} job(s) × {report.contractors} contractor(s) · "
-        f"{report.matched} matched · {report.no_match} no match · {report.seconds} s"
-    )
-    if not report.dry_run:
-        typer.echo(
-            f"stored {report.stored} in matches.csv · {report.flagged} in matches_flagged.csv · "
-            f"{report.unchanged} unchanged · {report.status_changes} job status change(s)"
-        )
-    typer.echo(f"scoring version {report.scoring_version}")
-    if no_notes:
-        typer.echo(f"Profession notes left out: {no_notes}")
-    log.info("match", extra={"fields": report.model_dump()})
-
-
-@app.command("export-matches")
-def export_matches(ctx: typer.Context) -> None:
-    """Write the current matches (shortlist and flagged) to exports/matches-<time>.csv for
-    Excel. The file holds contractor names: keep it local."""
-    from datetime import UTC, datetime
-
-    from jobmatch.match.export import build_rows, write_export
-    from jobmatch.match.run import ACTIVE_STATUSES
-    from jobmatch.storage.csv_store import (
-        CsvContractorProfileRepository,
-        CsvJobRepository,
-        CsvMatchRepository,
-    )
-
-    settings: Settings = ctx.obj
-    timeout = settings.storage.lock_timeout_seconds
-    store = CsvStore(settings.paths.data_dir, lock_timeout=timeout)
-    path = settings.paths.contractors_csv
-    profiles = (
-        CsvContractorProfileRepository(path, lock_timeout=timeout).list_all()
-        if path.exists()
-        else []
-    )
-    jobs = {j.job_id: j for j in CsvJobRepository(store).list_all()}
-    rows = build_rows(
-        CsvMatchRepository(store).list_all(),
-        CsvMatchRepository(store, flagged=True).list_all(),
-        jobs,
-        {p.talent_id: p for p in profiles},
-        _profession_notes(
-            settings, [j for j in jobs.values() if j.status in ACTIVE_STATUSES], profiles
-        ),
-    )
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    dest = settings.paths.exports_dir / f"matches-{stamp}.csv"
-    count = write_export(rows, dest)
-    typer.echo(f"Wrote {count} match row(s) to {dest}")
-    log.info("export_matches", extra={"fields": {"rows": count}})
-
-
-@app.command("export-trial-run")
-def export_trial_run(ctx: typer.Context) -> None:
-    """Write the best shortlisted contractors per active job (exports.trial_run_per_job) to
-    exports/trial-run-<time>.csv, read by data_visualizer.ipynb. A job with no shortlist
-    gets a "no match" row. The file holds contractor names: keep it local."""
-    from datetime import UTC, datetime
-
-    from jobmatch.match.export import build_trial_rows, write_trial_run
-    from jobmatch.match.run import ACTIVE_STATUSES
-    from jobmatch.storage.csv_store import (
-        CsvContractorProfileRepository,
-        CsvJobRepository,
-        CsvMatchRepository,
-    )
-
-    settings: Settings = ctx.obj
-    timeout = settings.storage.lock_timeout_seconds
-    store = CsvStore(settings.paths.data_dir, lock_timeout=timeout)
-    path = settings.paths.contractors_csv
-    profiles = (
-        CsvContractorProfileRepository(path, lock_timeout=timeout).list_all()
-        if path.exists()
-        else []
-    )
-    active = [j for j in CsvJobRepository(store).list_all() if j.status in ACTIVE_STATUSES]
-    rows = build_trial_rows(
-        CsvMatchRepository(store).list_all(),
-        active,
-        {p.talent_id: p for p in profiles},
-        settings.exports.trial_run_per_job,
-        CsvMatchRepository(store, flagged=True).list_all(),
-        _profession_notes(settings, active, profiles),
-    )
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    dest = settings.paths.exports_dir / f"trial-run-{stamp}.csv"
-    count = write_trial_run(rows, dest)
-    jobs = len({r.job_url for r in rows})
-    typer.echo(f"Wrote {count} row(s) for {jobs} job(s) to {dest}")
-    log.info("export_trial_run", extra={"fields": {"rows": count, "jobs": jobs}})
-
-
-def _profession_notes(
-    settings: Settings, jobs: list["Job"], profiles: list["ContractorProfile"]
-) -> dict[tuple[str, str], str]:
-    """Profession notes for the exports, or none (with the reason) when vectors are missing."""
-    from jobmatch.match.professions import profession_notes
-
-    notes, reason = profession_notes(settings, jobs, profiles)
-    if reason:
-        typer.echo(f"Profession notes left out: {reason}")
-    return {pair: note.text() for pair, note in notes.items()}
-
-
-def _reviewed_table(settings: Settings, path: Path | None = None) -> "CsvTable[ReviewedMatch]":
-    from jobmatch.schemas import ReviewedMatch
-    from jobmatch.storage.csv_store import CsvTable, TableMode
-
-    path = path or settings.paths.data_dir / "eval" / "reviewed_matches.csv"
-    return CsvTable(
-        path,
-        ReviewedMatch,
-        TableMode.READ_WRITE,
-        backups_dir=path.parent / "backups",
-        lock_timeout=settings.storage.lock_timeout_seconds,
-        unique_key=("match_id",),
-    )
-
-
-@app.command("import-reviewed-matches")
-def import_reviewed_matches(
-    ctx: typer.Context,
-    sheet: Annotated[Path, typer.Argument(help="Reviewed-match sheet exported as CSV.")],
-) -> None:
-    """Import human-reviewed matches (contract-type engagements only) into
-    data/eval/reviewed_matches.csv, the labels evaluate-matches compares against. Contact,
-    outreach and talent-name columns are not imported. An existing file is backed up and
-    replaced."""
-    from jobmatch.sources.reviewed_matches import (
-        SheetError,
-        load_reviewed_import,
-        read_reviewed_sheet,
-    )
-
-    settings: Settings = ctx.obj
-    try:
-        rows, report = read_reviewed_sheet(sheet, load_reviewed_import(settings.config_dir))
-    except (OSError, SheetError) as exc:
-        typer.echo(f"Cannot read the sheet: {exc}")
-        raise typer.Exit(1) from exc
-    table = _reviewed_table(settings)
-    table.path.parent.mkdir(parents=True, exist_ok=True)
-    table.rewrite(rows)
-    typer.echo(f"Wrote {report.kept} reviewed match(es) to {table.path}")
-    typer.echo(
-        f"  {report.rows} filled-in row(s) · left out: {report.permanent} permanent · "
-        f"{report.no_engagement} without an engagement type"
-    )
-    log.info("import_reviewed_matches", extra={"fields": report.model_dump()})
-
-
-@app.command("evaluate-matches")
-def evaluate_matches(ctx: typer.Context) -> None:
-    """Compare the matcher's scores with the human reviews in data/eval/reviewed_matches.csv
-    and write the pair-by-pair comparison to exports/evaluation-<time>.csv. Read-only."""
-    from collections import Counter
-    from datetime import UTC, datetime
-
-    from jobmatch.match.evaluate import EvalPair, evaluate
-    from jobmatch.match.run import MatchError, score_all_jobs
-    from jobmatch.storage.csv_store import export_csv
-
-    settings: Settings = ctx.obj
-    table = _reviewed_table(settings)
-    if not table.path.exists():
-        typer.echo(f"No reviews found at {table.path}. Run import-reviewed-matches first.")
-        raise typer.Exit(1)
-    try:
-        scored = score_all_jobs(settings)
-    except MatchError as exc:
-        typer.echo(str(exc))
-        raise typer.Exit(1) from exc
-    report = evaluate(table.read_all(), scored, settings.matching)
-
-    skipped = Counter(p.status for p in report.pairs if p.status != "compared")
-    typer.echo(f"{len(report.pairs)} reviewed pair(s) · {report.compared} compared")
-    for reason, n in skipped.most_common():
-        typer.echo(f"  not compared: {n} · {reason}")
-    typer.echo(
-        f"\nRank correlation of our score with the reviewers' total: {report.spearman_total}"
-        f" · with their skills score: {report.spearman_skills}"
-    )
-    typer.echo("\nReviewer tier -> our result")
-    for tier, outcomes in report.tier_band.items():
-        detail = " · ".join(f"{k} {v}" for k, v in sorted(outcomes.items()))
-        typer.echo(f"  {tier:<7} {detail}")
-    typer.echo("\nPer job: reviewers' A/B talents in our shortlist")
-    for r in report.recall:
-        typer.echo(
-            f"  {r.good_shortlisted}/{r.good} A/B · {r.other_shortlisted} C/reject also shortlisted"
-            f"  {r.role or ''}  [{r.job_id}]"
-        )
-    typer.echo("\nPairs (talent IDs only)")
-    for p in sorted(
-        (p for p in report.pairs if p.status == "compared"),
-        key=lambda p: (p.job_id or "", p.our_rank or 0),
-    ):
-        mark = "FLAGGED" if p.flagged else (p.our_band or "")
-        where = "shortlisted" if p.shortlisted else "not shortlisted"
-        typer.echo(
-            f"  {p.match_id} {p.talent_id}: reviewers {p.human_tier} {p.human_score} "
-            f"(skills {p.human_skills}) · ours {p.our_score:.3f} {mark}, rank "
-            f"{p.our_rank}/{p.contractors}, {where}  {p.role or ''}"
-        )
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    dest = settings.paths.exports_dir / f"evaluation-{stamp}.csv"
-    export_csv(EvalPair, report.pairs, dest)
-    typer.echo(f"\nWrote {len(report.pairs)} pair(s) to {dest}")
-    log.info(
-        "evaluate_matches",
-        extra={
-            "fields": {
-                "pairs": len(report.pairs),
-                "compared": report.compared,
-                "spearman_total": report.spearman_total,
-                "spearman_skills": report.spearman_skills,
-            }
-        },
-    )
 
 
 # ---- v1: Gemini matching (doc/V1_PLAN.md) ----
@@ -760,33 +387,26 @@ def evaluate_matches(ctx: typer.Context) -> None:
 
 def _llm_inputs(
     settings: Settings,
-) -> "tuple[LlmSettings, CsvStore, list[Job], list[ContractorProfile], Roster]":
+) -> "tuple[LlmSettings, DataLoader, list[Job], list[ContractorProfile], Roster]":
     """The llm settings, active jobs, contractor list and anonymized roster, or exit 1 with
     the reason. Prints counts only (talent IDs, never names)."""
     from jobmatch.config import load_professions
     from jobmatch.llm.anonymize import build_roster
     from jobmatch.llm.payload import ACTIVE_STATUSES
     from jobmatch.llm.preview import profession_problems
-    from jobmatch.storage.csv_store import (
-        CsvContractorProfileRepository,
-        CsvJobRepository,
-        CsvStoreError,
-    )
+    from jobmatch.storage.csv_store import CsvStoreError
 
     llm = settings.llm
     if llm is None:
         typer.echo("settings.yaml has no llm section.")
         raise typer.Exit(1)
-    contractors_csv = settings.paths.contractors_csv
-    if not contractors_csv.exists():
-        typer.echo(f"No contractor list at {contractors_csv}. Run build-contractors first.")
+    loader = _loader(settings)
+    if not loader.contractors.exists():
+        typer.echo("No contractor list yet. Run build-contractors first.")
         raise typer.Exit(1)
-    store = CsvStore(settings.paths.data_dir, lock_timeout=settings.storage.lock_timeout_seconds)
     try:
-        jobs = [j for j in CsvJobRepository(store).list_all() if j.status in ACTIVE_STATUSES]
-        profiles = CsvContractorProfileRepository(
-            contractors_csv, lock_timeout=settings.storage.lock_timeout_seconds
-        ).list_all()
+        jobs = [j for j in loader.jobs.list_all() if j.status in ACTIVE_STATUSES]
+        profiles = loader.contractors.list_all()
     except CsvStoreError as exc:
         typer.echo(f"Cannot read data: {exc}")
         raise typer.Exit(1) from exc
@@ -801,7 +421,7 @@ def _llm_inputs(
         typer.echo(f"  {missing} contractor(s) have no primary profession yet (prefilter input)")
     if unknown:
         typer.echo(f"  profession not in professions.yaml: {', '.join(unknown)}")
-    return llm, store, jobs, profiles, roster
+    return llm, loader, jobs, profiles, roster
 
 
 def _gemini(llm: "LlmSettings") -> "GeminiProvider":
@@ -842,7 +462,7 @@ def llm_preview(
     from jobmatch.llm.usage import UsageLedger, check_run
 
     settings: Settings = ctx.obj
-    llm, store, jobs, profiles, roster = _llm_inputs(settings)
+    llm, loader, jobs, profiles, roster = _llm_inputs(settings)
 
     if stats:
         s = preview_stats(jobs, roster, llm)
@@ -867,7 +487,7 @@ def llm_preview(
         )
         tokens_per_call = s.call_input_tokens.median + s.output_tokens_per_call
         check = check_run(
-            llm.limits, llm.budget, UsageLedger(store).today(), s.calls, tokens_per_call
+            llm.limits, llm.budget, UsageLedger(loader.llm_usage).today(), s.calls, tokens_per_call
         )
         typer.echo(f"Budget today: {check.verdict.upper()} · {check.message}")
         log.info("llm_preview_stats", extra={"fields": s.model_dump()})
@@ -912,13 +532,13 @@ def suggest_professions(ctx: typer.Context) -> None:
     from jobmatch.llm.usage import UsageLedger, check_run
 
     settings: Settings = ctx.obj
-    llm, store, _, _, roster = _llm_inputs(settings)
+    llm, loader, _, _, roster = _llm_inputs(settings)
     professions = load_professions(settings.config_dir)
     if professions is None or not roster.cards:
         typer.echo("Nothing to ask: professions.yaml or contractor cards are missing.")
         raise typer.Exit(1)
     call = prepare_profession_call(roster, professions, llm)
-    ledger = UsageLedger(store)
+    ledger = UsageLedger(loader.llm_usage)
     check = check_run(llm.limits, llm.budget, ledger.today(), 1, call.estimated_total_tokens)
     typer.echo(f"Budget: {check.verdict.upper()} · {check.message}")
     if check.verdict == "exceeds":
@@ -963,22 +583,20 @@ def apply_professions(
     build-contractors rebuilds contractors.csv from the workbook, so put the same values in
     the workbook's profession columns to keep them."""
     from jobmatch.llm.professions import apply_suggestions, read_suggestions
-    from jobmatch.storage.csv_store import CsvContractorProfileRepository, CsvStoreError
+    from jobmatch.storage.csv_store import CsvStoreError
 
     settings: Settings = ctx.obj
-    dest = settings.paths.contractors_csv
+    loader = _loader(settings)
     try:
         rows = read_suggestions(suggestions)
-        profiles = CsvContractorProfileRepository(
-            dest, lock_timeout=settings.storage.lock_timeout_seconds
-        ).list_all()
+        profiles = loader.contractors.list_all()
     except (OSError, ValueError, CsvStoreError) as exc:
         typer.echo(f"Cannot read: {exc}")
         raise typer.Exit(1) from exc
-    report = apply_suggestions(profiles, rows, dest)
+    report = apply_suggestions(profiles, rows, loader.contractors)
     if report.backup:
-        typer.echo(f"Previous file copied to {report.backup}")
-    typer.echo(f"Updated {report.updated} contractor(s) · {report.unchanged} unchanged · {dest}")
+        typer.echo(f"Previous list kept at {report.backup}")
+    typer.echo(f"Updated {report.updated} contractor(s) · {report.unchanged} unchanged")
     if report.not_in_list:
         typer.echo(f"  not in the contractor list: {', '.join(report.not_in_list)}")
     typer.echo("Reminder: add the same values to the workbook, or build-contractors drops them.")
@@ -1005,7 +623,7 @@ def llm_try(
     from jobmatch.llm.usage import UsageLedger, check_run
 
     settings: Settings = ctx.obj
-    llm, store, jobs, profiles, roster = _llm_inputs(settings)
+    llm, loader, jobs, profiles, roster = _llm_inputs(settings)
     if job_id is None:
         if not jobs:
             typer.echo("No active jobs.")
@@ -1019,7 +637,7 @@ def llm_try(
         job = found[0]
     card = job_card(job, llm.payload)
     call = prepare_call(card, roster, llm)
-    ledger = UsageLedger(store)
+    ledger = UsageLedger(loader.llm_usage)
     check = check_run(llm.limits, llm.budget, ledger.today(), 1, call.estimated_total_tokens)
     typer.echo(f"Budget: {check.verdict.upper()} · {check.message}")
     if check.verdict == "exceeds":
@@ -1118,7 +736,7 @@ def llm_judge(
     from jobmatch.llm.usage import UsageLedger, check_run
 
     settings: Settings = ctx.obj
-    llm, store, jobs, _, roster = _llm_inputs(settings)
+    llm, loader, jobs, _, roster = _llm_inputs(settings)
     if labelled:
         path = labels or _default_labels(settings)
         wanted = {p.job_id for p in read_labels(path)}
@@ -1142,7 +760,7 @@ def llm_judge(
     todo = [p for p in plan if not p.cached]
     calls = min(len(todo), max_calls) if max_calls else len(todo)
     per_call = int(statistics.median(p.call.estimated_total_tokens for p in plan))
-    ledger = UsageLedger(store)
+    ledger = UsageLedger(loader.llm_usage)
     check = check_run(llm.limits, llm.budget, ledger.today(), calls, per_call)
     typer.echo(
         f"{len(plan)} job(s): {len(plan) - len(todo)} already judged (cached) · {calls} call(s) "
@@ -1181,25 +799,18 @@ def llm_compare(
         typer.Option("--labels", help="Label file (default data/eval/blind_consensus.csv)."),
     ] = None,
 ) -> None:
-    """Compare Gemini's cached verdicts (current prompt version) with the blind labels and with
-    v0's latest stored run (matches.csv + matches_flagged.csv, newest scoring version; v0 is
-    not re-run). No API call. Writes the pair-by-pair table to data/llm_results/."""
+    """Compare Gemini's cached verdicts (current prompt version) with the blind labels. No API
+    call. Writes the pair-by-pair table to data/llm_results/."""
     import json
     from datetime import UTC, datetime
 
-    from jobmatch.llm.compare import compare, latest_v0, read_labels
+    from jobmatch.llm.compare import PairRow, compare, read_labels
     from jobmatch.llm.judge import judgments_dir
     from jobmatch.llm.prompt import PROMPT_VERSION
     from jobmatch.llm.trial import TrialResult
-    from jobmatch.storage.csv_store import CsvStoreError, export_csv
+    from jobmatch.storage.csv_store import export_csv
 
     settings: Settings = ctx.obj
-    store = CsvStore(settings.paths.data_dir, lock_timeout=settings.storage.lock_timeout_seconds)
-    try:
-        v0 = latest_v0(store.matches.read_all(), store.matches_flagged.read_all())
-    except CsvStoreError as exc:
-        typer.echo(f"Cannot read v0 matches: {exc}")
-        raise typer.Exit(1) from exc
     newest: dict[str, TrialResult] = {}
     for path in sorted(judgments_dir(settings.paths.data_dir).glob("*.json")):
         r = TrialResult.model_validate_json(path.read_text(encoding="utf-8"))
@@ -1207,9 +818,8 @@ def llm_compare(
             continue
         if r.job_id not in newest or r.usage.at > newest[r.job_id].usage.at:
             newest[r.job_id] = r
-    result, rows = compare(read_labels(labels or _default_labels(settings)), newest.values(), v0)
+    result, rows = compare(read_labels(labels or _default_labels(settings)), newest.values())
 
-    typer.echo(f"v0: latest scoring version {result.v0_version} ({result.v0_created_at})")
     typer.echo(f"Gemini: prompt {PROMPT_VERSION} · {len(newest)} job(s) judged")
     typer.echo(
         f"Labelled pairs in judged jobs: {result.labelled_pairs} in {result.jobs_judged} job(s)"
@@ -1222,30 +832,24 @@ def llm_compare(
         f"Exact agreement {result.exact_agreement} · kappa {result.kappa} "
         f"(labels both AI judges agreed on: {result.kappa_agreed_labels})"
     )
-    typer.echo("\nPut in front of the reviewer (surfaced / labelled), by label")
-    for s in (result.gemini_surfaced, result.v0_surfaced, result.v0_surfaced_with_flagged):
-        detail = " · ".join(f"{k} {a}/{b}" for k, (a, b) in s.by_label.items())
-        typer.echo(
-            f"  {s.system:<26} {detail} · fits among surfaced {s.fit_share} · "
-            f"'no' among surfaced {s.no_share}"
-        )
-    d = result.within_job_difference
+    s = result.gemini_surfaced
+    detail = " · ".join(f"{k} {a}/{b}" for k, (a, b) in s.by_label.items())
     typer.echo(
-        f"\nWithin a job, fit ranked above 'no' ({result.within_job_pairs} pairs): Gemini "
-        f"{result.within_job_gemini} · v0 shortlist {result.within_job_v0_shortlist}"
-        + (f" · difference {d.mean} (95% {d.low} to {d.high}, by job)" if d else "")
+        f"\nPut in front of the reviewer (fit or partial / labelled): {detail} · fits among "
+        f"surfaced {s.fit_share} · 'no' among surfaced {s.no_share}"
+    )
+    typer.echo(
+        f"Within a job, fit ranked above 'no' ({result.within_job_pairs} pairs): "
+        f"{result.within_job_gemini}"
     )
     j = result.jobs
     typer.echo(
         f"\nJobs: {j.jobs} · with a labelled fit {j.with_labelled_fit} (Gemini shows nothing for "
-        f"{j.gemini_nothing_but_fit}, v0 for {j.v0_nothing_but_fit}) · without "
-        f"{j.without_labelled_fit} (Gemini shows nothing for {j.gemini_nothing_and_no_fit}, v0 "
-        f"for {j.v0_nothing_and_no_fit})"
+        f"{j.gemini_nothing_but_fit}) · without {j.without_labelled_fit} (Gemini shows nothing "
+        f"for {j.gemini_nothing_and_no_fit})"
     )
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     out = settings.paths.data_dir / "llm_results" / f"compare-{stamp}"
-    from jobmatch.llm.compare import PairRow
-
     export_csv(PairRow, rows, out.with_suffix(".csv"))
     out.with_suffix(".json").write_text(result.model_dump_json(indent=2) + "\n", encoding="utf-8")
     typer.echo(f"\nWrote {out}.csv (pairs, talent IDs only) and {out}.json")

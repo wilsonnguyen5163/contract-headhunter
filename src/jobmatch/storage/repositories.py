@@ -1,18 +1,20 @@
-"""Repository interfaces. Matching and review code depend only on these, so the CSV/NumPy
-implementations can later be swapped for SQLite or MongoDB without touching callers."""
+"""Repository interfaces, and the DataLoader that hands them out.
+
+Code outside storage/ asks storage.loader.create_loader(settings) for a DataLoader and only
+uses these interfaces, so the CSV files can later be swapped for MongoDB (or SQLite) by
+changing `storage.backend` in settings.yaml, without touching callers."""
 
 from collections.abc import Iterable, Mapping
 from typing import Protocol
 
 from jobmatch.schemas import (
     ContractorProfile,
-    EmbeddingMeta,
     Job,
     JobStatus,
-    Match,
+    LlmMatch,
+    LlmUsage,
     Review,
     Run,
-    VectorSet,
 )
 
 
@@ -41,19 +43,30 @@ class RunRepository(Protocol):
 
 
 class ContractorProfileRepository(Protocol):
-    """Read-only: the contractor list built from the master workbook."""
+    """The app's contractor list (built from the workbook or upserted from a loaded file)."""
+
+    def exists(self) -> bool:
+        """Whether a contractor list has been stored yet."""
+        ...
 
     def list_all(self) -> list[ContractorProfile]: ...
 
+    def replace_all(self, profiles: Iterable[ContractorProfile]) -> str | None:
+        """Store this list in place of the current one, keeping a copy of the old one first.
+        Returns where that copy is (for the report), or None when there was nothing yet."""
+        ...
 
-class MatchRepository(Protocol):
-    def list_all(self) -> list[Match]: ...
 
-    def list_for_job(self, job_id: str) -> list[Match]: ...
+class LlmMatchRepository(Protocol):
+    """Append-only: Gemini's shortlists (v1)."""
 
-    def add_many(self, matches: Iterable[Match]) -> list[Match]:
+    def list_all(self) -> list[LlmMatch]: ...
+
+    def add_many(self, matches: Iterable[LlmMatch]) -> list[LlmMatch]:
         """Store matches whose match_id is new; return those added."""
         ...
+
+    def current(self, judge_keys: Mapping[str, str]) -> dict[str, list[LlmMatch]]: ...
 
 
 class ReviewRepository(Protocol):
@@ -66,11 +79,21 @@ class ReviewRepository(Protocol):
     def latest_by_match(self) -> dict[str, Review]: ...
 
 
-class VectorStore(Protocol):
-    def save(self, namespace: str, vectors: VectorSet) -> None:
-        """Replace all vectors of a namespace (e.g. "jobs", "contractor_facets")."""
-        ...
+class UsageRepository(Protocol):
+    """Append-only: one row per LLM API call (token counts only), read by the budget guard."""
 
-    def load(self, namespace: str) -> VectorSet | None: ...
+    def record(self, usage: LlmUsage) -> None: ...
 
-    def meta(self, namespace: str) -> EmbeddingMeta | None: ...
+    def list_all(self) -> list[LlmUsage]: ...
+
+
+class DataLoader(Protocol):
+    """Every repository for one storage backend (storage.loader.create_loader)."""
+
+    backend: str
+    jobs: JobRepository
+    contractors: ContractorProfileRepository
+    llm_matches: LlmMatchRepository
+    reviews: ReviewRepository
+    runs: RunRepository
+    llm_usage: UsageRepository

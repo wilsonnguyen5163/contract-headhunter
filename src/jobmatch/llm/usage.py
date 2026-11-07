@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from jobmatch.config import LlmBudget, LlmLimits
 from jobmatch.schemas import LlmUsage
-from jobmatch.storage.csv_store import CsvStore
+from jobmatch.storage.repositories import UsageRepository
 
 # ---- the Pacific-time day (US daylight saving rules, no tz database needed) ----
 
@@ -75,16 +75,16 @@ def day_usage(records: Iterable[LlmUsage], now: datetime) -> DayUsage:
 
 
 class UsageLedger:
-    """data/llm_usage.csv through the CSV store (append-only)."""
+    """The usage log (loader.llm_usage: data/llm_usage.csv with the CSV backend)."""
 
-    def __init__(self, store: CsvStore) -> None:
-        self._table = store.llm_usage
+    def __init__(self, usage: UsageRepository) -> None:
+        self._usage = usage
 
     def record(self, usage: LlmUsage) -> None:
-        self._table.append([usage])
+        self._usage.record(usage)
 
     def all(self) -> list[LlmUsage]:
-        return self._table.read_all()
+        return self._usage.list_all()
 
     def today(self, now: datetime | None = None) -> DayUsage:
         return day_usage(self.all(), now or datetime.now(UTC))

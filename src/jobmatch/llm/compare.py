@@ -1,31 +1,25 @@
-"""Phase 5: compare Gemini's verdicts with the blind labels and with v0's latest stored run.
+"""Compare Gemini's verdicts with the blind labels (data/eval/blind_consensus.csv).
 
-Nothing is re-scored with v0 (v1 rule): v0 is read from data/matches.csv and
-matches_flagged.csv, keeping only the newest scoring version. Those files hold v0's
-shortlist (top 5 above min_score) only, so a labelled pair v0 did not shortlist has no v0
-score. v0's full-matrix numbers stay as recorded in doc/PROTOTYPES.md.
+v0 comparisons were removed with the v0 matcher (2026-11-06); the phase-5 results that
+compared the two are recorded in doc/LOG-UPDATE.md.
 
 Measures, on labelled pairs of the jobs Gemini judged:
 - agreement: Gemini verdict vs label (confusion table, exact agreement, Cohen's kappa);
-- surfaced: what each system puts in front of the reviewer (Gemini: fit or partial; v0: the
-  shortlist), split by label;
+- surfaced: what Gemini puts in front of the reviewer (fit or partial), split by label;
 - within-job ranking: chance that a labelled fit ranks above a labelled "no" in the same job
-  (ties count half), with a bootstrap over jobs for the Gemini minus v0 difference;
-- jobs: "nothing to show" (Gemini no_fit, v0 empty shortlist) vs whether a labelled fit exists.
+  (ties count half);
+- jobs: "nothing to show" (no fit or partial) vs whether a labelled fit exists.
 """
 
 import csv
-import random
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
-from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel
 
 from jobmatch.llm.trial import TrialResult
-from jobmatch.schemas import Match
 
 Label = Literal["fit", "partial", "no"]
 LABELS: tuple[Label, ...] = ("fit", "partial", "no")
@@ -53,38 +47,6 @@ def read_labels(path: Path) -> list[LabelledPair]:
             )
             for row in csv.DictReader(f)
         ]
-
-
-class V0Pair(BaseModel):
-    score: float
-    band: str
-    rank: int
-    flagged: bool
-
-
-class V0Run(BaseModel):
-    version: str
-    created_at: datetime | None
-    pairs: dict[tuple[str, str], V0Pair]  # (job_id, contractor_id)
-
-    def shortlist(self, job_id: str) -> list[str]:
-        return [c for (j, c), p in self.pairs.items() if j == job_id and not p.flagged]
-
-
-def latest_v0(matches: Iterable[Match], flagged: Iterable[Match]) -> V0Run:
-    rows = [(m, False) for m in matches] + [(m, True) for m in flagged]
-    if not rows:
-        return V0Run(version="", created_at=None, pairs={})
-    newest = max(rows, key=lambda r: r[0].created_at)[0]
-    version = newest.scoring_version
-    pairs = {
-        (m.job_id, m.contractor_id): V0Pair(
-            score=m.score, band=m.band.value, rank=m.rank, flagged=f
-        )
-        for m, f in rows
-        if m.scoring_version == version
-    }
-    return V0Run(version=version, created_at=newest.created_at, pairs=pairs)
 
 
 class GeminiPair(BaseModel):
@@ -136,27 +98,19 @@ class PairRow(BaseModel):
     gemini_in_top: bool
     gemini_fit_score: int | None
     gemini_reason: str | None
-    v0_shortlisted: bool
-    v0_flagged: bool
-    v0_score: float | None
-    v0_rank: int | None
-    v0_band: str | None
 
     @property
     def gemini_surfaced(self) -> bool:
         return self.gemini_verdict in ("fit", "partial")
 
 
-def pair_rows(
-    labels: Iterable[LabelledPair], gemini: dict[str, GeminiJob], v0: V0Run
-) -> list[PairRow]:
+def pair_rows(labels: Iterable[LabelledPair], gemini: dict[str, GeminiJob]) -> list[PairRow]:
     rows: list[PairRow] = []
     for lp in labels:
         job = gemini.get(lp.job_id)
         if job is None:
             continue  # job not judged by Gemini (excluded, or not run yet)
         g = job.pairs.get(lp.contractor_id)
-        v = v0.pairs.get((lp.job_id, lp.contractor_id))
         rows.append(
             PairRow(
                 job_id=lp.job_id,
@@ -167,11 +121,6 @@ def pair_rows(
                 gemini_in_top=g.in_top if g else False,
                 gemini_fit_score=g.fit_score if g else None,
                 gemini_reason=g.reason if g else None,
-                v0_shortlisted=v is not None and not v.flagged,
-                v0_flagged=v is not None and v.flagged,
-                v0_score=v.score if v else None,
-                v0_rank=v.rank if v else None,
-                v0_band=v.band if v else None,
             )
         )
     return rows
@@ -201,7 +150,7 @@ def kappa(rows: Sequence[PairRow]) -> float | None:
 
 
 class Surfaced(BaseModel):
-    """What a system put in front of the reviewer, among labelled pairs, by label."""
+    """What Gemini put in front of the reviewer, among labelled pairs, by label."""
 
     system: str
     by_label: dict[str, tuple[int, int]]  # label -> (surfaced, total)
@@ -231,11 +180,6 @@ def gemini_order(r: PairRow) -> float:
     return VERDICT_RANK[r.gemini_verdict] * 1000 + (r.gemini_fit_score or 0)
 
 
-def v0_order(r: PairRow) -> float:
-    """v0 shortlist score; pairs v0 did not keep (or flagged) share the bottom place."""
-    return r.v0_score if r.v0_shortlisted and r.v0_score is not None else -1.0
-
-
 def _wins(rows: Sequence[PairRow], order: Callable[[PairRow], float]) -> tuple[float, int]:
     wins, pairs = 0.0, 0
     for fit in (r for r in rows if r.label == "fit"):
@@ -246,94 +190,51 @@ def _wins(rows: Sequence[PairRow], order: Callable[[PairRow], float]) -> tuple[f
     return wins, pairs
 
 
-def within_job(rows: Sequence[PairRow], order: Callable[[PairRow], float]) -> float | None:
+def _by_job(rows: Sequence[PairRow]) -> dict[str, list[PairRow]]:
     by_job: dict[str, list[PairRow]] = defaultdict(list)
     for r in rows:
         by_job[r.job_id].append(r)
+    return by_job
+
+
+def within_job(rows: Sequence[PairRow], order: Callable[[PairRow], float]) -> float | None:
     wins = pairs = 0.0
-    for job_rows in by_job.values():
+    for job_rows in _by_job(rows).values():
         w, p = _wins(job_rows, order)
         wins, pairs = wins + w, pairs + p
     return round(wins / pairs, 3) if pairs else None
 
 
 def within_job_pairs(rows: Sequence[PairRow]) -> int:
-    by_job: dict[str, list[PairRow]] = defaultdict(list)
-    for r in rows:
-        by_job[r.job_id].append(r)
-    return sum(_wins(job_rows, lambda r: 0.0)[1] for job_rows in by_job.values())
-
-
-class Interval(BaseModel):
-    mean: float
-    low: float
-    high: float
-
-
-def bootstrap_difference(
-    rows: Sequence[PairRow], *, n: int = 2000, seed: int = 0
-) -> Interval | None:
-    """Gemini minus v0 within-job measure, resampling jobs (95% interval)."""
-    by_job: dict[str, list[PairRow]] = defaultdict(list)
-    for r in rows:
-        by_job[r.job_id].append(r)
-    # Per job: (Gemini wins, v0 wins, fit-vs-no pairs). Jobs without such pairs add nothing.
-    per_job = [
-        (_wins(rs, gemini_order)[0], _wins(rs, v0_order)[0], _wins(rs, gemini_order)[1])
-        for rs in by_job.values()
-    ]
-    per_job = [t for t in per_job if t[2]]
-    if len(per_job) < 2:
-        return None
-    rng = random.Random(seed)
-    diffs: list[float] = []
-    for _ in range(n):
-        sample = rng.choices(per_job, k=len(per_job))
-        pairs = sum(t[2] for t in sample)
-        diffs.append((sum(t[0] for t in sample) - sum(t[1] for t in sample)) / pairs)
-    diffs.sort()
-    return Interval(
-        mean=round(sum(diffs) / len(diffs), 3),
-        low=round(diffs[int(0.025 * (len(diffs) - 1))], 3),
-        high=round(diffs[int(0.975 * (len(diffs) - 1))], 3),
-    )
+    return sum(_wins(job_rows, lambda r: 0.0)[1] for job_rows in _by_job(rows).values())
 
 
 class JobCounts(BaseModel):
     jobs: int
     with_labelled_fit: int
-    gemini_nothing_but_fit: int  # Gemini no_fit although a labelled fit exists
-    v0_nothing_but_fit: int  # v0 empty shortlist although a labelled fit exists
+    gemini_nothing_but_fit: int  # Gemini shows nobody although a labelled fit exists
     without_labelled_fit: int
     gemini_nothing_and_no_fit: int
-    v0_nothing_and_no_fit: int
 
 
-def job_counts(rows: Sequence[PairRow], gemini: dict[str, GeminiJob], v0: V0Run) -> JobCounts:
+def job_counts(rows: Sequence[PairRow], gemini: dict[str, GeminiJob]) -> JobCounts:
     jobs = sorted({r.job_id for r in rows})
     has_fit = {j for j in jobs if any(r.job_id == j and r.label == "fit" for r in rows)}
 
-    def g_nothing(j: str) -> bool:
+    def nothing(j: str) -> bool:
         job = gemini[j]
         return job.no_fit or not any(p.verdict != "no" for p in job.pairs.values())
-
-    def v_nothing(j: str) -> bool:
-        return not v0.shortlist(j)
 
     return JobCounts(
         jobs=len(jobs),
         with_labelled_fit=len(has_fit),
-        gemini_nothing_but_fit=sum(g_nothing(j) for j in has_fit),
-        v0_nothing_but_fit=sum(v_nothing(j) for j in has_fit),
+        gemini_nothing_but_fit=sum(nothing(j) for j in has_fit),
         without_labelled_fit=len(jobs) - len(has_fit),
-        gemini_nothing_and_no_fit=sum(g_nothing(j) for j in jobs if j not in has_fit),
-        v0_nothing_and_no_fit=sum(v_nothing(j) for j in jobs if j not in has_fit),
+        gemini_nothing_and_no_fit=sum(nothing(j) for j in jobs if j not in has_fit),
     )
 
 
 class Comparison(BaseModel):
-    v0_version: str
-    v0_created_at: datetime | None
     jobs_judged: int
     labelled_pairs: int
     pairs_without_verdict: int
@@ -342,26 +243,20 @@ class Comparison(BaseModel):
     kappa: float | None
     kappa_agreed_labels: float | None  # labels where both AI judges agreed
     gemini_surfaced: Surfaced
-    v0_surfaced: Surfaced
-    v0_surfaced_with_flagged: Surfaced
     within_job_pairs: int
     within_job_gemini: float | None
-    within_job_v0_shortlist: float | None
-    within_job_difference: Interval | None
     jobs: JobCounts
 
 
 def compare(
-    labels: Sequence[LabelledPair], results: Iterable[TrialResult], v0: V0Run
+    labels: Sequence[LabelledPair], results: Iterable[TrialResult]
 ) -> tuple[Comparison, list[PairRow]]:
     gemini = gemini_jobs(results)
-    rows = pair_rows(labels, gemini, v0)
+    rows = pair_rows(labels, gemini)
     judged = [r for r in rows if r.gemini_verdict is not None]
     agreed = [r for r in rows if r.source.startswith("ai-agree")]
     return (
         Comparison(
-            v0_version=v0.version,
-            v0_created_at=v0.created_at,
             jobs_judged=len({r.job_id for r in rows}),
             labelled_pairs=len(rows),
             pairs_without_verdict=len(rows) - len(judged),
@@ -374,25 +269,9 @@ def compare(
             kappa=kappa(rows),
             kappa_agreed_labels=kappa(agreed),
             gemini_surfaced=surfaced(rows, "gemini (fit or partial)", lambda r: r.gemini_surfaced),
-            v0_surfaced=surfaced(rows, "v0 shortlist", lambda r: r.v0_shortlisted),
-            v0_surfaced_with_flagged=surfaced(
-                rows, "v0 shortlist + flagged", lambda r: r.v0_shortlisted or r.v0_flagged
-            ),
             within_job_pairs=within_job_pairs(rows),
             within_job_gemini=within_job(rows, gemini_order),
-            within_job_v0_shortlist=within_job(rows, v0_order),
-            within_job_difference=bootstrap_difference(rows),
-            jobs=job_counts(rows, gemini, v0)
-            if rows
-            else JobCounts(
-                jobs=0,
-                with_labelled_fit=0,
-                gemini_nothing_but_fit=0,
-                v0_nothing_but_fit=0,
-                without_labelled_fit=0,
-                gemini_nothing_and_no_fit=0,
-                v0_nothing_and_no_fit=0,
-            ),  # fmt: skip
+            jobs=job_counts(rows, gemini),
         ),
         rows,
     )

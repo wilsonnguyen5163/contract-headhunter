@@ -1,12 +1,11 @@
 # jobmatch: contract job matching assistant
 
-A local tool that collects **Canadian contract job postings**, matches each one to **our registered contractors** using a local AI model, and gives a **person** a ranked shortlist to review. The tool recommends; people decide.
+A local tool that collects **Canadian contract job postings**, asks **Gemini** (Google's AI, free tier) which of **our registered contractors** fit each one, and gives a **person** a ranked shortlist to review. Contractor names and contact details never leave the machine. The tool recommends; people decide.
 
 Contract roles are often filled first-come, first-served, and checking job boards by hand all day is slow. jobmatch does the collecting, cleanup and first sorting so reviewers spend their time on judgment.
 
-> **Status:** v0 prototype complete (2026-11-04). Job intake, normalization, embeddings, matching, profession notes, spreadsheet exports and evaluation against 331 blind-labelled pairs work. Next, in v1: an LLM judge for the matching itself. The review UI, automatic job-board feeds and the scheduler are not built yet.
+> **Status (2026-11-06):** v1 works end to end from the command line: job intake, normalization, matching with Gemini (`run-once`) and a spreadsheet export. The v0 local-embedding matcher was removed (kept on a separate local branch). Next: a desktop app (Mac `.app` and Windows `.exe`) for end users.
 
-> **Current:** v1 prototype is now underway. An LLM judge for the matching itself. The review UI, automatic job-board feeds and the scheduler are not built yet.
 ---
 
 ## What this repo contributes
@@ -15,57 +14,50 @@ Contract roles are often filled first-come, first-served, and checking job board
 - **Normalization for English and French postings.** It cleans the text, splits the posting into sections, and extracts title, company, location, work mode, language, contract type and length, seniority, years of experience, pay and skills. Rules live in editable YAML files in `config/`.
 - **Deduplication and filtering.** The same job posted on several sites is stored once. Non-Canadian and non-contract postings are set aside, with the reason.
 - **Contractor profiles from the master workbook.** It builds the contractor list from the talent spreadsheet and learns skills that the curated skill list doesn't know yet.
-- **Local semantic matching.** It embeds jobs and contractors with `BAAI/bge-m3`, on the CPU and offline, then scores every pair on overall meaning, title, shared skills and type of work. Each pair gets a high, medium or low band, with explanations taken from the data: matched skills, missing must-have skills, flags.
-- **Rule checks and notes.** A seniority gap of two or more levels sends a match to a separate flagged list, with the reason. Each match also carries a profession note ("job: recruiting · talent: sales (different)") for the reviewer.
-- **Exports and evaluation.** Spreadsheet exports for reviewers, a notebook view of the best matches, and a comparison of the matcher's scores with human-reviewed matches to tune thresholds.
-- **Safe storage with no database.** Plain CSV files with schema validation, atomic writes, file locks and timestamped backups. Vectors go in NumPy `.npz` files. Every step is safe to re-run.
+- **Matching with Gemini.** One call per job judges every contractor (fit, partial or no, with a reason) and describes the best ones: requirements met and missing, red flags, and evidence quoted from the posting and profile, each quote checked word for word. Contractors are sent as anonymous cards, never with names, contact details, location or rates.
+- **Quota guard.** Every call's token use is logged, and a run that would use most of the day's free quota asks first. Answers are cached, so re-running costs nothing.
+- **Contractor loading.** Load the master workbook or a contractor CSV: new contractors are added and changed ones updated.
+- **Exports and evaluation.** A spreadsheet of the shortlists for reviewers, and a comparison of Gemini's verdicts with blind-labelled pairs.
+- **Safe storage with no database.** Plain CSV files with schema validation, atomic writes, file locks and timestamped backups. Every step is safe to re-run.
 
 ## How it works
 
 ```
 links / pasted postings ──► fetch ──► normalize ──► dedupe & filter ──► data/jobs.csv
                                                                              │
-contractor workbook ──► build-contractors ──► contractors.csv                │
-                                  │                                          │
-                                  ▼                                          ▼
-                          embed-contractors                              embed-jobs
-                                  └──────────────► match ◄───────────────────┘
-                                                     │
-                       data/matches.csv  +  data/matches_flagged.csv
-                                                     │
-                     export-trial-run / export-matches ──► exports/*.csv ──► notebook / Excel ──► human review
+contractor workbook / CSV ──► contractors.csv ──► anonymous cards            │
+                                                       │                     │
+                                                       ▼                     ▼
+                                         Gemini: one call per job (quota-checked, cached)
+                                                       │
+                                               data/llm_matches.csv
+                                                       │
+                                  export-llm-matches ──► exports/*.csv ──► human review
 ```
 
 ## Requirements
 
-- Docker with Docker Compose. The app runs in a `linux/amd64` container, CPU only, capped at 4 GB of memory.
-- About 5 GB of disk for the embedding model (downloaded once into a Docker volume).
-- Target machine: a 2019 Intel MacBook Pro with 16 GB RAM. Development also works on any x86_64 machine.
-- Optional, for the results notebook: Jupyter and `pandas` on your own machine.
+- Docker with Docker Compose (until the desktop app ships). The app runs in a small `linux/amd64` container, capped at 4 GB of memory.
+- A Gemini API key from Google AI Studio (free tier), in `.env`.
 
 ## Installation
 
 ```
-cp .env.example .env
+cp .env.example .env      # then add GEMINI_API_KEY=
 docker compose build
-docker compose run --rm -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 app python -m jobmatch smoke-embed   # one-time model download
 ```
-
-After the download, keep `HF_HUB_OFFLINE=1` in `.env`.
 
 ## Usage
 
-The short version:
-
 ```
-bash scripts/fetch_and_import.sh                                     # import jobs from data/inbox/
-docker compose run --rm app python -m jobmatch embed-contractors     # after the contractor list changes
-docker compose run --rm app python -m jobmatch embed-jobs
-docker compose run --rm app python -m jobmatch match
-docker compose run --rm app python -m jobmatch export-trial-run      # then open data_visualizer.ipynb
+docker compose run --rm app python -m jobmatch llm-judge --dry-run   # how many calls, quota check
+docker compose run --rm app python -m jobmatch run-once              # add --contractors <file> when the list changed
+docker compose run --rm app python -m jobmatch export-llm-matches
 ```
 
-**See [doc/quick_start.md](doc/quick_start.md)** for every command, how to add jobs, reset and re-import, where results are stored, and how to read them.
+**See [doc/quick_start.md](doc/quick_start.md)** for every command, how to add jobs, and how to read the results.
+
+**Desktop app (for end users, no Docker):** an Intel Mac `.app` and a Windows `.exe`, built by GitHub Actions (Actions › build-app). Installing and first use: [doc/FIRST_LAUNCH.md](doc/FIRST_LAUNCH.md). Preview it from the repo: `docker compose run --rm --service-ports app python -m jobmatch.app --browser --host 0.0.0.0`, then http://localhost:8080.
 
 ## Project structure
 
@@ -76,38 +68,38 @@ src/jobmatch/
   cli.py             command line (python -m jobmatch <command>)
   sources/           link fetching, paste files, saved pages and PDFs, contractor workbook
   normalize/         one module per normalization step
-  embed/             local embedding model and embedding texts
-  match/             scoring, rule checks, exports, evaluation
-  storage/           CSV store, NumPy vector store, repository interfaces
-  llm/, review/      placeholders for later phases
-scripts/             fetch_and_import.sh, reset_reimport.sh, update_contractors.sh, rename_manual_templates.sh
-  eval/              blind label sheets (make, import), ranking measures, weight check
-data/                runtime data (git-ignored): inbox/, jobs.csv, matches*.csv, embeddings/, raw/
+  llm/               Gemini matching: anonymized cards, prompt, judge, quota guard, shortlists
+  pipeline.py        run-once: the whole pipeline in one call
+  storage/           CSV store, repository interfaces
+  review/            placeholder (desktop app next)
+scripts/             fetch_and_import.sh, reset_reimport.sh, rename_manual_templates.sh
+data/                runtime data (git-ignored): inbox/, jobs.csv, llm_matches.csv, llm_results/, raw/
 exports/             spreadsheets for people (git-ignored; they contain contractor names)
 tests/               unit and end-to-end tests (synthetic data, network always mocked)
-data_visualizer.ipynb   notebook for reading trial-run results
 ```
 
 ## Documentation
 
 | File | For |
 |---|---|
+| [doc/FIRST_LAUNCH.md](doc/FIRST_LAUNCH.md) | End users: installing the desktop app and first use |
 | [doc/quick_start.md](doc/quick_start.md) | Day-to-day use: commands, importing, running, reading results |
-| [doc/DEVELOPMENT.md](doc/DEVELOPMENT.md) | Technical details: layout, normalization, embeddings, matching, storage |
+| [doc/DEVELOPMENT.md](doc/DEVELOPMENT.md) | Technical details: layout, intake, normalization, matching, storage |
 | [doc/PROJECT_CONTEXT.md](doc/PROJECT_CONTEXT.md) | Goals, architecture and decisions |
 | [doc/LOG-UPDATE.md](doc/LOG-UPDATE.md) | What each change solved, newest first |
+| [doc/V1_PLAN.md](doc/V1_PLAN.md) | v1 design: Gemini matching, privacy, quota |
 | [doc/PROTOTYPES.md](doc/PROTOTYPES.md) | What v0 tried and decided (full log in `doc/archive/`) |
 | [doc/LABELLING.md](doc/LABELLING.md) | The blind labelling sheet: why, how to fill it in, how to import it |
 | [doc/JTBD2-Full_pipeline.png](doc/JTBD2-Full_pipeline.png) | General pipeline template (not a v0 spec) |
 | [doc/Project_repo_artifact.pdf](doc/Project_repo_artifact.pdf) | Project repo artifact (PDF) |
 | [CLAUDE.md](CLAUDE.md) | Working rules for AI-assisted development (kept at the root so Claude Code loads it) |
 
-## What it does not do (v0)
+## What it does not do
 
 - **No emails.** Finding company contacts and drafting outreach come later, and a person will always review and send.
-- **No LinkedIn or Indeed scraping**, and no logging in to any site. LinkedIn jobs enter only through links a person pastes. Indeed postings are pasted by hand.
+- **No logging in to any site.** LinkedIn jobs enter only through links a person pastes; pages that need a login or JavaScript are pasted by hand.
 - **No final decisions.** Every match is reviewed by a person.
-- **No chatbot-style AI.** Matching uses embeddings and rules only. No contractor data is sent to outside AI services.
+- **No personal data to the AI.** Gemini sees anonymous contractor cards only: no names, contact details, location, rates or IDs.
 
 ## Privacy and data
 
@@ -118,14 +110,14 @@ data_visualizer.ipynb   notebook for reading trial-run results
 
 ## Known limits
 
-- Scores and thresholds are first guesses, tuned on a small set of reviewed matches. Expect some wrong suggestions and some misses early on.
+- Gemini is strict about "different profession" and sometimes contradicts itself; contractors it judged fit or partial without describing them are still shown ("reason only") for a person to check.
+- Free-tier limits change without notice. The limits in `config/settings.yaml` are guesses until copied from AI Studio.
 - Pages that need JavaScript (Workday, Zoho Recruit, BambooHR) can't be fetched and must be pasted by hand.
 - Contractors with thin profiles (no summary or strengths) are matched less reliably.
 - Canadian anti-spam law (CASL) applies to any future outreach step and needs qualified advice before it is built.
 
 ## Glossary
 
-- **Embedding:** turning text into numbers so a computer can tell which texts mean similar things.
-- **Skill taxonomy:** our list of skills and their alternate spellings ("React" and "ReactJS" count as the same).
-- **Band:** the confidence level of a match: high, medium or low.
+- **Verdict:** Gemini's judgment of a contractor for a job: fit, partial or no.
+- **Quota:** how many Gemini requests the free tier allows per day.
 - **Docker container:** a sealed package of the software that runs the same way on different computers.

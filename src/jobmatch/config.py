@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from jobmatch.schemas import CountryCode, Province
 
 CONFIG_DIR_ENV = "JOBMATCH_CONFIG_DIR"
+DATA_DIR_ENV = "JOBMATCH_DATA_DIR"  # root that settings.yaml's relative paths resolve against
 DEFAULT_CONFIG_DIR = Path("config")
 SETTINGS_FILE = "settings.yaml"
 INDUSTRIES_FILE = "industries.yaml"
@@ -47,16 +48,9 @@ class PathSettings(StrictModel):
 
 class StorageSettings(StrictModel):
     lock_timeout_seconds: float = Field(gt=0)
-
-
-class EmbeddingSettings(StrictModel):
-    model_name: str = Field(min_length=1)
-    model_revision: str | None = None
-    batch_size: int = Field(gt=0)
-    max_seq_length: int = Field(gt=0)
-    normalize_embeddings: bool
-    job_prefix: str
-    facet_prefix: str
+    # Where records are kept (storage/loader.py create_loader). "mongodb" is a placeholder
+    # until hosting is decided; connection details will come from .env, never from here.
+    backend: Literal["csv", "mongodb"] = "csv"
 
 
 class NormalizeSettings(StrictModel):
@@ -68,69 +62,6 @@ class NormalizeSettings(StrictModel):
     max_section_items: int = Field(ge=1)
     max_responsibilities: int = Field(ge=1)
     fuzzy_title_threshold: float = Field(gt=0, le=100)
-
-
-class MatchingWeights(StrictModel):
-    cosine: float = Field(ge=0)
-    title: float = Field(default=0, ge=0)
-    skill_overlap: float = Field(ge=0)
-    field: float = Field(default=0, ge=0)
-    lexical: float = Field(default=0, ge=0)  # TF-IDF word overlap (match/lexical.py)
-
-    @model_validator(mode="after")
-    def _not_all_zero(self) -> "MatchingWeights":
-        if self.cosine + self.title + self.skill_overlap + self.field + self.lexical <= 0:
-            raise ValueError("at least one matching weight must be positive")
-        return self
-
-
-class ConfidenceBands(StrictModel):
-    high: float = Field(ge=0, le=1)
-    medium: float = Field(ge=0, le=1)
-
-    @model_validator(mode="after")
-    def _ordered(self) -> "ConfidenceBands":
-        if self.medium > self.high:
-            raise ValueError("bands.medium must not exceed bands.high")
-        return self
-
-
-class MatchingSettings(StrictModel):
-    top_k: int = Field(gt=0)
-    min_score: float = Field(ge=0, le=1)
-    cosine_floor: float = Field(ge=-1, le=1)
-    cosine_ceiling: float = Field(ge=-1, le=1)
-    title_floor: float = Field(ge=-1, le=1)
-    title_ceiling: float = Field(ge=-1, le=1)
-    weights: MatchingWeights
-    bands: ConfidenceBands
-    missing_must_have_lowers_band: bool
-    skill_overlap_cap: int = Field(ge=1)
-    field_ignore_categories: list[str] = []
-    thin_profiles_skip_text: bool
-    seniority_max_gap: int = Field(ge=0)
-    assume_all_remote: bool
-    hours_per_year: float = Field(gt=0)
-    rate_tolerance: float = Field(gt=0)
-    # TF-IDF word overlap (weights.lexical): cosines stretched from [floor, ceiling] to [0, 1].
-    lexical_floor: float = Field(default=0.0, ge=0, le=1)
-    lexical_ceiling: float = Field(default=0.3, ge=0, le=1)
-    lexical_stopwords: list[str] = []
-
-    @model_validator(mode="after")
-    def _cosine_range(self) -> "MatchingSettings":
-        if self.cosine_floor >= self.cosine_ceiling:
-            raise ValueError("matching.cosine_floor must be below cosine_ceiling")
-        if self.title_floor >= self.title_ceiling:
-            raise ValueError("matching.title_floor must be below title_ceiling")
-        if self.lexical_floor >= self.lexical_ceiling:
-            raise ValueError("matching.lexical_floor must be below lexical_ceiling")
-        return self
-
-
-class ExportSettings(StrictModel):
-    # Kept out of MatchingSettings: changing it must not change the scoring version.
-    trial_run_per_job: int = Field(default=2, gt=0)
 
 
 class LoggingSettings(StrictModel):
@@ -164,6 +95,13 @@ class LlmPayloadSettings(StrictModel):
     expected_output_tokens: int = Field(gt=0)  # for budget estimates only
 
 
+class LlmShortlistSettings(StrictModel):
+    """What a job's stored shortlist keeps from Gemini's verdicts (user rule, 2026-11-06)."""
+
+    max_fits: int = Field(ge=0)  # jobs with at least one "fit": fits only, up to this many
+    partials_when_no_fit: int = Field(ge=0)  # jobs with no fit: this many best partials
+
+
 class LlmPrefilterSettings(StrictModel):
     enabled: bool
     min_roster: int = Field(ge=1)
@@ -188,6 +126,7 @@ class LlmSettings(StrictModel):
     limits: LlmLimits
     budget: LlmBudget
     payload: LlmPayloadSettings
+    shortlist: LlmShortlistSettings
     prefilter: LlmPrefilterSettings
 
     @model_validator(mode="after")
@@ -202,10 +141,7 @@ class Settings(StrictModel):
     config_dir: Path
     paths: PathSettings
     storage: StorageSettings
-    embedding: EmbeddingSettings
     normalize: NormalizeSettings
-    matching: MatchingSettings
-    exports: ExportSettings = ExportSettings()
     logging: LoggingSettings
     llm: LlmSettings | None = None  # v1; None when settings.yaml has no llm section
 
@@ -457,10 +393,14 @@ def _read_yaml(path: Path) -> dict[str, Any]:
     return data
 
 
-def load_settings(config_dir: Path | None = None) -> Settings:
+def load_settings(config_dir: Path | None = None, data_root: Path | None = None) -> Settings:
+    """Relative paths in settings.yaml resolve against `data_root`, else $JOBMATCH_DATA_DIR,
+    else the config folder's parent (the repo, or /app in Docker). The desktop app passes its
+    user data folder, so the read-only bundled config never decides where data is written."""
     cdir = resolve_config_dir(config_dir)
     raw = _read_yaml(cdir / SETTINGS_FILE)
-    root = cdir.parent
+    env_root = os.environ.get(DATA_DIR_ENV)
+    root = data_root or (Path(env_root) if env_root else cdir.parent)
     paths = dict(raw.get("paths") or {})
     for key, value in paths.items():
         path = Path(value)

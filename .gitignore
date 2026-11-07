@@ -131,3 +131,7 @@ ehthumbs.db
 Desktop.ini
 $RECYCLE.BIN/
 *.lnk
+
+# ---- Desktop app ----
+# NiceGUI local storage (created when the app runs from the repo)
+.nicegui/

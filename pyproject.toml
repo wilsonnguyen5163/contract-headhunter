@@ -1,19 +1,14 @@
 [project]
 name = "jobmatch"
 version = "0.1.0"
-description = "Find Canadian contract postings, match them to contractors with local embeddings, queue for human review."
+description = "Find Canadian contract postings, match them to contractors with the Gemini API, queue for human review."
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "pydantic>=2.7,<3",
     "pyyaml>=6.0",
     "typer>=0.12",
     "filelock>=3.13",
-    "numpy>=1.26",
-    # CPU-only wheel from the PyTorch CPU index (see [tool.uv.sources]). Never add CUDA builds.
-    "torch>=2.4",
-    "transformers>=4.41",
-    "sentence-transformers>=3.0",
-    # Fetching posting links that a person adds (phase 3). Already in the lock via huggingface-hub.
+    # Fetching posting links that a person adds, and the Gemini REST API (v1).
     "httpx>=0.27",
     # Normalization (phase 2): HTML to text, mojibake repair.
     "beautifulsoup4>=4.12",
@@ -25,6 +20,13 @@ dependencies = [
     "pypdf>=5.0",
 ]
 
+[project.optional-dependencies]
+# The desktop app (Mac .app, Windows .exe): UI in a native window. Not installed in Docker.
+app = [
+    "nicegui>=2.0",
+    "pywebview>=5.0",
+]
+
 [project.scripts]
 jobmatch = "jobmatch.cli:app"
 
@@ -32,6 +34,10 @@ jobmatch = "jobmatch.cli:app"
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
+]
+# Packaging the desktop app; never shipped inside it.
+build = [
+    "pyinstaller>=6.0",
 ]
 
 [build-system]
@@ -41,27 +47,22 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/jobmatch"]
 
-# ---- uv: lock only for the Docker runtime (linux/amd64), torch from the CPU index ----
+# ---- uv: lock for the Docker runtime (linux/amd64) and the desktop app (Intel Mac, Windows) ----
 [tool.uv]
-environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+environments = [
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'darwin' and platform_machine == 'x86_64'",
+    "sys_platform == 'win32' and platform_machine == 'AMD64'",
+]
+# Docker installs the default dependencies plus dev only (see Dockerfile).
+default-groups = ["dev"]
 # Only resolve releases at least ~2 weeks old (stability for the client machine). Move forward deliberately.
 exclude-newer = "2026-10-05T00:00:00Z"
-
-[tool.uv.sources]
-torch = [{ index = "pytorch-cpu" }]
-
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
 
 # ---- pytest ----
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra -m 'not model'"
-markers = [
-    "model: loads the real embedding model (downloads it on first use); run with `pytest -m model`",
-]
+addopts = "-ra"
 
 # ---- ruff ----
 [tool.ruff]

@@ -9,8 +9,6 @@ services:
     env_file:
       - path: .env
         required: false
-    environment:
-      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-0}
     volumes:
       - ./data:/app/data
       - ./exports:/app/exports
@@ -18,9 +16,8 @@ services:
       # Source and tests mounted so code edits need no rebuild (the project is installed editable).
       - ./src:/app/src
       - ./tests:/app/tests
-      - hf-cache:/cache/huggingface
+    # Desktop-app preview in a browser (only with `docker compose run --service-ports`).
+    ports:
+      - "127.0.0.1:8080:8080"
     # Client Mac has 16 GB; keep the container well under it.
     mem_limit: 4g
-
-volumes:
-  hf-cache:

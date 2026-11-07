@@ -12,7 +12,11 @@ from jobmatch.llm.judge import judge_jobs, load_judgment, plan_jobs
 from jobmatch.llm.provider import DailyQuotaError, LlmRequest, LlmResponse, TokenUsage
 from jobmatch.llm.usage import UsageLedger
 from jobmatch.schemas import ContractorProfile, Job
-from jobmatch.storage.csv_store import CsvStore
+from jobmatch.storage.csv_store import CsvStore, CsvUsageRepository
+
+
+def ledger(store: CsvStore) -> UsageLedger:
+    return UsageLedger(CsvUsageRepository(store))
 
 
 def llm() -> LlmSettings:
@@ -97,7 +101,7 @@ def test_jobs_are_judged_cached_and_paced(
     lines: list[str] = []
     batch = jobs(make_job, 3)
     report = judge_jobs(
-        batch, ROSTER, llm(), fake, UsageLedger(store), folder,
+        batch, ROSTER, llm(), fake, ledger(store), folder,
         echo=lines.append, sleep=sleep, clock=clock,
     )  # fmt: skip
     assert (report.sent, report.ok, report.failed, report.cached) == (3, 3, 0, 0)
@@ -107,7 +111,7 @@ def test_jobs_are_judged_cached_and_paced(
     assert all(p.cached for p in plan_jobs(batch, ROSTER, llm(), folder))
 
     again = judge_jobs(
-        batch, ROSTER, llm(), fake, UsageLedger(store), folder,
+        batch, ROSTER, llm(), fake, ledger(store), folder,
         echo=lines.append, sleep=sleep, clock=clock,
     )  # fmt: skip
     assert (again.sent, again.cached) == (0, 3)
@@ -120,7 +124,7 @@ def test_daily_limit_stops_the_run_and_keeps_what_was_done(
     folder, clock = tmp_path / "judgments", Clock()
     batch = jobs(make_job, 4)
     report = judge_jobs(
-        batch, ROSTER, llm(), Fake(fail_after=2), UsageLedger(store), folder,
+        batch, ROSTER, llm(), Fake(fail_after=2), ledger(store), folder,
         echo=lambda s: None, sleep=clock.sleep, clock=clock,
     )  # fmt: skip
     assert (report.sent, report.ok, report.failed) == (3, 2, 1)
@@ -135,7 +139,7 @@ def test_max_calls_limits_the_run(
 ) -> None:
     clock = Clock()
     report = judge_jobs(
-        jobs(make_job, 3), ROSTER, llm(), Fake(), UsageLedger(store), tmp_path / "j",
+        jobs(make_job, 3), ROSTER, llm(), Fake(), ledger(store), tmp_path / "j",
         max_calls=1, echo=lambda s: None, sleep=clock.sleep, clock=clock,
     )  # fmt: skip
     assert report.sent == 1 and report.stopped == "--max-calls 1 reached"

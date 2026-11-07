@@ -1,0 +1,111 @@
+# Build the jobmatch desktop app: an Intel Mac .app (in a .dmg) and a Windows .exe (in a zip).
+#
+# Start it from GitHub: Actions > build-app > Run workflow (or push a tag like v0.1.0).
+# Each platform builds on its own runner (PyInstaller cannot cross-build). Every build:
+#   1. installs exactly what uv.lock pins (with the app extra and the build group),
+#   2. runs the test suite (Gemini is always faked; no API key is used or needed),
+#   3. builds with packaging/jobmatch.spec,
+#   4. runs the finished app with --check (loads config and every module, opens no window),
+#   5. uploads the .dmg / .zip as a download for 14 days.
+# No secrets are used. data/, exports/ and .env are never in the repo or the build.
+#
+# macos-15-intel is GitHub's last Intel macOS runner (supported until fall 2027).
+
+name: build-app
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15-intel
+            artifact: jobmatch-mac-intel
+          - os: windows-latest
+            artifact: jobmatch-windows
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      UV_PYTHON_DOWNLOADS: never
+      UV_FROZEN: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.0" # same as the Dockerfile
+
+      - name: Install (exactly uv.lock, app extra, build group)
+        shell: bash
+        run: uv sync --python "${{ steps.python.outputs.python-path }}" --extra app --group build
+
+      - name: Tests
+        shell: bash
+        run: uv run --no-sync pytest -q
+
+      - name: Build
+        shell: bash
+        run: uv run --no-sync pyinstaller packaging/jobmatch.spec --noconfirm --clean --distpath dist --workpath build
+
+      - name: Check the app (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          bin=dist/jobmatch.app/Contents/MacOS/jobmatch
+          echo "architecture: $(lipo -archs "$bin")"
+          lipo -archs "$bin" | grep -q x86_64
+          status=0
+          "$bin" --check --data-root "$RUNNER_TEMP/jm" || status=$?
+          cat "$RUNNER_TEMP/jm/check.txt" || true
+          exit $status
+
+      - name: Check the app (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # A window app returns at once when started from a shell: wait for it explicitly.
+          $p = Start-Process -FilePath "dist\jobmatch\jobmatch.exe" `
+            -ArgumentList "--check", "--data-root", "$env:RUNNER_TEMP\jm" -Wait -PassThru
+          Get-Content "$env:RUNNER_TEMP\jm\check.txt" -ErrorAction SilentlyContinue
+          if ($p.ExitCode -ne 0) { exit 1 }
+
+      - name: Package (macOS .dmg)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          # The disk image shows the app next to an Applications shortcut: drag to install.
+          mkdir -p dist/dmg
+          cp -R dist/jobmatch.app dist/dmg/
+          ln -s /Applications dist/dmg/Applications
+          hdiutil create -volname jobmatch -srcfolder dist/dmg -ov -format UDZO "dist/${{ matrix.artifact }}.dmg"
+
+      - name: Package (Windows .zip)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path "dist\jobmatch" -DestinationPath "dist\${{ matrix.artifact }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-${{ github.sha }}
+          path: |
+            dist/${{ matrix.artifact }}.dmg
+            dist/${{ matrix.artifact }}.zip
+          if-no-files-found: error
+          retention-days: 14

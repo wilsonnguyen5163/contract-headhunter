@@ -296,3 +296,11 @@ If added later, behind an `LLMProvider` interface: input = posting + top-k facet
   - posting text treated as untrusted (prompt injection).
 - **Evaluation:** compare the LLM judge with today's score on the same blind labels with `scripts/eval/`, before it replaces anything.
 
+
+## 15. v1 wired in, v0 removed, desktop app next (2026-11-06)
+
+- **Phase 6 done:** `run-once` runs the whole v1 pipeline (contractor upsert, intake, quota check, Gemini judging, shortlists in `data/llm_matches.csv`). See `doc/LOG-UPDATE.md`.
+- **v0 removed from this branch (user decision):** `embed/`, `match/`, the vector store, the v0 CLI commands, `scripts/eval/`, `update_contractors.sh`, the notebook, and torch, transformers, sentence-transformers and numpy. It is kept on a separate local branch. Sections 3a, 8 and 10 above describe v0 and are history now. The data v0 left (`matches*.csv`, `embeddings/`) is untouched and unread.
+- **Shortlist rule (user decision):** a job with clear fits shows fits only (up to 3); a job with no clear fit shows its single best partial for manual review; a job with neither shows 0. Contractors Gemini judged fit or partial without describing them still count (10 of 78 pilot answers contradicted themselves on "no_fit"). Numbers in `llm.shortlist`.
+- **Contractor intake:** the external intake form (built outside this repo) will produce a file a person loads into the app; the app upserts it into `contractors.csv`. No Google Drive access (CLAUDE.md rule 4).
+- **Desktop app (user decision, option A):** a native app with no Docker, built as a Mac `.app` (Intel, unsigned) and a Windows `.exe`. With v0 gone, the app needs no ML library. There is no Mac for building, so the plan is GitHub Actions runners (to confirm). CLAUDE.md's "Docker runtime" line is the user's to update.

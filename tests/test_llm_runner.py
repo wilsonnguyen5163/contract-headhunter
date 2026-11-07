@@ -14,10 +14,14 @@ from jobmatch.llm.provider import (
 from jobmatch.llm.runner import send
 from jobmatch.llm.usage import UsageLedger
 from jobmatch.schemas import LlmCallStatus
-from jobmatch.storage.csv_store import CsvStore
+from jobmatch.storage.csv_store import CsvStore, CsvUsageRepository
 
 REQUEST = LlmRequest(system="s", user="u", response_schema={"type": "object"})
 NOW = datetime(2026, 11, 5, 18, 0, tzinfo=UTC)
+
+
+def ledger(store: CsvStore) -> UsageLedger:
+    return UsageLedger(CsvUsageRepository(store))
 
 
 def llm() -> LlmSettings:
@@ -46,13 +50,13 @@ def ok_response() -> LlmResponse:
 
 
 def test_successful_call_is_logged_with_its_tokens(store: CsvStore) -> None:
-    ledger = UsageLedger(store)
+    usage = ledger(store)
     outcome = send(
-        Fake(ok_response()), ledger, llm(), REQUEST, purpose="test", job_ids=["a:1"],
+        Fake(ok_response()), usage, llm(), REQUEST, purpose="test", job_ids=["a:1"],
         estimated_tokens=9000, clock=lambda: NOW,
     )  # fmt: skip
     assert outcome.ok
-    row = ledger.all()[0]
+    row = usage.all()[0]
     assert (row.status, row.input_tokens, row.total_tokens) == (LlmCallStatus.OK, 8000, 9250)
     assert row.job_ids == ["a:1"] and row.estimated_tokens == 9000
     assert "total 9,250" in outcome.line and "today 1/" in outcome.line
@@ -62,7 +66,7 @@ def test_failed_call_keeps_the_tokens_it_spent(store: CsvStore) -> None:
     spent = TokenUsage(input_tokens=8000, output_tokens=4096, total_tokens=12096)
     error = LlmResponseError("answer cut", usage=spent, http_status=200, attempts=1)
     outcome = send(
-        Fake(error), UsageLedger(store), llm(), REQUEST, purpose="test", estimated_tokens=9000,
+        Fake(error), ledger(store), llm(), REQUEST, purpose="test", estimated_tokens=9000,
         clock=lambda: NOW,
     )  # fmt: skip
     assert not outcome.ok
@@ -74,7 +78,7 @@ def test_failed_call_keeps_the_tokens_it_spent(store: CsvStore) -> None:
 def test_daily_quota_is_logged_as_such(store: CsvStore) -> None:
     error = DailyQuotaError("daily limit reached", http_status=429, attempts=1)
     outcome = send(
-        Fake(error), UsageLedger(store), llm(), REQUEST, purpose="test", estimated_tokens=9000,
+        Fake(error), ledger(store), llm(), REQUEST, purpose="test", estimated_tokens=9000,
         clock=lambda: NOW,
     )  # fmt: skip
     assert outcome.usage.status == LlmCallStatus.DAILY_QUOTA
@@ -83,7 +87,7 @@ def test_daily_quota_is_logged_as_such(store: CsvStore) -> None:
 def test_call_too_large_is_not_sent(store: CsvStore) -> None:
     fake = Fake(ok_response())
     outcome = send(
-        fake, UsageLedger(store), llm(), REQUEST, purpose="test", estimated_tokens=10_000_000,
+        fake, ledger(store), llm(), REQUEST, purpose="test", estimated_tokens=10_000_000,
         clock=lambda: NOW,
     )  # fmt: skip
     assert fake.calls == 0

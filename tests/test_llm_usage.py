@@ -14,7 +14,7 @@ from jobmatch.llm.usage import (
     usage_line,
 )
 from jobmatch.schemas import LlmCallStatus, LlmUsage
-from jobmatch.storage.csv_store import CsvStore
+from jobmatch.storage.csv_store import CsvStore, CsvUsageRepository
 
 LIMITS = LlmLimits(rpm=10, tpm=250_000, rpd=250)
 BUDGET = LlmBudget(drain_warn_share=0.8, call_max_tpm_share=0.5)
@@ -71,7 +71,7 @@ def test_day_usage_counts_attempts_and_tokens_since_midnight_pacific() -> None:
 
 
 def test_ledger_round_trip(store: CsvStore) -> None:
-    ledger = UsageLedger(store)
+    ledger = UsageLedger(CsvUsageRepository(store))
     ledger.record(usage(at("2026-11-05T09:00:00"), input_tokens=900, output_tokens=100))
     ledger.record(usage(at("2026-11-05T09:01:00"), status=LlmCallStatus.DAILY_QUOTA))
     rows = ledger.all()

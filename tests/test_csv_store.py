@@ -5,13 +5,11 @@ import pytest
 from pydantic import Field, ValidationError
 
 from jobmatch.schemas import (
-    Band,
     Decision,
     EmploymentType,
     JobStatus,
     Language,
     LanguageCode,
-    Match,
     NocCode,
     NonEmptyStr,
     PayUnit,
@@ -317,21 +315,16 @@ def test_rejection_requires_reason_code() -> None:
 
 
 def test_export_has_bom_and_neutralizes_formulas(tmp_path) -> None:
-    match = Match(
-        match_id="m1",
-        job_id="=cmd|' /C calc'!A0",
-        contractor_id="C1",
-        facet="data_engineering",
-        cosine=-0.25,
-        skill_overlap=0.5,
-        score=0.4,
-        band=Band.LOW,
-        rank=1,
-        scoring_version="v1",
-        created_at=datetime(2026, 10, 1, tzinfo=UTC),
+    class Scored(Record):
+        job_id: NonEmptyStr
+        score: float
+        created_at: datetime
+
+    match = Scored(
+        job_id="=cmd|' /C calc'!A0", score=-0.25, created_at=datetime(2026, 10, 1, tzinfo=UTC)
     )
     dest = tmp_path / "exports" / "matches.csv"
-    assert export_csv(Match, [match], dest) == 1
+    assert export_csv(Scored, [match], dest) == 1
     raw = dest.read_bytes()
     assert raw.startswith(b"\xef\xbb\xbf")
     text = raw.decode("utf-8-sig")
