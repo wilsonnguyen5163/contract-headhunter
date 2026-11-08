@@ -1,0 +1,48 @@
+# CI: check every push and pull request (lint, format, tests). Linux only, about 2-3 minutes.
+#
+# This only checks the code; it builds nothing. Building and releasing the desktop app is
+# build-app.yml. Gemini is always faked in the tests: no API key, no network calls from tests.
+
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      UV_PYTHON_DOWNLOADS: never
+      UV_FROZEN: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.0" # same as the Dockerfile
+
+      - name: Install (exactly uv.lock, app extra for the screen tests)
+        run: uv sync --python "${{ steps.python.outputs.python-path }}" --extra app
+
+      - name: Lint
+        run: uv run --no-sync ruff check .
+
+      - name: Format
+        run: uv run --no-sync ruff format --check .
+
+      - name: Tests
+        run: uv run --no-sync pytest -q

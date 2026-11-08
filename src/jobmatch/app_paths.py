@@ -2,9 +2,9 @@
 
 - **User data root** (writable, survives app updates): `data/`, `exports/` and `.env` (the
   Gemini key) live here.
-  - macOS: ~/Library/Application Support/jobmatch
-  - Windows: %APPDATA%\\jobmatch
-  - other (Linux, development): $XDG_DATA_HOME/jobmatch, else ~/.local/share/jobmatch
+  - macOS: ~/Library/Application Support/dogoodtalent
+  - Windows: %APPDATA%\\dogoodtalent
+  - other (Linux, development): $XDG_DATA_HOME/dogoodtalent, else ~/.local/share/dogoodtalent
 - **Config folder** (read-only): bundled inside the app by PyInstaller (sys._MEIPASS/config);
   when running from the repo, the repo's config/.
 
@@ -16,7 +16,10 @@ import sys
 from collections.abc import Mapping
 from pathlib import Path
 
-APP_FOLDER = "jobmatch"
+# The app's public name (the code package stays `jobmatch`). File names use APP_FOLDER, which
+# matches the executable's name (packaging/jobmatch.spec): dogoodtalent.exe, dogoodtalent.app.
+APP_TITLE = "do good talent"
+APP_FOLDER = "dogoodtalent"
 ENV_FILE = ".env"
 _REPO_ROOT = Path(__file__).resolve().parents[2]  # src/jobmatch/app_paths.py -> repo
 

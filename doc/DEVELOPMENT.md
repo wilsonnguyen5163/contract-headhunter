@@ -131,8 +131,9 @@ Dependencies are pinned in `uv.lock`, resolved for linux/amd64 and limited to re
 ## Desktop app (in progress)
 
 Option A: a native app with no Docker (NiceGUI in a pywebview window, packaged with PyInstaller as an Intel Mac `.app` and a Windows `.exe`).
+- **Name and theme:** the app is called **do good talent** (window, header, Mac Finder/Dock: `app_paths.APP_TITLE`); its files are `dogoodtalent.app` / `dogoodtalent.exe` and its data folder `dogoodtalent` (`APP_FOLDER`). The code package and CLI stay `jobmatch`. Theme: light purple (`THEME_PRIMARY` `#7E57C2` for the header and buttons, `THEME_BACKGROUND` `#EDE7F6` for the page, in `app/ui.py`); the green/yellow/red decision colours are separate.
 - **Dependencies:** the `app` extra (`nicegui`, `pywebview`) and the `build` group (`pyinstaller`). Docker installs neither. `uv.lock` covers linux x86_64, macOS x86_64 and Windows AMD64; every compiled package has a wheel for each platform that needs it (checked 2026-11-06).
-- **Folders** (`app_paths.py`): user data root `~/Library/Application Support/jobmatch` (Mac) or `%APPDATA%\jobmatch` (Windows), holding `data/`, `exports/` and `.env`; config is bundled read-only (`sys._MEIPASS/config`). The app calls `load_settings(bundled_config_dir(), data_root=user_data_root())`.
+- **Folders** (`app_paths.py`): user data root `~/Library/Application Support/dogoodtalent` (Mac) or `%APPDATA%\dogoodtalent` (Windows), holding `data/`, `exports/` and `.env`; config is bundled read-only (`sys._MEIPASS/config`). The app calls `load_settings(bundled_config_dir(), data_root=user_data_root())`.
 - **Secrets** (`secrets_file.py`): the app loads its `.env` into the environment at startup and saves the Gemini key from its Settings screen (atomic write, owner-only file, never logged).
 - **Screens** (`app/ui.py`, NiceGUI 3 `ui.sub_pages`): `/` find matches, `/results`, `/settings`. All logic is in `app/service.py` (`AppService`), tested without a UI; the screens are tested with NiceGUI's simulated user (`user_simulation`, run with `asyncio.run`, no pytest-asyncio). The run goes to a worker thread (`run.io_bound`); progress reaches the screen through a queue, and the quota question through a dialog awaited on the UI loop.
 - **Start:** `python -m jobmatch.app` (native window, user data root) or `python -m jobmatch.app --browser` (repo data). Preview in Docker: `docker compose run --rm --service-ports app python -m jobmatch.app --browser --host 0.0.0.0`, then http://localhost:8080 (published on 127.0.0.1 only).
@@ -140,8 +141,21 @@ Option A: a native app with no Docker (NiceGUI in a pywebview window, packaged w
 ### Packaging (G3)
 
 - **Recipe:** `packaging/jobmatch.spec` (PyInstaller), with `packaging/launch.py` as the entry script (it calls `multiprocessing.freeze_support()` first: NiceGUI's native window runs in a child process). It bundles the code, NiceGUI's and pywebview's files and `config/`; never `data/`, `exports/` or `.env`. No UPX.
-- **Outputs:** an Intel Mac `jobmatch.app` (x86_64, minimum macOS 10.15) in `jobmatch-mac-intel.dmg` with an Applications shortcut; a Windows folder `jobmatch/` with `jobmatch.exe`, zipped as `jobmatch-windows.zip`. Both unsigned (first-launch steps in [FIRST_LAUNCH.md](FIRST_LAUNCH.md)).
-- **Builds:** `.github/workflows/build-app.yml` on GitHub Actions (`macos-15-intel`, GitHub's last Intel runner, supported until fall 2027; `windows-latest`). Run it from Actions › build-app › Run workflow, or push a `v*` tag. Each build runs the tests, builds, runs the app with `--check` and uploads the download (kept 14 days). No secrets.
+- **Outputs:** an Intel Mac `dogoodtalent.app` (x86_64, minimum macOS 10.15, bundle ID `org.dogoodtalent.desktop`) in `dogoodtalent-mac-intel.dmg` with an Applications shortcut; a Windows folder `dogoodtalent/` with `dogoodtalent.exe`, zipped as `dogoodtalent-windows.zip`. Both unsigned (first-launch steps in [FIRST_LAUNCH.md](FIRST_LAUNCH.md)).
+- **Builds:** `.github/workflows/build-app.yml` on GitHub Actions (`macos-15-intel`, GitHub's last Intel runner, supported until fall 2027; `windows-latest`). Run it from Actions › build-app › Run workflow (a test build), or push a `v*` tag (a release, below). Each build runs the tests, builds, runs the app with `--check` and uploads the download (kept 14 days). No secrets.
+- **Version:** one number, `version` in `pyproject.toml`. The spec reads it for the Mac app's version (Finder › Get Info).
+
+### CI and releases
+
+- **CI** (`.github/workflows/ci.yml`): every push and pull request, on Linux: `ruff check`, `ruff format --check`, `pytest`. About 2–3 minutes. A red ✗ on a commit in GitHub means one of them failed; open it for the log.
+- **Release** (tag-triggered `build-app.yml`):
+  1. Raise `version` in `pyproject.toml` (for example `0.2.0`), and add a LOG-UPDATE entry.
+  2. Commit, push, then tag that commit `v0.2.0` and push the tag (`git tag v0.2.0`, `git push origin v0.2.0`).
+  3. GitHub checks the tag matches the version, builds and checks both apps, then creates a **draft** release with `dogoodtalent-mac-intel.dmg` and `dogoodtalent-windows.zip`.
+  4. Open GitHub › Releases, look over the draft, click **Publish release**. Only then can others see it.
+  - A wrong tag (not `v` + the version) stops in the first minute and publishes nothing. A failed build or check also publishes nothing.
+  - Once published, the newest files are always at `https://github.com/<owner>/<repo>/releases/latest` (fixed file names, so `…/releases/latest/download/dogoodtalent-mac-intel.dmg` always gives the newest Mac build).
+  - To redo a version: delete the draft release and the tag on GitHub, fix, and tag again.
 - **`--check`:** `python -m jobmatch.app --check [--data-root DIR]` loads the bundled config, NiceGUI's web files and every module the app needs (`CHECK_MODULES`), writes `<data root>/check.txt` and exits 0 or 1, without a window.
 
 ## Storage conventions

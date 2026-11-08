@@ -32,6 +32,7 @@ from jobmatch.app.service import (
     JobResult,
     MatchView,
 )
+from jobmatch.app_paths import APP_TITLE
 from jobmatch.llm.usage import RunCheck
 from jobmatch.pipeline import PipelineError
 from jobmatch.schemas import Decision, ReasonCode
@@ -43,6 +44,12 @@ from jobmatch.storage.loader import StorageBackendUnavailable
 # at 1600 px so lines stay readable on very wide monitors. Settings is a short form: narrower.
 PAGE = "w-full mx-auto max-w-[1600px] px-2 sm:px-4 lg:px-8"
 PAGE_NARROW = "w-full mx-auto max-w-[900px] px-2 sm:px-4 lg:px-8"
+
+# The org's theme, light purple. The header and main buttons use a medium purple so white
+# text on them stays readable; the page background is the light purple. The decision colours
+# (SHADE below: green / yellow / red) carry meaning and are not part of the theme.
+THEME_PRIMARY = "#7E57C2"
+THEME_BACKGROUND = "#EDE7F6"
 
 RUN_ERRORS = (
     AppError,
@@ -608,9 +615,11 @@ def _go(path: str) -> Callable[[], None]:
 
 def build_root(service: AppService, *, native: bool) -> Callable[[], None]:
     def root() -> None:
-        ui.page_title("jobmatch")
+        ui.page_title(APP_TITLE)
+        ui.colors(primary=THEME_PRIMARY)
+        ui.query("body").style(f"background-color: {THEME_BACKGROUND}")
         with ui.header().classes("items-center"):
-            ui.label("jobmatch").classes("text-lg font-bold")
+            ui.label(APP_TITLE).classes("text-lg font-bold").mark("app-title")
             ui.space()
             for text, path in (
                 ("Find matches", "/"),

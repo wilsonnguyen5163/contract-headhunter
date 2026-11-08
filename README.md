@@ -57,7 +57,7 @@ docker compose run --rm app python -m jobmatch export-llm-matches
 
 **See [doc/quick_start.md](doc/quick_start.md)** for every command, how to add jobs, and how to read the results.
 
-**Desktop app (for end users, no Docker):** an Intel Mac `.app` and a Windows `.exe`, built by GitHub Actions (Actions › build-app). Installing and first use: [doc/FIRST_LAUNCH.md](doc/FIRST_LAUNCH.md). Preview it from the repo: `docker compose run --rm --service-ports app python -m jobmatch.app --browser --host 0.0.0.0`, then http://localhost:8080.
+**Desktop app (for end users, no Docker):** an Intel Mac `.app` and a Windows `.exe`, built by GitHub Actions (Actions › build-app) and published on the Releases page from a `v*` tag (see [doc/DEVELOPMENT.md](doc/DEVELOPMENT.md), CI and releases). Installing and first use: [doc/FIRST_LAUNCH.md](doc/FIRST_LAUNCH.md). Preview it from the repo: `docker compose run --rm --service-ports app python -m jobmatch.app --browser --host 0.0.0.0`, then http://localhost:8080.
 
 ## Project structure
 
