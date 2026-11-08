@@ -111,7 +111,7 @@ jobs:
           mkdir -p dist/dmg
           cp -R dist/dogoodtalent.app dist/dmg/
           ln -s /Applications dist/dmg/Applications
-          hdiutil create -volname "do good talent"-srcfolder dist/dmg -ov -format UDZO "dist/${{ matrix.artifact }}.dmg"
+          hdiutil create -volname "do good talent" -srcfolder dist/dmg -ov -format UDZO "dist/${{ matrix.artifact }}.dmg"
 
       - name: Package (Windows .zip)
         if: runner.os == 'Windows'
