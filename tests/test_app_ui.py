@@ -28,6 +28,7 @@ def run_ui(service: AppService, scenario: Callable) -> None:
 def test_home_asks_for_a_key_first(service: AppService) -> None:
     async def scenario(user) -> None:  # noqa: ANN001
         await user.open("/")
+        await user.should_see("do good talent", marker="app-title")  # the header's title
         await user.should_see("Add your Gemini key in Settings")
         await user.should_see("Find matches")
         await user.should_see("0 contractor(s) in the app")

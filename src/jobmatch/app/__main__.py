@@ -23,7 +23,13 @@ import traceback
 from pathlib import Path
 
 from jobmatch import secrets_file
-from jobmatch.app_paths import bundled_config_dir, ensure_layout, env_file, user_data_root
+from jobmatch.app_paths import (
+    APP_TITLE,
+    bundled_config_dir,
+    ensure_layout,
+    env_file,
+    user_data_root,
+)
 from jobmatch.config import (
     load_canada_locations,
     load_company_aliases,
@@ -137,7 +143,7 @@ def main(argv: list[str] | None = None) -> None:
     service = AppService(settings, env_path)
     ui.run(
         build_root(service, native=native),
-        title="jobmatch",
+        title=APP_TITLE,
         native=native,
         window_size=(1200, 860) if native else None,
         reload=False,

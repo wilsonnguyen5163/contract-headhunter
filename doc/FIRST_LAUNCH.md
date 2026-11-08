@@ -1,9 +1,9 @@
-# jobmatch: installing and first use
+# do good talent: installing and first use
 
-jobmatch suggests contractors for Canadian contract jobs. You give it a list of contractors and some job postings. It asks Google's Gemini AI which contractors fit each job, and shows you the suggestions to approve or reject. **It only suggests: you make every decision.**
+do good talent suggests contractors for Canadian contract jobs. You give it a list of contractors and some job postings. It asks Google's Gemini AI which contractors fit each job, and shows you the suggestions to approve or reject. **It only suggests: you make every decision.**
 
 You need:
-- the install file you were sent: **`jobmatch-mac-intel.dmg`** (Mac) or **`jobmatch-windows.zip`** (Windows);
+- the install file, sent to you or downloaded from the project's GitHub **Releases** page (under "Assets"): **`dogoodtalent-mac-intel.dmg`** (Mac) or **`dogoodtalent-windows.zip`** (Windows);
 - a Google account, to get a free Gemini key (step 3);
 - your contractor file (`.xlsx` or `.csv`) and a jobs file (step 5).
 
@@ -12,28 +12,28 @@ You need:
 ## 1. Install
 
 ### Mac
-1. Double-click **`jobmatch-mac-intel.dmg`**. A window opens with **jobmatch** and an **Applications** folder.
-2. Drag **jobmatch** onto **Applications**.
-3. Close the window, then eject the "jobmatch" disk in the Finder sidebar.
+1. Double-click **`dogoodtalent-mac-intel.dmg`**. A window opens with **dogoodtalent** and an **Applications** folder.
+2. Drag **dogoodtalent** onto **Applications**.
+3. Close the window, then eject the "do good talent" disk in the Finder sidebar.
 
 ### Windows
-1. Right-click **`jobmatch-windows.zip`** and choose **Extract All…**. Pick a place you'll remember, such as your **Documents** folder.
-2. Open the extracted **jobmatch** folder. Keep every file in it together: the app needs all of them.
-3. Optional: right-click **jobmatch.exe**, choose **Send to › Desktop (create shortcut)**.
+1. Right-click **`dogoodtalent-windows.zip`** and choose **Extract All…**. Pick a place you'll remember, such as your **Documents** folder.
+2. Open the extracted **dogoodtalent** folder. Keep every file in it together: the app needs all of them.
+3. Optional: right-click **dogoodtalent.exe**, choose **Send to › Desktop (create shortcut)**.
 
 ## 2. Open it the first time
 
-jobmatch isn't registered with Apple or Microsoft, so the first time your computer asks you to confirm. This happens only once.
+do good talent isn't registered with Apple or Microsoft, so the first time your computer asks you to confirm. This happens only once.
 
 ### Mac
-1. Open **Applications** and double-click **jobmatch**. A message says it can't be opened, or that Apple can't check it. Click **Done** (or **OK**).
-2. Open **System Settings › Privacy & Security**. Scroll down to the message about jobmatch and click **Open Anyway**. Enter your Mac password if asked.
-3. Click **Open** in the next message. From now on, jobmatch opens normally.
+1. Open **Applications** and double-click **dogoodtalent**. A message says it can't be opened, or that Apple can't check it. Click **Done** (or **OK**).
+2. Open **System Settings › Privacy & Security**. Scroll down to the message about dogoodtalent and click **Open Anyway**. Enter your Mac password if asked.
+3. Click **Open** in the next message. From now on, the app opens normally.
 
-On older macOS versions, you can instead right-click **jobmatch** in Applications, choose **Open**, then **Open** again.
+On older macOS versions, you can instead right-click **dogoodtalent** in Applications, choose **Open**, then **Open** again.
 
 ### Windows
-1. Double-click **jobmatch.exe**.
+1. Double-click **dogoodtalent.exe**.
 2. If a blue box says **"Windows protected your PC"**, click **More info**, then **Run anyway**.
 
 The first start can take a few seconds.
@@ -42,10 +42,10 @@ The first start can take a few seconds.
 
 1. In a web browser, go to **aistudio.google.com** and sign in with your Google account.
 2. Click **Get API key**, then **Create API key**. Copy the key (a long line of letters and numbers).
-3. In jobmatch, click **Settings** (top right). Paste the key under **Gemini key** and click **Save key**.
+3. In do good talent, click **Settings** (top right). Paste the key under **Gemini key** and click **Save key**.
 4. In **Your name**, type your name and click **Save name**. It's stored with each decision you make.
 
-Use the free tier: don't turn on billing in Google's site. The key stays on your computer; jobmatch never shows it again.
+Use the free tier: don't turn on billing in Google's site. The key stays on your computer; the app never shows it again.
 
 ## 4. Find matches
 
@@ -78,17 +78,17 @@ At the bottom: **Export to Excel** saves a spreadsheet of the suggestions, and *
 
 ## 6. Your data
 
-Everything stays on your computer, in jobmatch's own folder:
-- **Mac:** your user folder › Library › Application Support › jobmatch
-- **Windows:** `%APPDATA%\jobmatch` (type it into File Explorer's address bar)
+Everything stays on your computer, in the app's own folder:
+- **Mac:** your user folder › Library › Application Support › dogoodtalent
+- **Windows:** `%APPDATA%\dogoodtalent` (type it into File Explorer's address bar)
 
-**Settings › Data folder** shows the exact place. To back up, copy that folder. To move to a new computer, install jobmatch there and copy the folder into the same place.
+**Settings › Data folder** shows the exact place. To back up, copy that folder. To move to a new computer, install the app there and copy the folder into the same place.
 
 **The contractor list and the Excel exports hold personal information.** Keep your computer password-protected, and don't share exports outside your team. Gemini only ever receives anonymous profiles: no names, contact details, locations or rates.
 
 ## If something goes wrong
 
-- **The window stays blank:** close jobmatch and open it again.
+- **The window stays blank:** close the app and open it again.
 - **"Add your Gemini key in Settings":** see step 3.
 - **A job shows "Not judged yet":** the day's Gemini allowance ran out, or the run was stopped. Click **Find matches** again later; jobs already judged aren't asked again.
-- **Anything else:** write down what you clicked and what the message said, and send it, along with the file `check.txt` from the data folder if there is one, to the person who gave you jobmatch.
+- **Anything else:** write down what you clicked and what the message said, and send it, along with the file `check.txt` from the data folder if there is one, to the person who gave you the app.

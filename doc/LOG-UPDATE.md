@@ -4,6 +4,50 @@ What each change solves, for the team. Newest first. Add an entry with every com
 
 ---
 
+## 2026-11-07 · The app is now "do good talent", in the org's light purple
+
+### What this solves
+The desktop app carries the org's name and colours.
+- **Name:**
+  - The header, the window title and the Mac Dock show **do good talent**.
+  - The app files are **`dogoodtalent.exe`** (Windows) and **`dogoodtalent.app`** (Mac).
+  - The downloads are `dogoodtalent-mac-intel.dmg` and `dogoodtalent-windows.zip`.
+- **Data folder:** now `dogoodtalent`: `~/Library/Application Support/dogoodtalent` on Mac, `%APPDATA%\dogoodtalent` on Windows. Nobody had installed the app yet, so no data needs moving.
+- **Theme:** light purple.
+  - The header and main buttons use a medium purple (`#7E57C2`), so white text stays readable.
+  - The page background is a light purple (`#EDE7F6`).
+  - The green/yellow/red decision colours are unchanged, because they carry meaning.
+- **Unchanged:** the code package, the `jobmatch` CLI command, Docker and the repo layout. Only what end users see was renamed.
+
+### How to use
+Nothing to do. The next build produces the renamed files. [FIRST_LAUNCH.md](FIRST_LAUNCH.md) uses the new names.
+
+### Checks run
+- `pytest`: 724 passed. The screen test now also checks the header says "do good talent", and the folder tests use `dogoodtalent`.
+- `ruff check .` and `ruff format --check .`: pass.
+- The purple isn't covered by tests; check it by eye in the preview or the first build.
+
+---
+
+## 2026-11-07 · CI on every push, releases from a tag
+
+### What this solves
+- **Mistakes are caught on every push**, not only when someone builds the app. The new `ci.yml` runs lint, the format check and all tests on Linux (about 2–3 minutes). A ✓ or ✗ appears next to each commit on GitHub.
+- **New app versions have a permanent download page.** Before, builds were only downloadable for 14 days, from the run's page, and needed a GitHub login. Now pushing a tag such as `v0.2.0`:
+  - builds and checks both apps;
+  - puts them on a **draft** GitHub Release that only repo owners see;
+  - waits for an owner to click Publish.
+- **One version number.** `pyproject.toml` sets it. The Mac app now reads it too (it was hard-coded), and a tag that doesn't match it is refused before anything is built.
+- **Not included (user decision):** auto-update inside the app. It would need a network call that rule 4 doesn't allow, and on an unsigned Mac app it would bring back the "Open Anyway" warning.
+
+### How to use
+See [DEVELOPMENT.md](DEVELOPMENT.md), "CI and releases". In short: raise the version, push, tag `v<version>`, push the tag, check the draft, then publish it.
+
+### Checks run
+None yet. Workflows can only run on GitHub, so the first push and tag are the test.
+
+---
+
 ## 2026-11-07 · DataLoader factory: one place decides where records are kept
 
 ### What this solves

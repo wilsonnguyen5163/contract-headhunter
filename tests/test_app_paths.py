@@ -14,21 +14,25 @@ HOME = Path("/home/someone")
 
 def test_mac_folder() -> None:
     root = user_data_root("darwin", env={}, home=HOME)
-    assert root == HOME / "Library" / "Application Support" / "jobmatch"
+    assert root == HOME / "Library" / "Application Support" / "dogoodtalent"
 
 
 def test_windows_folder_uses_appdata() -> None:
     appdata = r"C:\Users\Camille\AppData\Roaming"
     assert user_data_root("win32", env={"APPDATA": appdata}, home=HOME) == (
-        Path(appdata) / "jobmatch"
+        Path(appdata) / "dogoodtalent"
     )
     # No APPDATA (unusual): the default location under the home folder.
-    assert user_data_root("win32", env={}, home=HOME) == (HOME / "AppData" / "Roaming" / "jobmatch")
+    assert user_data_root("win32", env={}, home=HOME) == (
+        HOME / "AppData" / "Roaming" / "dogoodtalent"
+    )
 
 
 def test_other_systems_follow_xdg() -> None:
-    assert user_data_root("linux", env={}, home=HOME) == HOME / ".local" / "share" / "jobmatch"
-    assert user_data_root("linux", env={"XDG_DATA_HOME": "/x"}, home=HOME) == Path("/x/jobmatch")
+    default = user_data_root("linux", env={}, home=HOME)
+    assert default == HOME / ".local" / "share" / "dogoodtalent"
+    xdg = user_data_root("linux", env={"XDG_DATA_HOME": "/x"}, home=HOME)
+    assert xdg == Path("/x/dogoodtalent")
 
 
 def test_config_comes_from_the_bundle_when_frozen(
@@ -41,7 +45,7 @@ def test_config_comes_from_the_bundle_when_frozen(
 
 
 def test_layout_is_created_once(tmp_path: Path) -> None:
-    root = ensure_layout(tmp_path / "jobmatch")
+    root = ensure_layout(tmp_path / "dogoodtalent")
     ensure_layout(root)  # second call is a no-op
     assert (root / "data").is_dir() and (root / "exports").is_dir()
     assert env_file(root) == root / ".env"
