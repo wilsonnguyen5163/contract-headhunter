@@ -20,6 +20,7 @@ from pathlib import Path
 
 from jobmatch.config import Settings
 from jobmatch.storage.csv_store import (
+    CsvAppendRepository,
     CsvContractorProfileRepository,
     CsvJobRepository,
     CsvLlmMatchRepository,
@@ -55,6 +56,9 @@ class CsvDataLoader:
         self.reviews = CsvReviewRepository(self.store)
         self.runs = CsvRunRepository(self.store)
         self.llm_usage = CsvUsageRepository(self.store)
+        self.job_scans = CsvAppendRepository(self.store.job_scans)
+        self.job_rounds = CsvAppendRepository(self.store.job_rounds)
+        self.applications = CsvAppendRepository(self.store.applications)
 
 
 class MongoDataLoader:

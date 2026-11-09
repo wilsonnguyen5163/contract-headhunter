@@ -107,18 +107,21 @@ class ExportResult(BaseModel):
 def export_current(settings: "Settings", now: datetime | None = None) -> ExportResult:
     """Write each active job's current shortlist to exports/llm-matches-<time>.csv. No API
     call. Used by export-llm-matches and the desktop app's Export button."""
-    from jobmatch.llm.payload import ACTIVE_STATUSES
-    from jobmatch.pipeline import current_judge_keys
+    from jobmatch.llm.payload import is_active
+    from jobmatch.shortlists import sync_rounds
     from jobmatch.storage.loader import create_loader
 
     loader = create_loader(settings)
     profiles = loader.contractors.list_all() if loader.contractors.exists() else []
-    active = [j for j in loader.jobs.list_all() if j.status in ACTIVE_STATUSES]
-    rows = build_export_rows(
-        loader.llm_matches.current(current_judge_keys(settings, loader)),
-        active,
-        {p.talent_id: p for p in profiles},
-    )
+    active = [j for j in loader.jobs.list_all() if is_active(j)]
+    # What Results shows (llm/rounds.py), ranked 1.. in screen order; a job still to scan
+    # with nothing shown yet is "not judged". Rejected candidates are left out.
+    current = {}
+    for job_id, picture in sync_rounds(settings, loader).items():
+        shown = picture.shortlist.shown
+        if shown or not picture.to_scan:
+            current[job_id] = [m.model_copy(update={"rank": i}) for i, m in enumerate(shown, 1)]
+    rows = build_export_rows(current, active, {p.talent_id: p for p in profiles})
     stamp = (now or datetime.now(UTC)).strftime("%Y%m%dT%H%M%SZ")
     dest = settings.paths.exports_dir / f"llm-matches-{stamp}.csv"
     return ExportResult(path=dest, rows=write_llm_export(rows, dest), jobs=len(active))

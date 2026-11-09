@@ -73,6 +73,14 @@ class JobStatus(StrEnum):
     NO_MATCH = "no_match"
 
 
+class JobAvailability(StrEnum):
+    """Set by the reviewer on the Jobs screen. Only available jobs are sent to Gemini."""
+
+    AVAILABLE = "available"
+    COMPLETED = "completed"  # hired, or the position was filled
+    UNAVAILABLE = "unavailable"  # expired or not valid
+
+
 class PayUnit(StrEnum):
     HOUR = "hour"
     DAY = "day"
@@ -199,12 +207,70 @@ class Job(Record):
     fingerprint: str | None = None
     status: JobStatus = JobStatus.NEW
     filter_reason: str | None = None
+    # Added in 0.4: older files without these columns load with the defaults.
+    availability: JobAvailability = JobAvailability.AVAILABLE
+    availability_changed_at: AwareDatetime | None = None
+    # Set by "Reopen": part of the job's cache keys, so a reopened job is scanned again.
+    reopened_at: AwareDatetime | None = None
 
     @model_validator(mode="after")
     def _pay_range(self) -> "Job":
         if self.pay_min is not None and self.pay_max is not None and self.pay_min > self.pay_max:
             raise ValueError("pay_min is greater than pay_max")
         return self
+
+
+class ScanRecord(Record):
+    """One contractor judged by Gemini for one job (data/job_scans.csv, append-only).
+
+    A rescan of the job sends only contractors without a row for the same basis and profile:
+    new contractors, and those whose profile changed (user decision 2026-11-09)."""
+
+    job_id: NonEmptyStr
+    talent_id: NonEmptyStr
+    card_hash: NonEmptyStr  # the profile as sent (without its alias)
+    basis: NonEmptyStr  # job text, prompt versions, models and thinking: another basis, rescan
+    judge_key: NonEmptyStr  # the judgment it came from
+    scanned_at: AwareDatetime
+
+
+class RoundEventKind(StrEnum):
+    SEATED = "seated"  # shown as a recommendation in this round
+    BUMPED = "bumped"  # a higher-scoring newcomer took the slot: back to the reserve
+
+
+class RoundEvent(Record):
+    """Who is recommended in which round, per job (data/job_rounds.csv, append-only).
+
+    A round shows up to 3 (llm.shortlist). When everyone in it is decided, the next round
+    opens after newcomers are scanned (user decisions 2026-11-09)."""
+
+    job_id: NonEmptyStr
+    round: int = Field(ge=1)
+    talent_id: NonEmptyStr
+    event: RoundEventKind
+    at: AwareDatetime
+
+
+class ApplicationStatus(StrEnum):
+    """An approved candidate's application, set on the Jobs screen."""
+
+    NOT_REFERRED = "not_referred"
+    OUTREACHED = "outreached"  # outreached to HR
+    IN_PROGRESS = "in_progress"  # HR replied, in progress
+    REJECTED = "rejected"  # rejection or ghosted: out of consideration for this job
+    HIRED = "hired"  # the job is marked completed
+
+
+class Application(Record):
+    """One application status change (data/applications.csv, append-only; latest counts).
+    Undo is a new row with the status from before."""
+
+    job_id: NonEmptyStr
+    talent_id: NonEmptyStr
+    status: ApplicationStatus
+    reviewer: NonEmptyStr
+    updated_at: AwareDatetime
 
 
 class Review(Record):

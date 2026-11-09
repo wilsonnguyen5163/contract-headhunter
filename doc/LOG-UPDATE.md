@@ -4,6 +4,71 @@ What each change solves, for the team. Newest first. Add an entry with every com
 
 ---
 
+## 2026-11-09 · Recommendations in rounds, rescans of newcomers only, application tracking
+
+### What this solves
+- **Rescans cost less.** A new or changed contractor no longer means re-judging every contractor for every job. Each job now sends Gemini only the contractors it hasn't judged yet, plus those whose profile changed. Someone with a decision for the job (approved or rejected) is never sent again for it.
+- **Decisions stick across rescans,** and new strong candidates still get in. Recommendations come in rounds of up to 3 (Gemini's rule is unchanged: up to 3 fits, otherwise the single best partial).
+- **Hiring progress is tracked** per job, from the Jobs screen.
+
+### How it works
+- **Within a round:**
+  - Approved and rejected candidates keep their slot.
+  - A candidate awaiting review loses their slot if a newcomer scores higher. They go to a reserve and can fill a later round.
+- **When everyone in a round is decided,** the next **Find matches** first scans any newcomers. It then fills the next round with the best 3 of the newcomers and the reserve. With no newcomers, the round fills straight from the reserve, with no Gemini call.
+- **Results shows:**
+  - everyone approved (in any round) and everyone awaiting review, best score first;
+  - a reviewer's rejections behind **Show rejected (N)**, where **Reset** brings one back (rejections are often misclicks). On Results this happens at once, both ways: Reject moves the candidate under "Show rejected", and Reset (or Approve) brings them back, without a reload. The Jobs screen still keeps cards in place until a refresh, so a toggle never makes the list jump;
+  - "Needs info" counts as awaiting review.
+- **Jobs screen, the caret on each card** ("Approved candidates (N)"):
+  - shows a table of the approved candidates: name, headline, score, an **application status** dropdown and **Save**;
+  - the statuses: "Not referred yet" (the default), "Outreached to HR", "HR replied, in progress", "Rejection / Ghosted", "Hired".
+- **Rejection / Ghosted:** the candidate leaves consideration for that job, everywhere, including the rejected list on Results. Their row stays greyed out with **Undo**, which restores the status from before. Only that Undo brings them back.
+- **Hired:** the job is marked Completed.
+
+### Files (all append-only; the history is kept)
+- `data/job_scans.csv`: which contractor was judged for which job, with a fingerprint of their profile and of the question (job text, prompts, models).
+- `data/job_rounds.csv`: who holds a slot in which round, and who was bumped.
+- `data/applications.csv`: every application status change, with the reviewer's name.
+- `data/llm_matches.csv` now keeps every fit or partial candidate from each scan (the reserve), not just the 3 shown.
+
+### Upgrading from 0.3
+- **No Gemini calls.** The first time a screen opens, the saved judgments are recorded as scans, and round 1 is exactly the old shortlist. Earlier approve and reject decisions keep their place.
+- **Reopen** makes a job available again. Only contractors not yet judged for it are sent.
+- **Tests:**
+  - `tests/test_rounds.py`: the round rules, the full flow with a fake Gemini that scores each contractor, and the screens.
+  - `tests/test_jobs_view.py`: the reopen rule.
+
+---
+
+## 2026-11-09 · Jobs screen: see every job and close the ones that are done
+
+### What this solves
+There was no way to stop matching a job once it was filled or had expired. Every run kept it in Results. The new **Jobs** screen (header button) lists every imported job A–Z, coloured by state:
+
+| State | Colour | Meaning |
+|---|---|---|
+| Scanned, with matches | light green, green border | Someone was recommended (reviewed or not, hiring in progress or not) |
+| Scanned, no match | light red, red border | Nobody fits. Stays open, so later runs try again with new contractors |
+| Not scanned yet | light yellow, yellow border | New, reopened, or the contractor list changed since |
+| Closed | grey | Marked Completed or Unavailable: never sent to Gemini, not in Results or the export |
+
+Each card shows the title, "company · location", a link to the posting, and one line: "Scanned · 3 matches · best score 92", "Scanned · best score 58" (only a partial), "Scanned · no match", "Not scanned yet" or "Closed · completed".
+
+### How to use
+- **Completed:** someone was hired, or the position was filled. **Unavailable:** the posting expired or isn't valid. Both close the job.
+- **Order:** open jobs A–Z, then closed jobs (completed and unavailable) A–Z at the bottom. After a click, the card changes colour where it is. It moves to its new place on the next visit or page refresh, so nothing jumps while you work down the list.
+- **Reopen** (closed jobs only) makes the job available again. Since the entry above, it only sends contractors not yet judged for the job; see "Recommendations in rounds".
+- **`jobs.csv` has 3 new columns:**
+  - `availability` (available / completed / unavailable);
+  - `availability_changed_at`;
+  - `reopened_at` (kept as a record).
+- **Older files still load.** The first write adds the columns, after a timestamped backup in `data/backups/`.
+- **Not listed:** postings the import left out (not a contract, not in Canada, duplicates).
+- **Tests:** `tests/test_jobs_view.py`.
+
+---
+
 ## 2026-11-09 · Release v0.3.0
 
 ### What this solves

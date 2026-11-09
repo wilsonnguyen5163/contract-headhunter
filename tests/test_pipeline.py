@@ -16,18 +16,18 @@ from jobmatch.pipeline import (
     PIPELINE_LOCK_FILE,
     PipelineError,
     RunOnceReport,
-    current_judge_keys,
     run_once,
 )
 from jobmatch.schemas import ContractorProfile, Job, JobStatus
+from jobmatch.shortlists import sync_rounds
 from jobmatch.sources.contractor_upsert import upsert_contractors
 from jobmatch.storage.csv_store import (
     CsvContractorProfileRepository,
     CsvJobRepository,
-    CsvLlmMatchRepository,
     CsvRunRepository,
     CsvStore,
 )
+from jobmatch.storage.loader import create_loader
 
 
 class FakeGemini:
@@ -132,10 +132,13 @@ def test_full_run_then_rerun_costs_nothing(
         "paste:1": JobStatus.MATCHED, "paste:2": JobStatus.MATCHED,
         "paste:3": JobStatus.NO_MATCH,
     }  # fmt: skip
-    current = CsvLlmMatchRepository(store).current(current_judge_keys(app_settings))
-    assert {k: [m.talent_id for m in v] for k, v in current.items()} == {
+    pictures = sync_rounds(app_settings, create_loader(app_settings))
+    assert {k: [m.talent_id for m in p.shortlist.shown] for k, p in pictures.items()} == {
         "paste:1": ["TAL-1"], "paste:2": ["TAL-1"], "paste:3": [],
     }  # fmt: skip
+    # Each job records who was judged for it, so the next run sends nobody.
+    scanned = {(s.job_id, s.talent_id) for s in create_loader(app_settings).job_scans.list_all()}
+    assert scanned == {("paste:1", "TAL-1"), ("paste:2", "TAL-1"), ("paste:3", "TAL-1")}
 
     again = go(app_settings, fake)
     assert fake.calls == 4 and again.judge is None

@@ -370,6 +370,14 @@ class PreparedCall(BaseModel):
         raw = "|".join(parts + ([extra] if extra else []))
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
+    def basis(self, model: str) -> str:
+        """Everything a judgment depends on except the contractors: the job text, both prompt
+        versions, the model and thinking settings. A contractor judged for a job on the same
+        basis, with the same profile, is not sent again (data/job_scans.csv)."""
+        parts = [model, PROMPT_VERSION, SCREEN_VERSION, self.thinking, self.job_hash]
+        raw = "|".join(parts + [self.review_thinking])
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
     def judge_key(self, model: str) -> str:
         """Same key = same question, same model, same thinking: no need to ask again. For a
         job, the stored judgment (screening + review) is filed under it."""

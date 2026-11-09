@@ -20,7 +20,7 @@
 """
 
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -100,14 +100,25 @@ class PlannedJob(BaseModel):
     key: str  # the judgment's key (screening + review)
     screen_key: str  # the screening answer's key (changes only with the screening prompt)
     cached: bool
+    roster: Roster  # the contractors this job is screened against
 
 
 def plan_jobs(
-    jobs: Sequence[Job], roster: Roster, settings: LlmSettings, folder: Path
+    jobs: Sequence[Job],
+    roster: Roster,
+    settings: LlmSettings,
+    folder: Path,
+    rosters: Mapping[str, Roster] | None = None,
 ) -> list[PlannedJob]:
+    """One planned screening per job. With `rosters` (job_id -> the contractors not judged
+    yet for it, pipeline.contractors_to_scan), each job is screened against its own list, and
+    a job missing from it has nobody to send: it is not planned."""
     planned: list[PlannedJob] = []
     for job in jobs:
-        call = prepare_call(job_card(job, settings.payload), roster, settings)
+        if rosters is not None and job.job_id not in rosters:
+            continue
+        own = rosters[job.job_id] if rosters is not None else roster
+        call = prepare_call(job_card(job, settings.payload), own, settings)
         key = call.judge_key(settings.model)
         cached = load_judgment(folder, key) is not None
         planned.append(
@@ -117,6 +128,7 @@ def plan_jobs(
                 key=key,
                 screen_key=call.screen_key(settings.model),
                 cached=cached,
+                roster=own,
             )  # fmt: skip
         )
     return planned
@@ -220,7 +232,7 @@ def _screen(chain: Chain, job: Job, item: PlannedJob, roster: Roster, folder: Pa
     if outcome.response is None:
         chain.echo(f"  {job.job_id}: no usable screening answer: {outcome.usage.note}")
         return None
-    screened = parse_screen(outcome.response.text, roster, settings.top_k)
+    screened = parse_screen(outcome.response.text, item.roster, settings.top_k)
     if screened.output is None:
         chain.echo(f"  {job.job_id}: no usable screening answer: {screened.error}")
         return None
@@ -244,8 +256,10 @@ def _save(
     chain: Chain, pending: _Pending, roster: Roster, folder: Path,
     review: ReviewOutput | None, outcome: CallOutcome | None, batch: list[str],
 ) -> TrialResult:  # fmt: skip
-    """Join one job's screening and review (None: nobody shortlisted) and save it."""
+    """Join one job's screening and review (None: nobody shortlisted) and save it. Checked
+    against the contractors this job was screened with."""
     settings = chain.settings
+    roster = pending.item.roster
     screened = pending.screening.screened
     job_text = render_job(job_card(pending.job, settings.payload))
     judged = join_answers(screened, review, job_text, roster, settings.top_k)
@@ -361,11 +375,14 @@ def judge_jobs(
     echo: Callable[[str], None] = print,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    rosters: Mapping[str, Roster] | None = None,
 ) -> JudgeRunReport:
     """Screen every job not judged yet, then review the shortlists in batches of
-    llm.review_batch_size. `max_calls` caps the number of jobs started."""
+    llm.review_batch_size. `max_calls` caps the number of jobs started. `rosters`: each
+    job's own contractors to send (plan_jobs); the review uses `roster`, which holds them
+    all under the same aliases."""
     by_id = {j.job_id: j for j in jobs}
-    planned = plan_jobs(jobs, roster, settings, folder)
+    planned = plan_jobs(jobs, roster, settings, folder, rosters)
     report = JudgeRunReport(
         planned=len(planned), cached=sum(p.cached for p in planned), sent=0, ok=0, failed=0
     )
