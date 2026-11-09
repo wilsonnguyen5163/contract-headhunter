@@ -6,6 +6,10 @@ Accepted files:
 - .xlsx: the contractors master workbook, read with build-contractors' rules
   (config/contractor_import.yaml).
 - .csv: the contractor list's own columns (ContractorProfile), header and every row checked.
+  A row with an empty talent_id gets a new ID (fill_missing_ids): the prefix from
+  config/contractor_import.yaml (TAL-CAN-) plus the highest ID number known + 1. A row whose
+  name matches a contractor already given such an ID reuses it, so loading the same file
+  again makes no duplicate. Names are compared on this machine only and never reported.
 
 Upsert rules (assumptions, to confirm):
 - a talent_id not in the list yet is added at the end;
@@ -17,6 +21,10 @@ backend: atomically, after a timestamped backup in its backups/ folder). Skills 
 learned here. Reports hold counts and talent IDs only, never names.
 """
 
+import csv
+import re
+import tempfile
+from collections.abc import Sequence
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -55,21 +63,119 @@ def _table(path: Path, mode: TableMode, lock_timeout: float) -> CsvTable[Contrac
     )
 
 
-def read_contractor_file(
-    path: Path, *, config_dir: Path, lock_timeout: float
-) -> list[ContractorProfile]:
+class LoadedContractors(BaseModel):
+    rows: list[ContractorProfile]
+    given_ids: list[str] = []  # IDs given to rows that had none (new or reused), in file order
+
+
+_ID_NUMBER = re.compile(r"(\d+)\s*$")
+
+
+def _id_number(talent_id: str) -> int:
+    found = _ID_NUMBER.search(talent_id)
+    return int(found.group(1)) if found else 0
+
+
+def _name_key(name: str | None) -> str:
+    return " ".join((name or "").split()).casefold()
+
+
+def fill_missing_ids(
+    rows: list[dict[str, str]],
+    existing: Sequence[ContractorProfile],
+    *,
+    prefix: str,
+    width: int,
+) -> list[str]:
+    """Give every row with an empty talent_id an ID, in place, and return the IDs given.
+
+    - A row whose name matches a stored contractor whose ID has this prefix reuses that ID
+      (the same file loaded again must not add the person twice).
+    - Otherwise: prefix + (highest number among the stored IDs and the file's IDs) + 1,
+      counting up, zero-padded to `width` digits. TAL-ON-052 known -> TAL-CAN-053.
+    """
+    known = [p.talent_id for p in existing]
+    known += [(r.get("talent_id") or "").strip() for r in rows]
+    next_number = max((_id_number(t) for t in known if t), default=0) + 1
+    by_name = {
+        _name_key(p.talent_name): p.talent_id for p in existing if p.talent_id.startswith(prefix)
+    }
+    given: list[str] = []
+    for row in rows:
+        if (row.get("talent_id") or "").strip():
+            continue
+        key = _name_key(row.get("talent_name"))
+        talent_id = by_name.get(key) if key else None
+        if talent_id is None:
+            talent_id = f"{prefix}{next_number:0{width}d}"
+            next_number += 1
+            if key:
+                by_name[key] = talent_id
+        row["talent_id"] = talent_id
+        given.append(talent_id)
+    return given
+
+
+def _read_csv(
+    path: Path, existing: Sequence[ContractorProfile], config_dir: Path, lock_timeout: float
+) -> LoadedContractors:
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        header = list(reader.fieldnames or [])
+        rows = list(reader)
+    needs_ids = "talent_id" in header and any(not (r.get("talent_id") or "").strip() for r in rows)
+    if not needs_ids or any(None in r for r in rows):  # nothing to fill, or a broken row:
+        return LoadedContractors(  # the table check reports problems with row numbers
+            rows=_table(path, TableMode.READ_ONLY, lock_timeout).read_all()
+        )
+    rules = load_contractor_import(config_dir)
+    given = fill_missing_ids(rows, existing, prefix=rules.new_id_prefix, width=rules.new_id_width)
+    # Check the filled rows exactly like any other file: through a private temporary copy
+    # with the same name (so messages still name the person's file). The file itself is
+    # never changed.
+    with tempfile.TemporaryDirectory() as folder:
+        filled = Path(folder) / path.name
+        with filled.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=header)
+            writer.writeheader()
+            writer.writerows(rows)
+        loaded = _table(filled, TableMode.READ_ONLY, lock_timeout).read_all()
+    return LoadedContractors(rows=loaded, given_ids=given)
+
+
+def load_contractor_file(
+    path: Path,
+    *,
+    config_dir: Path,
+    lock_timeout: float,
+    existing: Sequence[ContractorProfile] = (),
+) -> LoadedContractors:
+    """Read a contractor file. `existing` (the stored list) decides the IDs given to .csv
+    rows without one."""
     suffix = path.suffix.lower()
     if not path.is_file():
         raise ContractorFileError(f"not found: {path}")
     try:
         if suffix == ".xlsx":
             rows, _ = build_contractors(read_sheets(path), load_contractor_import(config_dir))
-            return rows
+            return LoadedContractors(rows=rows)
         if suffix == ".csv":
-            return _table(path, TableMode.READ_ONLY, lock_timeout).read_all()
+            return _read_csv(path, existing, config_dir, lock_timeout)
     except (WorkbookError, CsvStoreError, ValueError, OSError) as exc:
         raise ContractorFileError(f"{path.name}: {exc}") from exc
     raise ContractorFileError(f"{path.name}: expected a .xlsx workbook or a .csv file")
+
+
+def read_contractor_file(
+    path: Path,
+    *,
+    config_dir: Path,
+    lock_timeout: float,
+    existing: Sequence[ContractorProfile] = (),
+) -> list[ContractorProfile]:
+    return load_contractor_file(
+        path, config_dir=config_dir, lock_timeout=lock_timeout, existing=existing
+    ).rows
 
 
 def upsert_contractors(

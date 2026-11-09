@@ -14,6 +14,7 @@ from jobmatch.llm.provider import (
     LLMProvider,
     LlmRequest,
     LlmResponse,
+    LlmTimeoutError,
     RateLimitError,
 )
 from jobmatch.llm.usage import UsageLedger, check_call, new_call_id, usage_line
@@ -73,6 +74,8 @@ def send(
             status = (
                 LlmCallStatus.DAILY_QUOTA
                 if isinstance(exc, DailyQuotaError)
+                else LlmCallStatus.TIMEOUT
+                if isinstance(exc, LlmTimeoutError)
                 else LlmCallStatus.RATE_LIMITED
                 if isinstance(exc, RateLimitError)
                 else LlmCallStatus.ERROR
@@ -90,5 +93,5 @@ def send(
                 note=str(exc)[:_NOTE_MAX],
             )
     ledger.record(usage)
-    line = usage_line(usage, ledger.today(clock()), settings.limits)
+    line = usage_line(usage, ledger.today(clock(), model=settings.model), settings.limits)
     return CallOutcome(response=response, usage=usage, line=line)

@@ -9,7 +9,7 @@ from nicegui import ui
 from nicegui.testing.user_simulation import user_simulation
 
 from jobmatch.app.service import AppService
-from jobmatch.app.ui import build_root, title_case
+from jobmatch.app.ui import SCORE_SHADE, SHADE, build_root, score_shade, title_case
 from jobmatch.schemas import Decision, Job
 from jobmatch.secrets_file import read_env_file
 from jobmatch.storage.csv_store import CsvReviewRepository, CsvStore
@@ -96,6 +96,19 @@ def test_profile_pop_up_shows_the_csv_row(
         await user.should_see("Builds dashboards in Power BI for public agencies.")
 
     run_ui(service, scenario)
+
+
+def test_verdict_chip_colour_follows_the_score_bands(service: AppService) -> None:
+    assert score_shade(service, 95, fit=True) == SCORE_SHADE["strong"] == "#5BBE77"
+    assert score_shade(service, 90, fit=True) == SCORE_SHADE["strong"]
+    assert score_shade(service, 89, fit=True) == SHADE["green"]
+    assert score_shade(service, 70, fit=False) == SHADE["green"]  # by score, not verdict
+    assert score_shade(service, 69, fit=True) == SHADE["yellow"]
+    assert score_shade(service, 40, fit=False) == SHADE["yellow"]
+    assert score_shade(service, 39, fit=False) == SCORE_SHADE["low"]
+    # No score (judged but not described): the verdict's colour.
+    assert score_shade(service, None, fit=True) == SHADE["green"]
+    assert score_shade(service, None, fit=False) == SHADE["yellow"]
 
 
 def test_title_case_for_job_titles() -> None:

@@ -1,7 +1,6 @@
 """run_once end to end with a fake Gemini and no fetching: contractors upserted, jobs judged
 once, shortlists stored, statuses set, budget questions honoured, runs never overlap."""
 
-import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -9,6 +8,7 @@ from typing import Any
 import pytest
 from filelock import FileLock
 
+from conftest import staged_answer
 from jobmatch.config import Settings
 from jobmatch.llm.provider import LlmRequest, LlmResponse, TokenUsage
 from jobmatch.llm.usage import RunCheck
@@ -58,8 +58,9 @@ class FakeGemini:
             }  # fmt: skip
         usage = TokenUsage(input_tokens=4000, output_tokens=400, total_tokens=4400)
         return LlmResponse(
-            text=json.dumps(answer), usage=usage, model="fake", http_status=200, attempts=1
-        )
+            text=staged_answer(answer, request), usage=usage, model="fake", http_status=200,
+            attempts=1,
+        )  # fmt: skip
 
 
 @pytest.fixture
@@ -122,7 +123,8 @@ def test_full_run_then_rerun_costs_nothing(
     fake = FakeGemini()
     report = go(app_settings, fake, contractor_file=contractor_file(tmp_path))
     assert report.contractors is not None and report.contractors.added == ["TAL-1"]
-    assert fake.calls == 3
+    # 2 jobs with a fit: screening + review each; the recruiting job: screening only.
+    assert fake.calls == 5
     assert (report.jobs_matched, report.jobs_no_match, report.matches_added) == (2, 1, 2)
     statuses = {j.job_id: j.status for j in CsvJobRepository(store).list_all()}
     assert statuses == {
@@ -135,7 +137,7 @@ def test_full_run_then_rerun_costs_nothing(
     }  # fmt: skip
 
     again = go(app_settings, fake)
-    assert fake.calls == 3 and again.judge is None
+    assert fake.calls == 5 and again.judge is None
     assert again.matches_added == 0
     runs = CsvRunRepository(store).list_all()
     assert [r.run_id.startswith("run-") for r in runs[-2:]] == [True, True]
@@ -161,7 +163,9 @@ def test_no_api_call_without_a_yes_when_the_quota_is_short(
     assert all(j.status is JobStatus.NEW for j in CsvJobRepository(store).list_all())
 
     yes = go(tight, fake, confirm=lambda check: True)
-    assert fake.calls == 1  # only what fits under 80% of the 2 left today
+    # Only 1 job fits under 80% of the 2 screening requests left today: its screening and
+    # its review (the review uses another model's quota).
+    assert fake.calls == 2
     assert yes.jobs_not_judged == 2
 
 

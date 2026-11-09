@@ -9,6 +9,7 @@ from jobmatch.config import (
     LlmSettings,
     NormalizationRules,
     ProfessionTitles,
+    ScoreBands,
     SkillsTaxonomy,
     load_canada_locations,
     load_company_aliases,
@@ -41,8 +42,16 @@ def test_llm_settings_load_without_any_key() -> None:
     assert llm is not None
     assert llm.provider == "gemini"
     assert llm.api_key_env == "GEMINI_API_KEY"  # the variable's name, never a key
-    assert llm.temperature == 0
+    assert llm.temperature == 1  # Google's default for Gemini 3 (user decision 2026-11-08)
+    assert isinstance(llm.seed, int)  # fixed seed, picked once
     assert llm.prefilter.enabled is False  # off until the recall check passes
+
+
+def test_score_bands_load_and_must_descend() -> None:
+    bands = load_settings(CONFIG_DIR).app.score_bands
+    assert (bands.strong, bands.good, bands.some) == (90, 70, 40)
+    with pytest.raises(ValidationError, match="strong > good > some"):
+        ScoreBands(strong=70, good=90, some=40)
 
 
 def test_both_thinking_settings_are_rejected() -> None:

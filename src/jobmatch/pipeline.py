@@ -30,7 +30,7 @@ from time import perf_counter
 from filelock import FileLock, Timeout
 from pydantic import BaseModel
 
-from jobmatch.config import Settings
+from jobmatch.config import LlmSettings, Settings
 from jobmatch.ingest import IngestReport, ingest_links, ingest_paste_files
 from jobmatch.llm.anonymize import build_roster
 from jobmatch.llm.judge import JudgeRunReport, judge_jobs, judgments_dir, load_judgment, plan_jobs
@@ -43,7 +43,7 @@ from jobmatch.normalize.pipeline import Normalizer
 from jobmatch.schemas import JobStatus, Run, RunStatus
 from jobmatch.sources.contractor_upsert import (
     UpsertReport,
-    read_contractor_file,
+    load_contractor_file,
     upsert_contractors,
 )
 from jobmatch.sources.web import PageFetcher
@@ -149,10 +149,19 @@ def _run(
     progress(0.0, "Loading contractors")
     if contractor_file is not None:
         echo(f"Loading contractors from {contractor_file.name}")
-        incoming = read_contractor_file(
-            contractor_file, config_dir=settings.config_dir, lock_timeout=timeout
+        stored = loader.contractors.list_all() if loader.contractors.exists() else []
+        loaded = load_contractor_file(
+            contractor_file,
+            config_dir=settings.config_dir,
+            lock_timeout=timeout,
+            existing=stored,
         )
-        report.contractors = upsert_contractors(incoming, loader.contractors)
+        if loaded.given_ids:  # IDs only, never names
+            echo(
+                f"  {len(loaded.given_ids)} row(s) had no talent ID and got: "
+                f"{', '.join(loaded.given_ids)} (add them to your file to keep them stable)"
+            )
+        report.contractors = upsert_contractors(loaded.rows, loader.contractors)
         c = report.contractors
         echo(
             f"  {len(c.added)} added · {len(c.updated)} updated · {c.unchanged} unchanged · "
@@ -207,10 +216,13 @@ def _run(
     calls = min(len(todo), max_calls) if max_calls else len(todo)
     if calls:
         per_call = int(statistics.median(p.call.estimated_total_tokens for p in todo))
-        check = check_run(llm.limits, llm.budget, ledger.today(), calls, per_call)
+        # The screening model makes one call per job; reviews use their own models' quotas
+        # and fall back down the chain on Google's daily-limit answer.
+        check = check_run(llm.limits, llm.budget, ledger.today(model=llm.model), calls, per_call)
         report.budget = check
         cached = len(plan) - len(todo)
         echo(f"{len(jobs)} active job(s) · {calls} to send to Gemini · {cached} cached")
+        echo(f"Screening: {llm.model} · deep review: {' → '.join(llm.review_chain)}")
         echo(f"Budget: {check.verdict.upper()} · {check.message}")
         go = True
         if check.verdict != "ok":
@@ -222,14 +234,15 @@ def _run(
             report.stopped = "not sent: the run needs a yes to use that much of today's quota"
             echo(report.stopped)
         else:
-            # 4. Gemini: one progress step per call (judge_jobs prints one "[llm]" line each)
+            # 4. Gemini: one progress step per job (one "[llm] screen" line each; a review,
+            # when there is one, follows it)
             sent = 0
             progress(PROGRESS_IMPORTED, f"Asking Gemini: 0 of {calls}")
 
             def echo_call(line: str) -> None:
                 nonlocal sent
                 echo(line)
-                if line.startswith("[llm]"):
+                if line.startswith("[llm] screen"):
                     sent += 1
                     share = PROGRESS_IMPORTED + (PROGRESS_JUDGED - PROGRESS_IMPORTED) * sent / calls
                     progress(min(share, PROGRESS_JUDGED), f"Asking Gemini: {sent} of {calls}")
@@ -243,8 +256,11 @@ def _run(
                 f"{j.sent} call(s) sent · {j.ok} usable · {j.failed} failed · tokens in "
                 f"{j.input_tokens:,} · out {j.output_tokens:,} · total {j.total_tokens:,}"
             )
-            today = ledger.today()
-            echo(f"Today: {today.requests}/{llm.limits.rpd} requests · {today.tokens:,} tokens")
+            echo_today(llm, ledger, echo)
+            if j.exhausted:
+                echo(f"Reached the daily limit today: {', '.join(j.exhausted)}")
+            if j.timed_out:
+                echo(f"Did not answer in time (skipped for this run): {', '.join(j.timed_out)}")
             if j.stopped:
                 report.stopped = j.stopped
     else:
@@ -276,6 +292,17 @@ def _run(
         f"none · {report.jobs_not_judged} not judged yet · {report.matches_added} new row(s)"
     )
     progress(1.0, "Done")
+
+
+def echo_today(llm: LlmSettings, ledger: UsageLedger, echo: Callable[[str], None]) -> None:
+    """Today's usage, total and per model used (each model has its own daily limits)."""
+    total = ledger.today()
+    echo(f"Today: {total.requests} requests · {total.tokens:,} tokens")
+    for model in dict.fromkeys([llm.model, *llm.review_chain]):
+        day = ledger.today(model=model)
+        if day.requests:
+            limits = llm.for_model(model).limits
+            echo(f"  {model}: {day.requests}/{limits.rpd} requests · {day.tokens:,} tokens")
 
 
 def current_judge_keys(settings: Settings, loader: DataLoader | None = None) -> dict[str, str]:

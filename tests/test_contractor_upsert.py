@@ -8,6 +8,8 @@ from conftest import CONFIG_DIR
 from jobmatch.schemas import ContractorProfile
 from jobmatch.sources.contractor_upsert import (
     ContractorFileError,
+    fill_missing_ids,
+    load_contractor_file,
     read_contractor_file,
     upsert_contractors,
 )
@@ -105,3 +107,57 @@ def test_other_file_types_and_missing_files_are_refused(tmp_path: Path) -> None:
         read_contractor_file(other, config_dir=CONFIG_DIR, lock_timeout=5)
     with pytest.raises(ContractorFileError, match="not found"):
         read_contractor_file(tmp_path / "nope.csv", config_dir=CONFIG_DIR, lock_timeout=5)
+
+
+# ---- rows without a talent ID (TAL-CAN-…) ----
+
+HEADER = "talent_id,talent_name,standardized_headline,rate_expectation\n"
+
+
+def test_rows_without_an_id_get_the_next_tal_can_number(tmp_path: Path) -> None:
+    stored = [person("TAL-BC-001", "Data Analyst"), person("TAL-ON-052", "Recruiter")]
+    upload = tmp_path / "new.csv"
+    upload.write_text(
+        HEADER
+        + "TAL-ON-049,Person TAL-ON-049,Rédacteur,80\n"
+        + ",Camille Roy,Analyste de données,90\n"
+        + ",Sam Lee,UX Writer,85\n",
+        encoding="utf-8",
+    )
+    loaded = load_contractor_file(upload, config_dir=CONFIG_DIR, lock_timeout=5, existing=stored)
+    assert loaded.given_ids == ["TAL-CAN-053", "TAL-CAN-054"]
+    assert [r.talent_id for r in loaded.rows] == ["TAL-ON-049", "TAL-CAN-053", "TAL-CAN-054"]
+    assert ",Camille Roy," in upload.read_text(encoding="utf-8")  # the file is never changed
+
+
+def test_loading_the_same_file_again_reuses_the_given_ids(tmp_path: Path) -> None:
+    dest = tmp_path / "contractors.csv"
+    upload = tmp_path / "people.csv"
+    upload.write_text(
+        HEADER + ",Camille Roy,Analyste de données,90\n" + "TAL-BC-007,Person 7,Recruiter,70\n",
+        encoding="utf-8",
+    )
+    first = load_contractor_file(upload, config_dir=CONFIG_DIR, lock_timeout=5)
+    assert first.given_ids == ["TAL-CAN-008"]
+    upsert_contractors(first.rows, repo(dest))
+
+    # Same person again (spacing and case differ), plus a new person without an ID.
+    upload.write_text(
+        HEADER + ",  camille   ROY ,Analyste de données principale,95\n"
+        + ",Sam Lee,UX Writer,85\n",
+        encoding="utf-8",
+    )  # fmt: skip
+    again = load_contractor_file(
+        upload, config_dir=CONFIG_DIR, lock_timeout=5, existing=stored(dest)
+    )
+    assert again.given_ids == ["TAL-CAN-008", "TAL-CAN-009"]
+    report = upsert_contractors(again.rows, repo(dest))
+    assert report.updated == ["TAL-CAN-008"] and report.added == ["TAL-CAN-009"]
+    assert len(stored(dest)) == 3  # no duplicate of Camille
+
+
+def test_fill_missing_ids_only_reuses_tal_can_ids() -> None:
+    existing = [person("TAL-BC-003", "Data Analyst")]  # named "Person TAL-BC-003"
+    rows = [{"talent_id": "", "talent_name": "Person TAL-BC-003"}]
+    # A same-named contractor with an ID from the master list is not reused: new ID.
+    assert fill_missing_ids(rows, existing, prefix="TAL-CAN-", width=3) == ["TAL-CAN-004"]

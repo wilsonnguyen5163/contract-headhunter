@@ -193,11 +193,13 @@ class AppService:
                 raise AppError("No file was given.")
             path = _stamped(self.data_dir / "contractors" / "uploads", name, datetime.now(UTC))
             path.write_bytes(data)
+        contractors = self._loader().contractors
         try:
             rows = read_contractor_file(
                 path,
                 config_dir=self.settings.config_dir,
                 lock_timeout=self.settings.storage.lock_timeout_seconds,
+                existing=contractors.list_all() if contractors.exists() else [],
             )
         except Exception as exc:  # shown to the person; holds no contractor data
             raise AppError(str(exc)) from exc
@@ -243,7 +245,8 @@ class AppService:
         return report
 
     def quota(self) -> Quota:
-        today = UsageLedger(self._loader().llm_usage).today()
+        # The screening model: one call per job, so its quota decides how many jobs fit today.
+        today = UsageLedger(self._loader().llm_usage).today(model=self.llm.model)
         return Quota(requests=today.requests, rpd=self.llm.limits.rpd, tokens=today.tokens)
 
     # ---- results and decisions ----

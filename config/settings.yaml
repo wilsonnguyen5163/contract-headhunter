@@ -32,23 +32,61 @@ normalize:
 logging:
   level: INFO
 
+# The desktop app's screens.
+app:
+  # Colour of each contractor's verdict chip by Gemini's fit_score (user decision 2026-11-08):
+  # >= strong darker green, >= good green, >= some yellow, below that light yellow.
+  # The matching prompt (llm/prompt.py SCORE_RANGES, v5) asks for the same ranges: fit 90-100
+  # nothing missing, fit 70-89 missing a little, partial 40-69. Change both together.
+  score_bands:
+    strong: 90
+    good: 70
+    some: 40
+
 # v1: matching with the Gemini API (doc/V1_PLAN.md). Free tier only. The key is read from the
 # environment variable named in api_key_env (set it in .env, never here).
 llm:
   provider: gemini
+  # Two calls per job (user design 2026-11-08). The screening model reads every contractor and
+  # shortlists those who fit or partly fit (up to top_k, fewer if fewer fit, none if none).
   model: gemini-3.5-flash-lite
+  # The shortlist is reviewed in depth by the first of these with quota left today; when one
+  # reaches its daily limit the next is used. Checked 2026-11-08 with the model list for our
+  # key: gemini-3.0-flash does not exist; gemini-3-flash-preview is the closest (Gemini 3
+  # Flash, a preview model). gemini-3.8-flash was removed the same day (user decision): it
+  # answered "high demand" (HTTP 503) or timed out on every review.
+  review_models:
+    - gemini-3.6-flash
+    - gemini-3-flash-preview
+    - gemini-3.5-flash-lite
+  # Per-model free-tier limits. GUESS: not published for these models; copy the real ones from
+  # AI Studio. They pace calls and size the budget check; the switch to the next model happens
+  # on Google's own "daily limit reached" answer, whatever these say.
+  model_limits:
+    gemini-3.6-flash: {rpm: 10, tpm: 250000, rpd: 20}
+    gemini-3-flash-preview: {rpm: 10, tpm: 250000, rpd: 20}
   base_url: https://generativelanguage.googleapis.com/v1beta
   api_key_env: GEMINI_API_KEY
-  temperature: 0
-  max_output_tokens: 4096 # GUESS: one job's verdicts plus 5 detailed matches use about 1-1.5k
-  # For Gemini 3 models set thinking_budget: null and thinking_level: low instead.
-  # 2026-11-05: gemini-3.5-flash-lite is a Gemini 3 model, so thinking_level (GUESS: minimal).
+  # 1 = Google's default for Gemini 3 models; lower values can degrade their answers
+  # (user decision 2026-11-08, was 0).
+  temperature: 1
+  # Fixed seed, picked at random once (2026-11-08): the same request tends to get the same
+  # answer. Best effort only; answers are cached anyway, so a judged job never changes.
+  seed: 418093
+  # Thinking tokens count against this limit too: at thinking "medium" an answer plus its
+  # thinking reached about 6.7k (2026-11-08), "high" was cut off at 8192, and a
+  # gemini-3-flash-preview review at "medium" thought for 11k and was cut off at 12288.
+  # Only what's used counts.
+  max_output_tokens: 24576
+  # Gemini 3 models take a thinking level. "medium" for every call (user decision
+  # 2026-11-08): at "minimal" the model ignored the field-of-work and job-title rules; at
+  # "medium" it applied them. Was minimal.
   thinking_budget: null
-  thinking_level: minimal
+  thinking_level: medium
   timeout_seconds: 120
   max_retries: 3 # per-minute 429, 5xx and network errors; a daily-limit 429 is never retried
   retry_base_seconds: 5 # GUESS: doubles each try unless Google says how long to wait
-  top_k: 5 # contractors described in detail per job (every contractor still gets a verdict)
+  top_k: 5 # at most this many shortlisted for the deep review (fewer if fewer fit)
   jobs_per_call: 1 # >1 packs several jobs of one profession per call (only if RPD is tight)
   limits:
     # GUESS until copied from AI Studio for our project and model (doc/V1_PLAN.md Q1).
@@ -62,7 +100,9 @@ llm:
   payload:
     chars_per_token: 4 # GUESS: local estimate; the API's own count is logged after each call
     max_job_tokens: 1200 # GUESS: v0 job texts were 440 tokens median, 948 at most
-    summary_max_words: 80 # GUESS
+    # Whole summary sent (user decision 2026-11-08: all details except the name); the cap
+    # only guards against a pasted essay. Was 80. GUESS: summaries run 30-80 words.
+    summary_max_words: 300
     max_list_items: 15 # GUESS: per contractor list (skills, keywords, titles)
     expected_output_tokens: 1500 # GUESS: for budget estimates only
   # What is shown to the reviewer per job (user rule, 2026-11-06). Gemini still judges every

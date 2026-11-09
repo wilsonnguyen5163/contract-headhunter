@@ -65,6 +65,11 @@ class LlmResponseError(LlmError):
     """HTTP error, blocked prompt, cut-off or empty answer."""
 
 
+class LlmTimeoutError(LlmResponseError):
+    """No answer within llm.timeout_seconds. Not retried: the next model of the review chain
+    is asked instead (user decision 2026-11-08)."""
+
+
 class LLMProvider(Protocol):
     model: str
 

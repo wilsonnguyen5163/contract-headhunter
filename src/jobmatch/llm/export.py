@@ -35,8 +35,7 @@ class LlmExportRow(BaseModel):
     requirements_met: list[str] = []
     requirements_missing: list[str] = []
     red_flags: list[str] = []
-    evidence: list[str] = []
-    evidence_check: str | None = None
+    evidence_check: str | None = None  # v10: whether every "meets" row was found in the texts
     model: str | None = None
     match_id: str | None = None
 
@@ -80,9 +79,8 @@ def build_export_rows(
                     requirements_met=m.requirements_met,
                     requirements_missing=m.requirements_missing,
                     red_flags=m.red_flags,
-                    evidence=m.evidence,
                     evidence_check=(
-                        "a quote could not be verified and was removed"
+                        "something could not be found in the profile or job and was left out"
                         if m.unverified_evidence
                         else "verified"
                         if m.detailed

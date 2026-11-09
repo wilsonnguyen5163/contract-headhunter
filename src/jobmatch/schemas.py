@@ -280,6 +280,7 @@ class LlmCallStatus(StrEnum):
     ERROR = "error"  # bad answer or HTTP error; tokens may still have been spent
     RATE_LIMITED = "rate_limited"  # per-minute 429 after every retry
     DAILY_QUOTA = "daily_quota"  # per-day 429: nothing more until midnight Pacific time
+    TIMEOUT = "timeout"  # no answer within llm.timeout_seconds (not retried; next model)
     NOT_SENT = "not_sent"  # stopped locally before sending (call too large)
 
 

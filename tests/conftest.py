@@ -95,8 +95,31 @@ def app_settings(settings: Settings, data_dir: Path) -> Settings:
         }
     )
     limits = settings.llm.limits.model_copy(update={"rpm": 60_000})
-    llm = settings.llm.model_copy(update={"limits": limits})
+    # Every model of the chain paces at these fast limits (no per-model limits in tests).
+    llm = settings.llm.model_copy(update={"limits": limits, "model_limits": {}})
     return settings.model_copy(update={"paths": paths, "llm": llm})
+
+
+def staged_answer(combined: dict[str, Any], request: Any) -> str:
+    """Test fakes write one combined answer (verdicts, top, no_fit). Since v12 a job takes two
+    calls: the screening call gets the verdicts plus a shortlist of the detailed aliases, the
+    deep-review call gets the detailed entries."""
+    import json
+
+    from jobmatch.llm.prompt import SCREEN_SYSTEM
+
+    if "verdicts" not in combined:  # not a matching answer (for example professions)
+        return json.dumps(combined)
+    top = combined.get("top", [])
+    if request.system == SCREEN_SYSTEM:
+        return json.dumps(
+            {
+                "verdicts": combined["verdicts"],
+                "shortlist": [t["alias"] for t in top],
+                "no_fit": combined["no_fit"],
+            }
+        )
+    return json.dumps({"top": top})
 
 
 @pytest.fixture

@@ -75,6 +75,10 @@ class ContractorImportRules(StrictModel):
     # Leave out confirmed contractors with no Executive Summary and no Core Strengths: a
     # headline alone is too little to match on.
     require_profile_text: bool = False
+    # A loaded .csv row with no talent_id gets <new_id_prefix><highest ID number + 1>, padded
+    # to new_id_width digits (user decision 2026-11-08). See contractor_upsert.fill_missing_ids.
+    new_id_prefix: str = Field(default="TAL-CAN-", min_length=1)
+    new_id_width: int = Field(default=3, ge=1)
     columns: ImportColumns
 
 

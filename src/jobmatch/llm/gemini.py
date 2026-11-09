@@ -24,6 +24,7 @@ from jobmatch.llm.provider import (
     LlmRequest,
     LlmResponse,
     LlmResponseError,
+    LlmTimeoutError,
     RateLimitError,
     TokenUsage,
 )
@@ -40,6 +41,8 @@ def build_body(settings: LlmSettings, request: LlmRequest) -> dict[str, Any]:
         "responseMimeType": "application/json",
         "responseJsonSchema": request.response_schema,
     }
+    if settings.seed is not None:
+        generation["seed"] = settings.seed
     thinking: dict[str, Any] = {}
     if settings.thinking_budget is not None:
         thinking["thinkingBudget"] = settings.thinking_budget
@@ -119,6 +122,12 @@ class GeminiProvider:
         env = os.environ if env is None else env
         return cls(settings, env.get(settings.api_key_env, ""), client=client, sleep=sleep)
 
+    def with_model(self, model: str) -> "GeminiProvider":
+        """The same caller (key, HTTP client, settings) for another model of the chain."""
+        return GeminiProvider(
+            self.settings.for_model(model), self._key, client=self._client, sleep=self._sleep
+        )
+
     @property
     def url(self) -> str:
         return f"{self.settings.base_url.rstrip('/')}/models/{self.model}:generateContent"
@@ -136,6 +145,12 @@ class GeminiProvider:
                 response = self._client.post(
                     self.url, json=body, headers=headers, timeout=self.settings.timeout_seconds
                 )
+            except httpx.TimeoutException as exc:
+                # Not retried (each try waits the full timeout): the caller moves on to the
+                # next model of the review chain.
+                raise LlmTimeoutError(
+                    f"no answer within {self.settings.timeout_seconds:g} s", attempts=attempt
+                ) from exc
             except httpx.TransportError as exc:
                 # The exception text names the host only; the key is in a header.
                 last = LlmResponseError(f"network error: {type(exc).__name__}", attempts=attempt)
