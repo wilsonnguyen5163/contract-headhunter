@@ -4,6 +4,22 @@ What each change solves, for the team. Newest first. Add an entry with every com
 
 ---
 
+## 2026-11-09 · Release v0.3.0
+
+### What this solves
+The first release with the settled matching setup:
+- Flash Lite screens at `medium`.
+- 3.6 Flash reviews 2 jobs per call (1 if alone).
+- The fallbacks are 3 Flash, then Flash Lite.
+
+It also includes everything since the first build: the "do good talent" name and theme, CI on every push, draft releases from tags, and the v12–v15 matching changes. See the entries below and [reports/2026-11-09-final-matching-setup.md](reports/2026-11-09-final-matching-setup.md).
+
+### How to use
+- The version is `0.3.0` in `pyproject.toml`, and the project's own entry in `uv.lock` is updated to match.
+- Release with tag `v0.3.0`. A first push of `v0.3` was stopped by the build's version check, as designed, because the file still said 0.1.0.
+
+---
+
 ## 2026-11-09 · Deep reviews in batches: 2 jobs per call (prompt v15)
 
 ### What this solves
