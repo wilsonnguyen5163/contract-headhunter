@@ -58,7 +58,8 @@ def test_preview_writes_requests_without_personal_details(project: Path) -> None
     assert len(folders) == 1
     request_file = folders[0] / "adzuna_1.json"
     text = request_file.read_text(encoding="utf-8")
-    for secret in ("Riley", "Sample", "Halifax", "TAL-9", "902-555-0100", '"80"'):
+    # Location and rate are sent since 2026-11-08 (user: all details except the name).
+    for secret in ("Riley", "Sample", "TAL-9", "902-555-0100"):
         assert secret not in text, secret
     body = json.loads(text)["body"]
     assert "Write blog posts" in body["contents"][0]["parts"][0]["text"]
@@ -92,13 +93,13 @@ class FakeGemini:
         self.requests: list[object] = []
 
     def generate(self, request):  # type: ignore[no-untyped-def]
+        from conftest import staged_answer
         from jobmatch.llm.provider import LlmResponse, TokenUsage
 
         self.requests.append(request)
         usage = TokenUsage(input_tokens=7000, output_tokens=600, total_tokens=7600)
-        return LlmResponse(
-            text=self.text, usage=usage, model="fake-model", http_status=200, attempts=1
-        )
+        text = staged_answer(json.loads(self.text), request)
+        return LlmResponse(text=text, usage=usage, model="fake-model", http_status=200, attempts=1)
 
 
 def fake_answer() -> str:
@@ -110,14 +111,21 @@ def fake_answer() -> str:
                 {
                     "alias": "C01",
                     "fit_score": 85,
-                    "requirements_met": ["writing"],
+                    "meets": [
+                        {
+                            "skill": "writes blog posts",
+                            "requirement_quote": "Write blog posts",
+                            "requirement": "Blog posts",
+                        },
+                        # Invented: not in the profile, so the row is removed.
+                        {
+                            "skill": "ten years at a newspaper",
+                            "requirement_quote": "Write blog posts",
+                            "requirement": "Blog posts",
+                        },
+                    ],
                     "requirements_missing": [],
                     "red_flags": [],
-                    "evidence": [
-                        {"source": "job", "quote": "Write blog posts"},
-                        {"source": "contractor", "quote": "writes blog posts"},
-                        {"source": "contractor", "quote": "ten years at a newspaper"},
-                    ],
                 }
             ],
         }
@@ -135,18 +143,29 @@ def test_llm_try_logs_usage_and_saves_the_checked_answer(
         app, ["--config-dir", str(project / "config"), "llm-try", "--job-id", "adzuna:1"]
     )
     assert result.exit_code == 0, result.output
-    assert len(fake.requests) == 1
+    # The screening call (whole roster), then the deep review of the shortlist (C01).
+    assert len(fake.requests) == 2
+    assert [line.split()[1] for line in result.output.splitlines() if line.startswith("[llm]")] == [
+        "screen", "review",
+    ]  # fmt: skip
     assert "total 7,600" in result.output
-    assert "1 fit · 0 partial · 0 no" in result.output
+    assert "Screening: 1 fit · 0 partial · 0 no" in result.output
     assert "TAL-9  Content Writer" in result.output
-    assert "unverified evidence removed for TAL-9: 1 quote(s)" in result.output
+    assert "rows not found in the texts, removed for TAL-9: 1" in result.output
+    assert "removed meets: ten years at a newspaper" in result.output
+    assert "meets: writes blog posts  →  Blog posts" in result.output
     assert "Riley" not in result.output
     usage = (project / "data" / "llm_usage.csv").read_text(encoding="utf-8")
-    assert "judge_try" in usage and "adzuna:1" in usage
-    saved = next((project / "data" / "llm_results").rglob("adzuna_1.json"))
+    assert ",screen,adzuna:1," in usage and ",review,adzuna:1," in usage
+    # Saved in its own folder under llm_results/, never in the run's judgments cache.
+    results = project / "data" / "llm_results"
+    saved = next(p for p in results.glob("2*/*.json"))
+    assert not (results / "judgments").exists()
     data = json.loads(saved.read_text(encoding="utf-8"))
     assert data["aliases"] == {"C01": "TAL-9"}
-    assert len(data["judged"]["output"]["top"][0]["evidence"]) == 2
+    assert [r["skill"] for r in data["judged"]["output"]["top"][0]["meets"]] == [
+        "writes blog posts"
+    ]
 
 
 def test_llm_try_without_a_key_sends_nothing(project: Path) -> None:

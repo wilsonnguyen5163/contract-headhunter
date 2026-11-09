@@ -33,6 +33,7 @@ from jobmatch.app.service import (
     MatchView,
 )
 from jobmatch.app_paths import APP_TITLE
+from jobmatch.llm.matches import MEETS_SEP
 from jobmatch.llm.usage import RunCheck
 from jobmatch.pipeline import PipelineError
 from jobmatch.schemas import Decision, ReasonCode
@@ -104,7 +105,12 @@ def file_picker(
     suffixes: tuple[str, ...],
     label: str,
     on_file: Callable[[str, bytes, Path | None], Awaitable[None] | None],
+    *,
+    multiple: bool = False,
 ) -> None:
+    """A Browse button (native dialog) or an upload box (browser). With `multiple`, several
+    files can be picked at once; on_file is called once per file, in order."""
+
     async def handle(name: str, data: bytes, path: Path | None) -> None:
         result = on_file(name, data, path)
         if asyncio.iscoroutine(result):
@@ -118,9 +124,11 @@ def file_picker(
                 ui.notify("The file dialog is not available.", type="negative")
                 return
             patterns = ";".join(f"*{s}" for s in suffixes)
-            picked = await window.create_file_dialog(file_types=(f"{label} ({patterns})",))
-            if picked:
-                path = Path(picked[0])
+            picked = await window.create_file_dialog(
+                allow_multiple=multiple, file_types=(f"{label} ({patterns})",)
+            )
+            for chosen in picked or ():
+                path = Path(chosen)
                 await handle(path.name, path.read_bytes(), path)
 
         ui.button("Browse…", icon="folder_open", on_click=browse).props("outline")
@@ -129,9 +137,9 @@ def file_picker(
         async def uploaded(e: UploadEventArguments) -> None:
             await handle(e.file.name, await e.file.read(), None)
 
-        ui.upload(label=f"Choose {label.lower()}", on_upload=uploaded, auto_upload=True).props(
-            f'accept="{",".join(suffixes)}" flat bordered'
-        ).classes("w-full")
+        ui.upload(
+            label=f"Choose {label.lower()}", on_upload=uploaded, auto_upload=True, multiple=multiple
+        ).props(f'accept="{",".join(suffixes)}" flat bordered').classes("w-full")
 
 
 # ---- screen: find matches ----
@@ -169,8 +177,9 @@ def home_page(service: AppService, native: bool) -> None:
         with ui.card().classes("w-full"):
             ui.label("2. Jobs").classes("text-h6")
             ui.label(
-                "A .txt file with one job link per line, or one posting saved as .txt (from the "
-                "template), .html or .pdf. Jobs already imported are skipped."
+                "One or more files at once: .txt files with one job link per line, or postings "
+                "saved as .txt (from the template), .html or .pdf (one posting per file). Jobs "
+                "already imported are skipped."
             ).classes("text-sm text-grey-8")
             added = ui.column().classes("gap-0")
 
@@ -184,7 +193,7 @@ def home_page(service: AppService, native: bool) -> None:
                 with added:
                     ui.label(f"Added {name}: {what}.").classes("text-sm")
 
-            file_picker(native, JOB_SUFFIXES, "Jobs file", jobs)
+            file_picker(native, JOB_SUFFIXES, "Jobs files", jobs, multiple=True)
 
         with ui.column().classes("w-full items-center gap-2 py-2"):
             run_button = ui.button("Find matches", icon="search").props("size=lg color=primary")
@@ -279,6 +288,14 @@ SHADE = {"green": "#90DCA2", "yellow": "#F8DF9B", "red": "#E07F8A"}
 # Two steps lighter (about 75% toward white), for the Approve / Reject / Needs info buttons.
 SHADE_LIGHT = {"green": "#C8EED0", "yellow": "#FCEFCD", "red": "#F0BFC4"}
 TEXT_DARK = "#1D1D1D"
+# Verdict chip by fit_score (bands in settings.yaml app.score_bands, user decision
+# 2026-11-08): darker green, the green, the yellow, then the light yellow.
+SCORE_SHADE = {
+    "strong": "#5BBE77",
+    "good": SHADE["green"],
+    "some": SHADE["yellow"],
+    "low": SHADE_LIGHT["yellow"],
+}
 OUTCOME_SHADE = {"fits": "green", "check_partial": "yellow"}  # no match / not judged: none
 DECISION_SHADE = {
     Decision.APPROVED: "green",
@@ -348,6 +365,40 @@ def _profile_dialog(service: AppService, view: MatchView) -> None:
                     for value in values:
                         ui.label(value).classes("text-sm whitespace-pre-wrap")
     dialog.open()
+
+
+def _meets_table(items: list[str]) -> None:
+    """The "Meets" table (v10): TALENT ASSET (their skill or result) | JOB REQUIREMENT (the
+    one it meets, summarized). Column names, in capitals: user decision 2026-11-08. Each
+    stored item is "skill → requirement"; an older item without a requirement fills only the
+    left column."""
+    ui.label("Meets").classes("font-bold")
+    with (
+        ui.element("div")
+        .classes("w-full grid grid-cols-2 gap-x-4 gap-y-1 text-sm")
+        .mark("meets-table")
+    ):
+        for header in ("Talent Asset", "Job Requirement"):
+            ui.label(header).classes("text-xs text-grey-7 uppercase border-b border-grey-4 pb-1")
+        for item in items:
+            skill, _, requirement = item.partition(MEETS_SEP)
+            ui.label(skill)
+            ui.label(requirement or "—").classes("text-grey-9")
+
+
+def score_shade(service: AppService, score: int | None, fit: bool) -> str:
+    """The verdict chip's colour: by fit_score band, or by verdict when there is no score
+    (a contractor Gemini judged but did not describe)."""
+    if score is None:
+        return SHADE["green" if fit else "yellow"]
+    bands = service.settings.app.score_bands
+    if score >= bands.strong:
+        return SCORE_SHADE["strong"]
+    if score >= bands.good:
+        return SCORE_SHADE["good"]
+    if score >= bands.some:
+        return SCORE_SHADE["some"]
+    return SCORE_SHADE["low"]
 
 
 def _match_row(service: AppService, view: MatchView) -> None:
@@ -432,11 +483,13 @@ def _match_row(service: AppService, view: MatchView) -> None:
                 ui.label(view.name or m.talent_id).classes("font-bold")
                 if view.headline:
                     ui.label(view.headline).classes("text-grey-8")
+                # Only the verdict chip is coloured (by score band); the score is plain text.
                 ui.label("fit" if fit else "partial").classes("text-xs px-2 rounded").style(
-                    f"background-color: {SHADE['green' if fit else 'yellow']}; color: {TEXT_DARK};"
-                )
+                    f"background-color: {score_shade(service, m.fit_score, fit)}; "
+                    f"color: {TEXT_DARK};"
+                ).mark("verdict-chip")
                 if m.fit_score is not None:
-                    ui.label(f"score {m.fit_score}").classes("text-xs text-grey-8")
+                    ui.label(f"· score {m.fit_score}").classes("text-xs text-grey-8")
                 if not m.detailed:
                     ui.label("reason only").classes("text-xs text-grey-7 italic")
             judgement()
@@ -450,18 +503,21 @@ def _match_row(service: AppService, view: MatchView) -> None:
                 ui.button("Resume", icon="description").props(
                     "outline dense no-caps disable"
                 ).tooltip("Resumes come in a later version")
+            if m.requirements_met:
+                _meets_table(m.requirements_met)
             for title, items in (
-                ("Meets", m.requirements_met),
                 ("Missing", m.requirements_missing),
                 ("Flags", m.red_flags),
-                ("Evidence (checked word for word)", m.evidence),
             ):
                 if items:
                     ui.label(title).classes("font-bold")
                     for item in items:
                         ui.label(f"• {item}")
             if m.unverified_evidence:
-                ui.label("A quote could not be verified and was removed.").classes("text-negative")
+                ui.label(
+                    "Something Gemini listed could not be found in their profile or the job, "
+                    "so it was left out."
+                ).classes("text-grey-7")
             if not m.detailed:
                 ui.label(
                     "Gemini judged this contractor without describing them: only the reason "

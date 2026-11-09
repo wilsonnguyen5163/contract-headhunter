@@ -43,9 +43,11 @@ def profile(**overrides: Any) -> ContractorProfile:
 
 
 def test_personal_fields_never_reach_the_card_text() -> None:
+    """Never sent: the name, the talent ID and contact data (user decision 2026-11-08: all
+    details except the name; CLAUDE.md v1 rule 2: no name, address or phone)."""
     roster = build_roster([profile()], payload_settings())
     text = roster.text()
-    secrets = ["Jordan", "Example", "Smith", "Kelowna", "TAL-BC-001", "95", "30", "Acme"]
+    secrets = ["Jordan", "Example", "Smith", "TAL-BC-001"]
     secrets += ["jordan.smith@example.com", "604-555-0199", "linkedin.com"]
     for secret in secrets:
         assert secret not in text, secret
@@ -60,6 +62,16 @@ def test_matching_fields_are_kept() -> None:
     assert "Level: Senior; 12 years" in text
     assert "Skills: Content strategy; SEO writing; ASP.NET" in text  # "asp.net" is not a link
     assert "Languages: en; fr" in text
+
+
+def test_proof_points_location_rate_and_hours_are_sent() -> None:
+    """User decision 2026-11-08: everything but the name, so the model can cite results."""
+    p = profile(proof_points=["Grew organic traffic 3x at Acme Corp", "Jordan won 2 awards"])
+    text = build_roster([p], payload_settings()).text()
+    assert "Proof points: Grew organic traffic 3x at Acme Corp; [name] won 2 awards" in text
+    assert "Location: Kelowna, BC" in text
+    assert "Rate expectation: 95" in text
+    assert "Weekly hours available: 30" in text
 
 
 def test_french_summary_name_removed_accent_insensitively() -> None:

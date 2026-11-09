@@ -15,6 +15,13 @@ contract_true_values: ["yes", "y", "true", "1", "oui"]
 # on the next build once their profile is filled in.
 require_profile_text: true
 
+# A contractor .csv row with no talent_id gets a new ID: this prefix plus the highest number
+# among the known IDs + 1 (TAL-ON-052 known -> TAL-CAN-053). Loading the same file again
+# reuses the ID given to a row with the same name, so no duplicate is made. User decision
+# 2026-11-08. (Workbook rows need an ID anyway: the profile tab is joined on it.)
+new_id_prefix: TAL-CAN-
+new_id_width: 3
+
 # Profile locations that mean "unknown": the City, Province from tab 1 is used instead.
 location_placeholders: [location to confirm, to confirm, tbd, n/a, unknown]
 

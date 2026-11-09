@@ -15,6 +15,7 @@ from jobmatch.llm.provider import (
     LlmConfigError,
     LlmRequest,
     LlmResponseError,
+    LlmTimeoutError,
     RateLimitError,
 )
 
@@ -82,9 +83,9 @@ def provider(
 def test_request_shape_and_key_in_header_only() -> None:
     seen: list[httpx.Request] = []
     # Pinned here so the test does not depend on the live settings.yaml choice.
-    result = provider([(200, answer())], seen, thinking_budget=0, thinking_level=None).generate(
-        REQUEST
-    )
+    result = provider(
+        [(200, answer())], seen, thinking_budget=0, thinking_level=None, temperature=1, seed=7
+    ).generate(REQUEST)
     sent = seen[0]
     assert sent.headers["x-goog-api-key"] == KEY
     assert KEY not in str(sent.url)
@@ -93,7 +94,8 @@ def test_request_shape_and_key_in_header_only() -> None:
     assert body["systemInstruction"]["parts"][0]["text"] == "rules"
     assert body["contents"][0]["parts"][0]["text"] == "<job>x</job>"
     config = body["generationConfig"]
-    assert config["temperature"] == 0
+    assert config["temperature"] == 1
+    assert config["seed"] == 7
     assert config["responseMimeType"] == "application/json"
     assert config["responseJsonSchema"] == {"type": "object"}
     assert config["thinkingConfig"] == {"thinkingBudget": 0}
@@ -106,6 +108,11 @@ def test_thinking_level_instead_of_budget() -> None:
     assert body["generationConfig"]["thinkingConfig"] == {"thinkingLevel": "low"}
     body = build_body(llm_settings(thinking_budget=None, thinking_level=None), REQUEST)
     assert "thinkingConfig" not in body["generationConfig"]
+
+
+def test_no_seed_sent_when_none_is_set() -> None:
+    body = build_body(llm_settings(seed=None), REQUEST)
+    assert "seed" not in body["generationConfig"]
 
 
 def test_usage_is_read_from_usage_metadata() -> None:
@@ -158,6 +165,38 @@ def test_server_error_is_retried_then_succeeds() -> None:
 def test_network_error_is_retried() -> None:
     replies: list[tuple[int, Any]] = [(0, httpx.ConnectError("down")), (200, answer())]
     assert provider(replies).generate(REQUEST).attempts == 2
+
+
+def test_a_timeout_is_not_retried() -> None:
+    """User decision 2026-11-08: a timeout moves on to the next model at once (each retry
+    would wait the full timeout again)."""
+    replies: list[tuple[int, Any]] = [(0, httpx.ReadTimeout("slow")), (200, answer())]
+    sleeps: list[float] = []
+    with pytest.raises(LlmTimeoutError) as caught:
+        provider(replies, sleeps=sleeps).generate(REQUEST)
+    assert caught.value.attempts == 1 and sleeps == []
+    assert "no answer within" in str(caught.value)
+
+
+def test_with_model_keeps_the_key_and_settings_for_another_model() -> None:
+    first = provider([(200, answer())])
+    other = first.with_model("gemini-other")
+    assert other.model == "gemini-other" and other.url.endswith(
+        "/models/gemini-other:generateContent"
+    )
+    assert other.settings.temperature == first.settings.temperature
+
+
+def test_with_model_can_switch_the_thinking_level() -> None:
+    """llm.review_thinking_level: review calls may think harder than the screening."""
+    base = provider([(200, answer())], thinking_budget=None, thinking_level="medium")
+    review = base.with_model("gemini-3.6-flash", "high")
+    assert review.model == "gemini-3.6-flash"
+    assert build_body(review.settings, REQUEST)["generationConfig"]["thinkingConfig"] == {
+        "thinkingLevel": "high"
+    }
+    same = base.with_model("gemini-3.6-flash")
+    assert same.settings.thinking_level == "medium"
 
 
 def test_bad_request_fails_at_once_without_the_key() -> None:

@@ -4,6 +4,247 @@ What each change solves, for the team. Newest first. Add an entry with every com
 
 ---
 
+## 2026-11-09 · Release v0.3.0
+
+### What this solves
+The first release with the settled matching setup:
+- Flash Lite screens at `medium`.
+- 3.6 Flash reviews 2 jobs per call (1 if alone).
+- The fallbacks are 3 Flash, then Flash Lite.
+
+It also includes everything since the first build: the "do good talent" name and theme, CI on every push, draft releases from tags, and the v12–v15 matching changes. See the entries below and [reports/2026-11-09-final-matching-setup.md](reports/2026-11-09-final-matching-setup.md).
+
+### How to use
+- The version is `0.3.0` in `pyproject.toml`, and the project's own entry in `uv.lock` is updated to match.
+- Release with tag `v0.3.0`. A first push of `v0.3` was stopped by the build's version check, as designed, because the file still said 0.1.0.
+
+---
+
+## 2026-11-09 · Deep reviews in batches: 2 jobs per call (prompt v15)
+
+### What this solves
+The strong reviewer (`gemini-3.6-flash`) allows about 20 requests a day on the free tier, and its limit counts **requests, not tokens**. Reviewing 2 jobs per call doubles the jobs it can review in a day, to about 40, at no cost.
+- **New flow:**
+  1. Every new job is screened first (Flash Lite, one call per job, as before).
+  2. The jobs with a shortlist are reviewed **`llm.review_batch_size` per call** (now 2; user decision).
+- **One review call carries 2 postings** (labelled J1, J2), each with its own shortlist. A contractor shortlisted for both is sent once.
+  - The prompt tells the model to judge each job's contractors against that job only.
+  - The answer is split per job, and each job's "Meets" rows are checked against *its own* posting.
+  - Each job is saved separately, so the screen, shortlists and export are unchanged.
+- **If a batch answer leaves a job out, or the call fails,** only those jobs are retried next run. Their screening is reused. The fallback chain (3.6 Flash → 3 Flash → Flash Lite) works per batch.
+- **The screening has its own version number** (`SCREEN_VERSION`, still v14), so a change to the review never pays for a new screening. Existing v14 screenings are reused.
+- **Progress bar:** "Screening jobs: n of N", then "Deep reviews: n of up to M".
+
+### Test against the single-review benchmark
+- 19 jobs, reviewed **2 per call by 3.6 Flash, on the same screenings**: 10 calls, all answered, 111,987 tokens, 358 s.
+- **86% verdict agreement** with single reviews (Flash Lite alone: 71%). 20 of 23 job outcomes are the same. 0 "Meets" rows failed the check.
+- Slightly more generous near the 40-point cut-off: 6 no → partial.
+- Half the review requests, about 20% fewer tokens, the same time per job.
+- **3 per call was also tested:** 7 calls, 103,306 tokens.
+  - Only **76% agreement**. It was more lenient: 11 no → partial, fewer missing items listed, and 3 creative directors without video production rated fit for a video job.
+  - So the batch size stays at 2.
+- **3 per call with review thinking `high`** was tested too, using a new optional setting, `llm.review_thinking_level` (unset by default; it's part of each job's saved-answer key, so changing it re-reviews without re-screening).
+  - Only **70% agreement**, more generous (7 partial → fit), and the same creative-director mistake. 121,725 tokens, about 26 s per job.
+  - More thinking doesn't fix bigger batches.
+- **All Flash Lite (screening and review) at thinking `high`** was tested (34 calls, 483,543 tokens, about 35 s per job).
+  - **78% agreement**: better than Flash Lite reviewing at `medium` (71%), below 3.6 Flash in batches of 2 (86%).
+  - Its screening missed none of the benchmark's shown candidates.
+  - But it's more generous (+6.5 points), and it rated the marketing-programs project manager fit 72 for the IT project manager job again.
+  - Good as a fallback, not as the default.
+- **Flash Lite now thinks at `high` by default** (user decision), wherever it runs: screening, and review when it's the last fallback.
+  - This is the new per-model setting `llm.model_thinking`. Each model's thinking is part of the saved-answer keys, so **the next run re-screens and re-reviews the dev jobs once**.
+  - 3.6 Flash and 3 Flash stay at `medium`.
+- **Flash Lite `high` reviewing 1 job per call** was tested against the 1-job benchmark: 21 calls, 162,862 tokens.
+  - 75% agreement, no better than 2 per call (78%), with the same leniency (project manager fit 72, fits without "essential" tools).
+  - For Flash Lite, batching isn't the issue; its own judgement is.
+- **Final setup going forward** (user decision 2026-11-09):
+  - Flash Lite (`high`) screens.
+  - 3.6 Flash (`medium`) reviews 2 jobs per call (1 if alone), then 3 Flash (`medium`), then Flash Lite (`high`).
+  - **Final re-judge of the 23 dev jobs:** 35 calls, 490,278 tokens, about 42 s per job.
+  - 3.6 Flash ran out after 16 jobs, and 3 Flash reviewed the other 5 (fallback worked).
+  - Result: 8 fit, 12 partial, 3 no match; **73% verdict agreement** with the benchmark (lower than the 86% test, mainly because of 3 Flash and the more generous `high` screening).
+  - See the run report's "Final run" section and its open points.
+- **Reverted to the best-measured setup** (user decision, same day): **Flash Lite screens at `medium`** (`llm.model_thinking` emptied); **3.6 Flash reviews 2 jobs per call (1 if alone)**; fallbacks 3 Flash, then Flash Lite, all at `medium`.
+  - Re-run with a new API key: screenings reused; 10 review calls, all on 3.6 Flash, 113,149 tokens, 410 s.
+  - **80% verdict agreement** with the benchmark, and **86%** with the earlier test of the same setup (its run-to-run variation). The project manager job is partial again.
+  - A full run takes about 33 s per job.
+  - **Decision report:** [reports/2026-11-09-final-matching-setup.md](reports/2026-11-09-final-matching-setup.md) covers the setup, results, time and cost, why it was chosen, and open items.
+- Details are in the run report: [reports/2026-11-08-matching-run-v14.md](reports/2026-11-08-matching-run-v14.md).
+
+### How to use
+- Nothing to do. To change the batch size, set `llm.review_batch_size` in `config/settings.yaml` (1–6).
+- **The next run re-reviews the 23 dev jobs once** (the prompt version changed): about 10 review calls and roughly 110k tokens. The screenings are reused.
+
+### Checks run
+- `pytest`: 756 passed. The judge, pipeline and app tests were updated for the batch flow. New tests cover batch labels, a contractor sent once for two jobs, splitting an answer per job, and missing or unknown jobs.
+- `ruff check .` and `ruff format --check .`: pass.
+
+---
+
+## 2026-11-08 · Talent IDs instead of codenames, summary reasons, score colours, multi-file jobs, smaller dev data
+
+### What this solves
+- **No more "C34 is a senior writer…", and no talent IDs either.** The reasons, requirements and warnings name nobody, because the contractor box already shows the name, Profile and Resume (user rule).
+  - It's a rule in the matching prompt (now `2026-11-08.v4`): describe the contractor directly ("Senior copywriter with…") and use the codename only in the answer's alias fields.
+  - The prompt is shared by every provider, so the rule carries over if the model or provider changes.
+  - Safety net: if a model still writes a codename, the app drops it ("C34 is a senior writer" becomes "Senior writer"; other mentions become "this contractor").
+  - Evidence quotes stay word for word.
+  - A first version earlier the same day put talent IDs in place of codenames (prompt v3). The user reversed that after seeing it.
+- **Reasons are always 2 sentences** for fit and partial contractors (at most 45 words): why they fit, then the main gap or what to confirm. "No" verdicts keep one short sentence.
+- **More repeatable answers:** a fixed `seed` is sent with each request (`llm.seed`, picked at random once). `temperature` is now 1, Google's default for Gemini 3 models. Judged jobs are cached, so a job's answer never changes on re-runs.
+- **Verdict chip colour by score** (`app.score_bands` in `settings.yaml`):
+  - 90+: darker green (`#5BBE77`);
+  - 70–89: green;
+  - 40–69: yellow;
+  - below 40: light yellow;
+  - no score: the verdict's colour.
+  - Only the "fit" / "partial" chip is coloured; "· score 95" is plain text.
+- **Contractor rows without a talent ID** (in a `.csv`) get **`TAL-CAN-<highest number + 1>`**, so with `TAL-ON-052` known the next is `TAL-CAN-053`.
+  - Loading the same file again reuses the ID by matching the name, so no duplicate is made.
+  - Names are compared on this machine only. The run log lists the IDs given (IDs only).
+  - The file itself is never changed. Add the IDs to it to keep them stable.
+- **Several job files at once** in the Browse dialog (and the browser preview's upload box).
+- **Smaller development data:** `data/jobs.csv` now holds 23 jobs instead of 82 (10 with a clear fit, 10 with a partial, 3 with no match, spread over as many professions as possible). This keeps Gemini calls low while developing.
+  - The full list is in `data/jobs.csv.backup`, and a timestamped copy is in `data/backups/`.
+  - One no-match job ("business analyst - IT III") was swapped for "data integration architect" (user request).
+  - **`data/inbox/` was moved to `data/inbox.before-dev-trim.20261108/`.** Every run imports every inbox file, so leaving it would have brought the 59 removed jobs back. The app creates a fresh inbox when a job file is added.
+- **Re-judged with prompt v3** (2026-11-08):
+  - 23 calls, all usable; 207,654 tokens (151,486 in, 56,168 out; about 9k per call); 24 of 500 requests used today.
+  - Result: 13 jobs with clear fits, 8 with a partial, 2 with no match (32 shortlist rows).
+  - No codenames are left in the text; 17 reasons name a talent ID. Reasons run 14–28 words.
+  - 4 answers contradicted themselves ("no_fit" true while some contractors were rated fit or partial). As before, the rated contractors still count, so nobody is hidden.
+- **Re-judged again with prompt v4** (same day, after the no-ID and 2-sentence rules):
+  - 23 calls, all usable; 207,482 tokens (152,590 in, 54,892 out). Today's total is 415,136 tokens and 52 of 500 requests; the request counter includes about 5 retried requests.
+  - Result: 14 jobs with clear fits, **1 with a partial**, 8 with no match (24 shortlist rows).
+  - Every fit/partial reason is 2 sentences (21–35 words, average 28). No codename, talent ID or "this contractor" appears in any text.
+  - ⚠ Partials dropped from 8 to 1, and no-match jobs rose from 2 to 8, compared with v3. A free comparison of the saved answers showed the prompt was the cause: v4 called same-field people with one missing skill "no", and turned real gaps into "confirm X" fits.
+- **Prompt v5 (same day): verdict by the size of the gap** (user scale):
+  - **fit:** same profession and meets the required skills; missing a little = fit with a lower score.
+  - **partial:** missing a few required skills, or one level off in seniority.
+  - **no:** the gap is too big (different profession, or missing many required skills).
+  - The score must agree with the verdict: fit with nothing missing 90–100, fit missing a little 70–89, partial 40–69. These match the chip colours.
+  - Summaries by verdict: a partial says what fits and what keeps them from a clear fit.
+  - A required item not written in the card is a gap, never "to confirm".
+  - Met and missing items must be specific (the job's requirement plus what in the card meets it), not generic.
+  - `max_output_tokens` was raised to 8,192 so longer answers are never cut off.
+  - A new check flags a score that disagrees with its verdict.
+  - **Re-judged:** 23 calls, all usable, 216,060 tokens. Today's total is 631,196 tokens and 75 of 500 requests.
+  - **Result:** 12 jobs with clear fits, 4 with a partial, 7 with no match. "Meets" items are longer and more specific (about 14.5 words, was 9), but still about 3 per contractor.
+  - 4 shown contractors are "fit" with a 50–65 score, which disagrees with the verdict and is flagged.
+- **Prompt v6 (same day): stopping invented matches.** Some v5 "Meets" items claimed things the contractor's card doesn't say.
+  - **Each requirement met now carries a quote from the card,** and the app checks the quote word for word, like the evidence quotes. An item whose quote isn't in the card is dropped before anyone sees it. On screen it reads `Requirement — "card words"`.
+  - **The answer is written evidence first:** requirements met and missed, red flags and evidence, then the score, then the verdicts. That way the score follows from the evidence instead of being justified after the fact.
+  - **The score decides:** a "fit" scored under 70 is kept as a partial.
+  - New `llm-try --thinking-level` option to try another thinking level on one job without touching shortlists.
+  - **3-job test** (social media community manager, email designer, bilingual partnership), each with thinking `minimal` and `low`:
+    - 6 calls, 58,083 tokens.
+    - Both levels reported 0 thinking tokens and gave similar answers, so `low` showed no benefit and the setting stays `minimal`.
+    - v6 answers: Todd is now partial at 50 (was fit 85, then 75); the graphic designers are partial at 40–60 for the email-designer job (missing HTML email coding); the bilingual job is partial, with French listed as missing.
+    - Quotes stop invented text, but a real quote can still be stretched (for example "Art Director" given as proof of an art degree).
+- **Prompt v7 (same day): plain English and real proof points.**
+  - **Plain English:** the prompt says "profile", never "card", and tells the model to write for a recruiter with no technical words ("card", "alias", "verdict", field names). If one slips through, the app swaps it for everyday words ("Card does not mention SEO" becomes "Their profile does not mention SEO").
+  - **Details are proof points,** not justifications. Each bullet is a concrete fact from the profile (a result, number, budget, client, tool, credential or years of experience), such as "Managed 40+ staff and $10M+ annual budgets". It never restates the job's requirement. Each is checked against the profile behind the scenes, and only the fact is shown.
+  - **More of the profile is sent to Gemini** (user decision: all details except the name): proof points, location (city/province), rate expectation, weekly hours and the whole summary, in addition to what was sent before.
+    - The name and the talent ID are still never sent.
+    - Emails, phone numbers, links, street addresses and postal codes are still scrubbed from every text.
+  - Each call sends about 1.5k more tokens: measured about 8.6k in, versus 6.9k before.
+  - CLAUDE.md V1 rule 2 was updated by the user to allow proof points, the executive summary and city + province.
+  - **3-job test:** 3 calls, 34,373 tokens. **Full re-judge:** 23 calls, all usable, 254,088 tokens (196,888 in, 57,200 out). Today's total is 977,657 tokens and 108 of 500 requests.
+  - **Result:** 5 jobs with clear fits, 12 with a partial, 6 with no match.
+    - Proof points per shown contractor: 1–6, average 2.8, all real facts from the profile ("Built brand systems for 20+ enterprise clients").
+    - No technical words in any text.
+    - Still open: some "fit" verdicts miss two or three required items (for example a degree and design software), which is lenient on the user's scale. One partial scored 75, above the partial range (flagged).
+- **Prompts v8 and v9 (same day): the recruiter flow and weighted verdicts** (user design).
+  - **Flow:** read the job → screen every contractor in one sentence → deep review of the best 5. Each review has a justification (2 sentences), then the description (proof points, missing, warnings, evidence), then the score, then the final verdict. **The app shows the best 3 of those 5,** ranked by final verdict (fit before partial), then score. A deep review's verdict and justification replace the screening; changes are logged.
+  - **Weighted verdicts, no counting rule:** what the job is mainly about counts most. Anything in the job title or stated as mandatory or required is core. Missing a core item is at most partial (example: a Python project without Python). Missing a few smaller items is still fit, with a lower score.
+  - **Proof points are achievements, results, clients, tools, credentials or years,** never location, availability, rate, level labels or admin notes. Fewer is better than filler.
+  - v8 test (3 jobs, 36,876 tokens): the bilingual job got 2 fits without French, and filler proof points appeared ("Based in Vancouver", an admin note "Contractor agreement countersigned…" taken from one contractor's proof points in the list). v9 fixed both: the 3-job test (35,286 tokens) showed the bilingual job as partial with French flagged as core, and no filler.
+  - **Full re-judge with v9:** 23 calls, all usable, 264,973 tokens (199,648 in, 65,325 out). Today's total is 1,314,792 tokens and 138 of 500 requests.
+  - **Result:** 9 jobs with clear fits, 13 with a partial, 1 with no match (30 shortlist rows).
+    - Proof points per shown contractor: 0–5, average 2.0; 3 contractors have none (thin profiles).
+    - No technical words. The deep review changed the screening 3 times, all fit to partial.
+  - Data note: one contractor's proof points in the list include an admin note (contract countersigned date). Clean it in the workbook.
+- **Prompt v10 (same day): a "Meets" table, and no separate evidence.**
+  - **"Evidence" is gone** from the answer, the prompt and the screen. It repeated what the checked rows already prove, and cost output tokens.
+  - **"Meets" is a two-column table:** *TALENT ASSET* (their skill or result) | *JOB REQUIREMENT* (column names chosen by the user).
+    - The left side is copied from the profile (core strengths first, then proof points).
+    - Each row also carries the requirement copied from the posting. Both are checked word for word, and only then is the requirement's short summary (8 words or fewer, as asked) shown on the right.
+    - A row that fails either check is dropped before anyone sees it.
+  - Stored as `skill → requirement` in the existing "Meets" column, so `llm_matches.csv` didn't change shape.
+  - Also fixed: a developer note (a class docstring) was being sent to Gemini as part of the answer layout since v7. Now only the short field descriptions are sent.
+  - **3-job test:** 3 calls, 35,719 tokens; 1 of about 37 rows dropped.
+  - **Full re-judge:** 23 calls, all usable, 261,399 tokens (198,659 in, 62,740 out). Today's total is 1,611,937 tokens and 164 of 500 requests.
+  - **Result:** 10 jobs with clear fits, 12 with a partial, 1 with no match.
+    - 181 table rows kept and 7 dropped by the word-for-word check (under 4%), so Gemini copies reliably.
+    - Rows per shown contractor: 1–5, average 2.7. Requirement summaries are 2–8 words, average 4.8.
+  - Still open: 4 partials scored 72–75 (above the partial range, so their chip shows green), and some pairings are a stretch (for example "AI transformation" paired with "operate automated community management systems").
+- **Prompt v11 (same day): the score decides, and the field of work counts.**
+  - **The score sets the verdict:** 70+ is fit, 40–69 is partial, below 40 isn't shown. It's in the prompt ("score first, then the verdict follows") and enforced by the app in both directions, so a partial chip is never green and a fit chip never yellow.
+  - **Field of work, not just the title:** a project manager, analyst, designer or writer from a different field is at most partial when the job's work depends on that field. The case behind it: a digital and marketing programs project manager scored 75 for an IT software and infrastructure project manager job.
+  - **3-job test** (Project Manager, social media, bilingual): 3 calls, 35,691 tokens. Today's total is 1,647,628 tokens and 167 of 500 requests.
+    - The score-decides rule works: every label now matches its score.
+    - **But the model ignored the two judgement rules.** The marketing-programs project manager still scored 75 (fit) for the IT project manager job, and the bilingual job still has 2 fits lacking French.
+    - The full re-judge was held back, since it wouldn't fix what was asked.
+- **v12 (same day): two models per job, with a fallback chain** (user design).
+  - **Thinking test first:** at thinking `medium` the same model applied both rules (Kayla partial 65, the bilingual job with French flagged). At `high`, both calls were cut off at the 8,192-token output limit.
+  - **Screening (Flash Lite, thinking `medium`):** reads every contractor, gives one-line verdicts, and **shortlists only those who fit or partly fit** (up to 5; fewer if fewer fit; none means no second call and "no match").
+  - **Deep review (stronger model, thinking `medium`):** only the shortlisted profiles are sent. It writes the justification, Meets table, missing items, flags, score and final verdict.
+  - **Review chain:** `gemini-3.6-flash` → `gemini-3-flash-preview` → `gemini-3.5-flash-lite`.
+    - A model that answers "daily limit reached", or **doesn't answer within 120 s** (not retried), is skipped for the rest of the run, and the next model reviews. The next run tries it first again.
+    - `gemini-3.8-flash` was tried first and removed: it answered "high demand" (HTTP 503) or timed out on every review.
+    - `gemini-3.0-flash` doesn't exist for our key, so `gemini-3-flash-preview` stands in for it (the model list call was checked).
+  - **Per-model quota:** usage is counted per model, and the run log shows today's use for each. Review-model limits in `settings.yaml` are guesses (20 requests a day) until copied from AI Studio.
+  - **Also:**
+    - The judgment cache key now includes the thinking setting.
+    - A screening answer is saved on its own, so a failed review is retried without screening again.
+    - `max_output_tokens` is 12,288 (thinking counts against it).
+    - `llm-try` runs both calls and saves to its own folder, never the run cache.
+  - **3-job test** (6 calls, 55,407 tokens): Kayla is **partial 58** ("missing the mandatory PMP certification and explicit provincial-scale IT infrastructure project experience"). The bilingual job has no fit.
+  - **Full re-judge:** 40 calls (23 screenings, 17 reviews; 6 jobs had nobody shortlisted), all usable, **405,239 tokens**. Today's total is 2,207,352 tokens: Flash Lite 209 of 500 requests, 3.6 Flash 20 of a guessed 20. No fallback was needed.
+    - Reviews cost 3.5k–10.2k tokens each, mostly thinking.
+  - **Result:** 3 jobs with clear fits, 10 with a partial, 10 with no match.
+    - The reviewer reviewed 59 contractors in depth and **downgraded 30 screening verdicts** (25 partial to no, 5 fit to partial), never upgraded.
+    - No technical words in any text.
+- **Prompt v13 (same day): fairer verdicts and a legal guardrail** (user decisions after a review of all 23 jobs).
+  - **"No" only for a different profession, or when almost none of the core is there.** The same profession missing a core specialty is partial (40–69). Examples in the prompt: a graphic designer without HTML email coding; an HR leader without compensation design.
+  - **Personal traits:** the model must never infer, guess or weigh age, gender, race, ethnicity, national origin, religion, disability, family status, sexual orientation or any other personal trait, not even from years of experience, names or dates. The prompt states this is **illegal discrimination under Canadian human rights law**. Eligibility conditions (age-based programs, citizenship, permits, clearance) become a flag for the recruiter to confirm, never a gap or a lower score.
+    - The case behind it: the reviewer had inferred that a contractor with 10+ years of experience was over 30 for a youth-subsidy job.
+  - **Missing items:** only what the job requires, never nice-to-haves or assets. English is taken as given (Canada); French is not.
+  - **Screening leans generous:** when unsure between partial and no, it chooses partial and shortlists, and the deep review decides.
+  - **3-job test** (new API key; 6 calls, 67,350 tokens):
+    - ECH marketing manager now shows 5 partials (it had none before; the screening had rated everyone "no").
+    - The email designer's graphic designers are all partial (40–55).
+    - The event coordinator: no age inference; each candidate gets the flag "the recruiter should confirm the candidate is 30 or under and a Canadian citizen, permanent resident, or refugee as required by the wage subsidy program".
+    - With the new key, `gemini-3.6-flash` still answered "daily limit reached", so the chain fell back to `gemini-3-flash-preview` as designed.
+    - Seen: the model also adds a generic "confirm legal eligibility to work in Canada" flag even when the posting doesn't ask.
+- **Prompt v14 (same day):** eligibility flags only when the job text states the condition.
+  - `max_output_tokens` raised to 24,576: a `gemini-3-flash-preview` review thought for 11k tokens and was cut off at 12,288.
+  - **Full re-judge (second API key):** 43 calls, all usable except that one cut-off review, which was redone after the raise (1 call). 453,964 tokens in all.
+    - Reviews: 22 jobs by `gemini-3.6-flash`, 1 by `gemini-3-flash-preview` (3.6 Flash answered "daily limit reached" once mid-run; the chain fell back).
+    - Today's local total: 2.73M tokens across both keys.
+  - **Result:** 4 jobs with clear fits, 14 with a partial, 5 with no match (was 3 / 10 / 10 in v12).
+    - The reviewer changed 27 screening verdicts (18 partial to no, 8 fit to partial, 1 fit to no). Screening now shortlists generously.
+    - Eligibility flags: 5 across all reviews (v13 had put one on every candidate). No age mentions in any shown text.
+  - **Groq was tested, then removed** (user decision).
+    - `openai/gpt-oss-120b` was benchmarked as a reviewer against the 3.6 Flash results: 15 of 19 reviews answered (8,000 tokens per minute is too tight), 63% verdict agreement (Flash Lite: 73%), more lenient, and 25 "Meets" rows that failed the word-for-word check.
+    - All Groq code, settings, tests and the `GROQ_API_KEY` entry in `.env.example` were then removed, and `llm.budget.call_max_tpm_share` went back to 0.5. The findings stay in the run report.
+  - **NVIDIA NIM tested** (user decision, rule 4 OK for testing).
+    - `src/jobmatch/llm/openai_compat.py` is a general OpenAI-compatible caller for review models named `<provider>:<model>` (settings `llm.compat_providers`; key `NVIDIA_API_KEY`).
+    - `nvidia/nemotron-3-ultra-550b-a55b` against the 3.6 Flash benchmark: 18 of 19 reviews answered, 68% verdict agreement, about 2 minutes per review.
+    - It was the strictest reviewer, and it rejected people on rate or location. 17 "Meets" rows failed the word-for-word check.
+    - It's not in the review chain.
+    - Then removed (user decision 2026-11-09): the caller, its settings, tests and the `NVIDIA_API_KEY` entry in `.env.example`. The findings stay in the run report.
+  - **Run report** with timing (about 32 s per job), token usage per model and quality metrics: [reports/2026-11-08-matching-run-v14.md](reports/2026-11-08-matching-run-v14.md).
+
+### How to use
+- Contractor IDs: nothing to do. If the app reports assigned `TAL-CAN-…` IDs, copy them into your source file.
+
+### Checks run
+- `pytest`: 732 passed (8 new: codenames dropped from the model's text with English and French examples, evidence left unchanged, TAL-CAN numbering and reuse, seed, score bands and chip colours).
+- `ruff check .` and `ruff format --check .`: pass.
+
+---
+
 ## 2026-11-07 · The app is now "do good talent", in the org's light purple
 
 ### What this solves

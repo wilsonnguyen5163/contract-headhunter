@@ -63,9 +63,11 @@ class DayUsage(BaseModel):
     tokens: int
 
 
-def day_usage(records: Iterable[LlmUsage], now: datetime) -> DayUsage:
+def day_usage(records: Iterable[LlmUsage], now: datetime, model: str | None = None) -> DayUsage:
+    """Today's usage; for one model only when `model` is given (each model has its own
+    daily limits)."""
     since = pacific_day_start(now)
-    today = [r for r in records if r.at >= since]
+    today = [r for r in records if r.at >= since and (model is None or r.model == model)]
     return DayUsage(
         since=since,
         calls=len(today),
@@ -86,16 +88,16 @@ class UsageLedger:
     def all(self) -> list[LlmUsage]:
         return self._usage.list_all()
 
-    def today(self, now: datetime | None = None) -> DayUsage:
-        return day_usage(self.all(), now or datetime.now(UTC))
+    def today(self, now: datetime | None = None, model: str | None = None) -> DayUsage:
+        return day_usage(self.all(), now or datetime.now(UTC), model)
 
 
 def usage_line(usage: LlmUsage, today: DayUsage, limits: LlmLimits) -> str:
-    """One terminal line per call: what it cost and where today stands."""
+    """One terminal line per call: what it cost and where today stands for that model."""
     jobs = ",".join(usage.job_ids) or "-"
     day_tokens = f"{today.tokens:,}" + (f"/{limits.tpd:,}" if limits.tpd else "")
     return (
-        f"[llm] {usage.purpose} {jobs} · {usage.status.value} · "
+        f"[llm] {usage.purpose} {jobs} · {usage.model} · {usage.status.value} · "
         f"in {usage.input_tokens:,} · out {usage.output_tokens:,} · "
         f"think {usage.thinking_tokens:,} · total {usage.total_tokens:,}"
         + (f" (est. {usage.estimated_tokens:,})" if usage.estimated_tokens is not None else "")

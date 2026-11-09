@@ -1,13 +1,15 @@
 """Contractor cards sent to the API: what matters for matching, no personal details
 (CLAUDE.md v1 rule 2; doc/V1_PLAN.md section 8).
 
-Sent: headline, professions, industries, seniority, years of experience, languages, target
-titles, core strengths, search keywords and a short summary (at most
-llm.payload.summary_max_words words).
+Sent (user decision 2026-11-08: "send all contractor's details except for name"): headline,
+professions, industries, seniority, years of experience, languages, target titles, core
+strengths, proof points, search keywords, location (city/province), rate expectation,
+weekly hours and the summary (up to llm.payload.summary_max_words words). Proof points give
+the model concrete results to cite. Before 2026-11-08 location, rate, hours and proof points
+were held back.
 
-Never sent: name, location, rate, weekly hours, proof points and the talent ID. Each
-contractor gets an alias (C01, C02… in talent-ID order); the alias-to-talent-ID map stays
-on this machine.
+Never sent: the name and the talent ID. Each contractor gets an alias (C01, C02… in
+talent-ID order); the alias-to-talent-ID map stays on this machine.
 
 Every sent text is scrubbed: the contractor's own name (each part, accent-insensitive),
 emails, URLs, phone numbers, street addresses and postal codes. If anything that still looks
@@ -93,7 +95,11 @@ class ContractorCard(BaseModel):
     languages: list[str] = []
     target_titles: list[str] = []
     skills: list[str] = []
+    proof_points: list[str] = []
     keywords: list[str] = []
+    location: str | None = None
+    rate: str | None = None
+    weekly_hours: float | None = None
     summary: str | None = None
 
 
@@ -156,7 +162,11 @@ def contractor_card(
         languages=profile.languages,
         target_titles=many(profile.target_titles),
         skills=many(profile.core_strengths),
+        proof_points=many(profile.proof_points),
         keywords=many(profile.search_keywords),
+        location=one(profile.location),
+        rate=one(profile.rate_expectation),
+        weekly_hours=profile.weekly_hours,
         summary=_words(summary, settings.summary_max_words) if summary else None,
     )
 
@@ -179,9 +189,14 @@ def render_card(card: ContractorCard) -> str:
     add("Level", level)
     add("Target titles", card.target_titles)
     add("Skills", card.skills)
+    add("Proof points", card.proof_points)
     add("Keywords", card.keywords)
     add("Industries", card.industries)
     add("Languages", card.languages)
+    add("Location", card.location)
+    add("Rate expectation", card.rate)
+    if card.weekly_hours is not None:
+        add("Weekly hours available", f"{card.weekly_hours:g}")
     add("Summary", card.summary)
     return "\n".join(lines)
 

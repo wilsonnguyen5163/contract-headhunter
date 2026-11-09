@@ -1,11 +1,15 @@
-"""Checks that every evidence quote in an answer appears in the text that was sent
-(CLAUDE.md: explanations come from data, never invented).
+"""Checks that what a model claims comes from the text that was sent (CLAUDE.md: explanations
+come from data, never invented).
 
-A job quote must be in the job text; a contractor quote must be in that contractor's own
-card. Comparison ignores case, accents are kept, curly quotes and dashes count as plain ones,
+v10: each row of a deep review's "meets" table carries two copied texts. "skill" must be in
+that contractor's profile as sent, and "requirement_quote" must be in the job text. Only a
+row where both are found is kept, and only then is its short summary ("requirement") shown
+next to the skill. A row that fails is removed and reported as "meets: <skill>"; the match
+stays for the reviewer with a note that something could not be confirmed.
+
+Comparison ignores case, accents are kept, curly quotes and dashes count as plain ones,
 whitespace is collapsed and edge punctuation dropped. A quote with "..." or "…" is checked
-piece by piece. Quotes not found are removed and reported; the match stays for the reviewer
-with an "unverified evidence" note.
+piece by piece.
 """
 
 import re
@@ -35,8 +39,8 @@ def quote_found(quote: str, haystack: str) -> bool:
 
 
 class EvidenceReport(BaseModel):
-    output: JudgeOutput  # with unverified quotes removed
-    unverified: dict[str, list[str]]  # alias -> quotes removed
+    output: JudgeOutput  # with unconfirmed rows removed
+    unverified: dict[str, list[str]]  # alias -> rows removed ("meets: <skill>")
 
 
 def verify_evidence(output: JudgeOutput, job_text: str, roster: Roster) -> EvidenceReport:
@@ -45,12 +49,12 @@ def verify_evidence(output: JudgeOutput, job_text: str, roster: Roster) -> Evide
     cleaned = output.model_copy(deep=True)
     unverified: dict[str, list[str]] = {}
     for match in cleaned.top:
+        card = cards.get(match.alias, "")
         kept = []
-        for item in match.evidence:
-            source = job if item.source == "job" else cards.get(match.alias, "")
-            if quote_found(item.quote, source):
-                kept.append(item)
+        for row in match.meets:
+            if quote_found(row.skill, card) and quote_found(row.requirement_quote, job):
+                kept.append(row)
             else:
-                unverified.setdefault(match.alias, []).append(item.quote)
-        match.evidence = kept
+                unverified.setdefault(match.alias, []).append(f"meets: {row.skill}")
+        match.meets = kept
     return EvidenceReport(output=cleaned, unverified=unverified)

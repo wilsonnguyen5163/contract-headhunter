@@ -233,5 +233,6 @@ def test_progress_moves_forward_to_done(
     shares = [f for f, _ in seen]
     assert shares == sorted(shares) and shares[0] == 0.0 and shares[-1] == 1.0
     stages = [s for _, s in seen]
-    assert "Importing jobs" in stages and "Asking Gemini: 3 of 3" in stages
+    assert "Importing jobs" in stages and "Screening jobs: 3 of 3" in stages
+    assert "Deep reviews: 1 of up to 2" in stages  # 2 jobs with a shortlist: one batch
     assert stages[-1] == "Done"

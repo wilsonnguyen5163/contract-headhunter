@@ -539,7 +539,9 @@ def suggest_professions(ctx: typer.Context) -> None:
         raise typer.Exit(1)
     call = prepare_profession_call(roster, professions, llm)
     ledger = UsageLedger(loader.llm_usage)
-    check = check_run(llm.limits, llm.budget, ledger.today(), 1, call.estimated_total_tokens)
+    check = check_run(
+        llm.limits, llm.budget, ledger.today(model=llm.model), 1, call.estimated_total_tokens
+    )
     typer.echo(f"Budget: {check.verdict.upper()} · {check.message}")
     if check.verdict == "exceeds":
         raise typer.Exit(1)
@@ -609,21 +611,35 @@ def llm_try(
     job_id: Annotated[
         str | None, typer.Option("--job-id", help="Job to judge. Default: the first active job.")
     ] = None,
+    thinking_level: Annotated[
+        str | None,
+        typer.Option(
+            "--thinking-level",
+            help="Try another Gemini 3 thinking level (minimal, low, medium, high) for this "
+            "call only, instead of llm.thinking_level in settings.yaml.",
+        ),
+    ] = None,
 ) -> None:
-    """Phase 4: judge ONE job with ONE real Gemini call (the whole anonymized roster).
-    Prints the token usage, the verdicts (talent IDs and headlines only) and any problem with
-    the answer, and saves everything to data/llm_results/<time>/. Changes no match data."""
+    """Judge ONE job for real, exactly as a run would: the screening call (the whole
+    anonymized roster), then the deep review of its shortlist by the first review model with
+    quota left. Prints the token usage of each call, the verdicts (talent IDs and headlines
+    only) and any problem, and saves everything to data/llm_results/<time>/ (not the run
+    cache). Changes no match data."""
+    import time
     from datetime import UTC, datetime
 
-    from jobmatch.llm.payload import job_card, render_job
-    from jobmatch.llm.preview import safe_name
-    from jobmatch.llm.prompt import prepare_call
-    from jobmatch.llm.runner import send
-    from jobmatch.llm.trial import TrialResult, judge_answer, write_result
+    from jobmatch.llm.judge import Chain, JudgeRunReport, judge_one, plan_jobs
+    from jobmatch.llm.payload import job_card
     from jobmatch.llm.usage import UsageLedger, check_run
 
     settings: Settings = ctx.obj
     llm, loader, jobs, profiles, roster = _llm_inputs(settings)
+    if thinking_level is not None:
+        if thinking_level not in ("minimal", "low", "medium", "high"):
+            typer.echo("--thinking-level: choose minimal, low, medium or high")
+            raise typer.Exit(2)
+        llm = llm.model_copy(update={"thinking_level": thinking_level, "thinking_budget": None})
+        typer.echo(f"Thinking level for this call: {thinking_level}")
     if job_id is None:
         if not jobs:
             typer.echo("No active jobs.")
@@ -636,66 +652,61 @@ def llm_try(
             raise typer.Exit(1)
         job = found[0]
     card = job_card(job, llm.payload)
-    call = prepare_call(card, roster, llm)
+    folder = settings.paths.data_dir / "llm_results" / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    [item] = plan_jobs([job], roster, llm, folder)
     ledger = UsageLedger(loader.llm_usage)
-    check = check_run(llm.limits, llm.budget, ledger.today(), 1, call.estimated_total_tokens)
+    check = check_run(
+        llm.limits, llm.budget, ledger.today(model=llm.model), 1, item.call.estimated_total_tokens
+    )
     typer.echo(f"Budget: {check.verdict.upper()} · {check.message}")
     if check.verdict == "exceeds":
         raise typer.Exit(1)
-    outcome = send(
-        _gemini(llm), ledger, llm, call.request,
-        purpose="judge_try", job_ids=call.job_ids, estimated_tokens=call.estimated_total_tokens,
+    typer.echo(f"Screening: {llm.model} · deep review: {' → '.join(llm.review_chain)}")
+    report = JudgeRunReport(planned=1, cached=0, sent=0, ok=0, failed=0)
+    chain = Chain(
+        llm, _gemini(llm), ledger, report,
+        echo=typer.echo, sleep=time.sleep, clock=lambda: datetime.now(UTC),
     )  # fmt: skip
-    typer.echo(outcome.line)
-    log.info("llm_call", extra={"fields": outcome.usage.model_dump(mode="json")})
-
-    judged = None
-    if outcome.response is not None:
-        judged = judge_answer(outcome.response.text, render_job(card), roster, llm.top_k)
-    result = TrialResult(
-        job_id=job.job_id,
-        model=outcome.response.model if outcome.response else llm.model,
-        judge_key=call.judge_key(llm.model),
-        usage=outcome.usage,
-        aliases=roster.aliases,
-        judged=judged,
-        raw_text=outcome.response.text if outcome.response else None,
-    )
-    folder = settings.paths.data_dir / "llm_results" / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    path = write_result(result, folder, safe_name(job.job_id))
+    outcome = judge_one(chain, job, item, roster, folder)
+    log.info("llm_try", extra={"fields": report.model_dump()})
 
     typer.echo(f"\n{card.title}  [{job.job_id}]")
-    if outcome.response is None:
-        typer.echo(f"Call failed: {outcome.usage.note}")
-    elif judged is None or judged.output is None:
-        typer.echo(f"Answer not usable: {judged.error if judged else 'empty'}")
-    else:
-        headline = {p.talent_id: p.standardized_headline or "" for p in profiles}
-        out = judged.output
-        counts = {
-            v: sum(1 for x in out.verdicts if x.verdict == v) for v in ("fit", "partial", "no")
-        }
-        typer.echo(
-            f"Verdicts: {counts['fit']} fit · {counts['partial']} partial · {counts['no']} no"
-            + (" · no_fit" if out.no_fit else "")
-        )
-        for rank, m in enumerate(out.top, start=1):
-            tid = roster.aliases.get(m.alias, m.alias)
-            verdict = next((v.verdict for v in out.verdicts if v.alias == m.alias), "?")
-            typer.echo(f"  {rank}. {m.fit_score:>3} {verdict:<7} {tid}  {headline.get(tid, '')}")
-            if m.requirements_missing:
-                typer.echo(f"       missing: {'; '.join(m.requirements_missing)}")
-            for flag in m.red_flags:
-                typer.echo(f"       flag ({flag.kind}): {flag.detail}")
-            typer.echo(f"       evidence kept: {len(m.evidence)}")
-        for problem in judged.problems:
-            typer.echo(f"  problem: {problem}")
-        for alias, quotes in judged.unverified.items():
-            tid = roster.aliases.get(alias, alias)
-            typer.echo(f"  unverified evidence removed for {tid}: {len(quotes)} quote(s)")
-    typer.echo(f"Saved to {path}")
-    if outcome.response is None or judged is None or judged.output is None:
+    if isinstance(outcome, str):
+        typer.echo(f"Stopped: {outcome}")
         raise typer.Exit(1)
+    if outcome is None or outcome.judged is None or outcome.judged.output is None:
+        typer.echo("No usable answer (see above).")
+        raise typer.Exit(1)
+    judged = outcome.judged
+    if outcome.review_model:
+        typer.echo(f"Deep review by {outcome.review_model}")
+    headline = {p.talent_id: p.standardized_headline or "" for p in profiles}
+    out = judged.output
+    counts = {v: sum(1 for x in out.verdicts if x.verdict == v) for v in ("fit", "partial", "no")}
+    typer.echo(
+        f"Screening: {counts['fit']} fit · {counts['partial']} partial · {counts['no']} no"
+        + (" · no_fit" if out.no_fit else "")
+    )
+    for rank, m in enumerate(out.top, start=1):
+        tid = roster.aliases.get(m.alias, m.alias)
+        screened = next((v.verdict for v in out.verdicts if v.alias == m.alias), "?")
+        verdict = m.verdict or screened  # the deep review's verdict wins
+        typer.echo(f"  {rank}. {m.fit_score:>3} {verdict:<7} {tid}  {headline.get(tid, '')}")
+        for row in m.meets:
+            typer.echo(f"       meets: {row.skill}  →  {row.requirement}")
+            typer.echo(f'              [job: "{row.requirement_quote}"]')
+        if m.requirements_missing:
+            typer.echo(f"       missing: {'; '.join(m.requirements_missing)}")
+        for flag in m.red_flags:
+            typer.echo(f"       flag ({flag.kind}): {flag.detail}")
+    for problem in judged.problems:
+        typer.echo(f"  problem: {problem}")
+    for alias, quotes in judged.unverified.items():
+        tid = roster.aliases.get(alias, alias)
+        typer.echo(f"  rows not found in the texts, removed for {tid}: {len(quotes)}")
+        for removed in quotes:
+            typer.echo(f"       removed {removed}")
+    typer.echo(f"Saved to {folder / (item.key + '.json')}")
 
 
 def _default_labels(settings: Settings) -> Path:
@@ -761,9 +772,9 @@ def llm_judge(
     calls = min(len(todo), max_calls) if max_calls else len(todo)
     per_call = int(statistics.median(p.call.estimated_total_tokens for p in plan))
     ledger = UsageLedger(loader.llm_usage)
-    check = check_run(llm.limits, llm.budget, ledger.today(), calls, per_call)
+    check = check_run(llm.limits, llm.budget, ledger.today(model=llm.model), calls, per_call)
     typer.echo(
-        f"{len(plan)} job(s): {len(plan) - len(todo)} already judged (cached) · {calls} call(s) "
+        f"{len(plan)} job(s): {len(plan) - len(todo)} already judged (cached) · {calls} job(s) "
         f"to make · about {per_call:,} tokens each, {calls * per_call:,} in all"
     )
     typer.echo(f"Budget: {check.verdict.upper()} · {check.message}")
@@ -784,8 +795,9 @@ def llm_judge(
         f"{report.cached} cached · tokens in {report.input_tokens:,} · out "
         f"{report.output_tokens:,} · total {report.total_tokens:,}"
     )
-    today = ledger.today()
-    typer.echo(f"Today: {today.requests}/{llm.limits.rpd} requests · {today.tokens:,} tokens")
+    from jobmatch.pipeline import echo_today
+
+    echo_today(llm, ledger, typer.echo)
     if report.stopped:
         typer.echo(f"Stopped early: {report.stopped}")
     log.info("llm_judge", extra={"fields": report.model_dump()})

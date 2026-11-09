@@ -108,11 +108,30 @@ class LlmPrefilterSettings(StrictModel):
 
 
 class LlmSettings(StrictModel):
+    """v12 (2026-11-08, user design): two calls per job. `model` screens every contractor and
+    shortlists up to top_k; the first model in `review_models` with quota left reviews that
+    shortlist in depth, falling back down the list when one reaches its daily limit."""
+
     provider: Literal["gemini"]
-    model: str = Field(min_length=1)
+    model: str = Field(min_length=1)  # the screening model (the one with the largest quota)
+    # Deep-review models, strongest first. Empty: `model` reviews too.
+    review_models: list[str] = []
+    # Jobs reviewed per review call (v15). The strong models' daily limits count requests, so
+    # 2 jobs per call doubles the jobs reviewed per day.
+    review_batch_size: int = Field(default=1, ge=1, le=6)
+    # Thinking level for review calls only (Gemini 3); null: the same as thinking_level.
+    review_thinking_level: Literal["minimal", "low", "medium", "high"] | None = None
+    # Thinking level per model, overriding thinking_level for that model wherever it runs
+    # (screening or review). User decision 2026-11-09: gemini-3.5-flash-lite at "high".
+    model_thinking: dict[str, Literal["minimal", "low", "medium", "high"]] = {}
+    # Free-tier limits per model; a model not listed uses `limits`.
+    model_limits: dict[str, LlmLimits] = {}
     base_url: str = Field(min_length=1)
     api_key_env: str = Field(min_length=1)  # name of the variable in .env, never the key
     temperature: float = Field(ge=0, le=2)
+    # A fixed seed makes answers more repeatable (Google: best effort, not guaranteed).
+    # null sends none.
+    seed: int | None = None
     max_output_tokens: int = Field(gt=0)
     # Gemini 2.5 models take a thinking budget (0 = off); Gemini 3 models a thinking level.
     # Leave both null to use the model's default.
@@ -135,6 +154,37 @@ class LlmSettings(StrictModel):
             raise ValueError("set llm.thinking_budget or llm.thinking_level, not both")
         return self
 
+    @property
+    def review_chain(self) -> list[str]:
+        return list(self.review_models) or [self.model]
+
+    def for_model(self, model: str) -> "LlmSettings":
+        """These settings for one model: its name, its own limits and its own thinking level
+        (model_thinking), when set."""
+        update: dict = {"model": model, "limits": self.model_limits.get(model, self.limits)}
+        if model in self.model_thinking:
+            update |= {"thinking_level": self.model_thinking[model], "thinking_budget": None}
+        return self.model_copy(update=update)
+
+
+class ScoreBands(StrictModel):
+    """Lowest fit_score of each colour band on the results screen (user decision
+    2026-11-08): strong = darker green, good = green, some = yellow, below = light yellow."""
+
+    strong: int = Field(default=90, ge=0, le=100)
+    good: int = Field(default=70, ge=0, le=100)
+    some: int = Field(default=40, ge=0, le=100)
+
+    @model_validator(mode="after")
+    def _descending(self) -> "ScoreBands":
+        if not self.strong > self.good > self.some:
+            raise ValueError("app.score_bands: need strong > good > some")
+        return self
+
+
+class AppSettings(StrictModel):
+    score_bands: ScoreBands = ScoreBands()
+
 
 class Settings(StrictModel):
     schema_version: Literal[1]
@@ -144,6 +194,7 @@ class Settings(StrictModel):
     normalize: NormalizeSettings
     logging: LoggingSettings
     llm: LlmSettings | None = None  # v1; None when settings.yaml has no llm section
+    app: AppSettings = AppSettings()  # the desktop app's screens
 
 
 # ---- taxonomies ----

@@ -17,7 +17,7 @@ Project: **jobmatch**, a local pipeline that finds Canadian contract job posting
 
 > ## Update for V1: for the matching framework. This prototype version will be offloading the matching process to Gemini API. Only use Gemini API (referred to as API). For each call to Gemini API, report back the token usage, and flag potential calls that would drain all token allotment for the day
 1. Detach the old matcher (v0) from the pipeline, and connect to it the API pipeline. You are to never use the old matcher (v0) anywhere for v1
-2. For the contractor's details being sent to the API, abstract their personal details (if any), the only thing matters for matching is related to their assets and skillsets, professional field, targeted positions. Their names + address + phone number must be omitted
+2. For the contractor's details being sent to the API, abstract their personal details (if any), the only thing matters for matching is related to their assets and skillsets, professional field, targeted positions. Their names + address + phone number must be omitted, but professional proof points, executive summary, city (only city + province) are allowed
 
 ## Cost estimate format (rule 3)
 
@@ -25,7 +25,7 @@ Before starting work, report:
 - **Scope:** files to create or change, and the rough size of the change (small / medium / large).
 - **New dependencies:** packages or models, with approximate disk size.
 - **External calls:** number of job-board or free-LLM calls expected, and the rate-limit budget they use (target: zero for most changes).
-- **Local compute:** extra embedding, LLM or database load, and expected runtime.
+- **Local compute:** LLM or database load, and expected runtime.
 - **Storage:** database or file growth.
 - **Risks:** anything that could break existing behavior.
 
