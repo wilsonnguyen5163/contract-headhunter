@@ -1,4 +1,10 @@
+import os
 import sys
+
+# Fallback to offscreen platform in headless CI environments
+if not os.environ.get("DISPLAY") and sys.platform.startswith("linux"):
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+
 from PyQt6.QtCore import Qt, QPropertyAnimation, QRectF, QPointF
 from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import (
@@ -21,47 +27,38 @@ COLOR_FIT_YELLOW_BG = "#FFF8E6"
 COLOR_FIT_RED = "#A31233"
 COLOR_FIT_RED_BG = "#FDE8EC"
 
-# Modern stylesheet definitions matching the web engine UI
 STYLE_SHEET = f"""
     QWidget#CentralWidget {{
         background-color: {COLOR_PURPLE};
     }}
-
     .Card {{
         background-color: {COLOR_WHITE};
         border-radius: 24px;
     }}
-
     .SectionBox {{
         border: 1.5px solid {COLOR_BORDER};
         border-radius: 16px;
         background-color: #FFFFFF;
     }}
-
     .ResultCard {{
         border: 1.5px solid {COLOR_BORDER};
         border-radius: 16px;
         background-color: #FFFFFF;
     }}
-
     QLabel.H1 {{
         color: #1A1A1A;
         font-size: 24px;
         font-weight: 800;
     }}
-
     QLabel.Subtitle {{
         color: {COLOR_GREY};
         font-size: 14px;
     }}
-
     QLabel.SectionTitle {{
         color: {COLOR_PURPLE};
         font-size: 16px;
         font-weight: 700;
     }}
-
-    /* Buttons */
     QPushButton.BtnPrimary {{
         background-color: {COLOR_PURPLE};
         color: #FFFFFF;
@@ -74,7 +71,6 @@ STYLE_SHEET = f"""
     QPushButton.BtnPrimary:hover {{
         background-color: {COLOR_DARK_PURPLE};
     }}
-
     QPushButton.BtnTransparent {{
         background-color: rgba(93, 59, 161, 0.1);
         color: {COLOR_PURPLE};
@@ -87,7 +83,6 @@ STYLE_SHEET = f"""
     QPushButton.BtnTransparent:hover {{
         background-color: rgba(93, 59, 161, 0.2);
     }}
-
     QPushButton.NavTab {{
         background-color: rgba(255, 255, 255, 0.15);
         color: #FFFFFF;
@@ -101,8 +96,6 @@ STYLE_SHEET = f"""
         background-color: #FFFFFF;
         color: {COLOR_PURPLE};
     }}
-
-    /* Action Buttons */
     QPushButton#BtnApprove {{
         background-color: {COLOR_FIT_GREEN};
         color: white;
@@ -127,8 +120,6 @@ STYLE_SHEET = f"""
         padding: 8px 16px;
         border: none;
     }}
-
-    /* Badges */
     QLabel.BadgeApprove {{
         background-color: {COLOR_FIT_GREEN_BG};
         color: {COLOR_FIT_GREEN};
@@ -137,7 +128,6 @@ STYLE_SHEET = f"""
         font-weight: 700;
         padding: 4px 10px;
     }}
-
     QLineEdit {{
         border: 1px solid {COLOR_BORDER};
         border-radius: 8px;
@@ -148,7 +138,6 @@ STYLE_SHEET = f"""
 
 
 class AnimatedInfinityLogo(QWidget):
-    """Custom paint widget rendering the animated swinging infinity icon."""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedSize(36, 20)
@@ -176,7 +165,6 @@ class AnimatedInfinityLogo(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
         painter.translate(self.width() / 2, self.height() / 2)
         painter.rotate(self._angle)
         painter.translate(-self.width() / 2, -self.height() / 2)
@@ -192,7 +180,6 @@ class AnimatedInfinityLogo(QWidget):
         path.cubicTo(34, 18, 22.3, 18, 18, 10)
         path.cubicTo(13.7, 2, 2, 2, 2, 10)
         path.cubicTo(2, 18, 13.7, 18, 18, 10)
-
         painter.drawPath(path)
 
 
@@ -203,14 +190,12 @@ class MainWindow(QWidget):
         self.resize(900, 750)
         self.setObjectName("CentralWidget")
         self.setStyleSheet(STYLE_SHEET)
-
         self.init_ui()
 
     def init_ui(self):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(20, 20, 20, 20)
 
-        # 1. Header & Brand Title
         header_layout = QVBoxLayout()
         header_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -221,7 +206,6 @@ class MainWindow(QWidget):
         lbl_do.setStyleSheet("font-size: 28px; font-weight: 900; color: #FFFFFF;")
        
         self.logo = AnimatedInfinityLogo()
-
         lbl_d = QLabel("d")
         lbl_d.setStyleSheet("font-size: 28px; font-weight: 900; color: #FFFFFF;")
 
@@ -237,7 +221,6 @@ class MainWindow(QWidget):
         header_layout.addWidget(lbl_sub)
         main_layout.addLayout(header_layout)
 
-        # 2. Navigation Tabs
         nav_layout = QHBoxLayout()
         nav_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         nav_layout.setSpacing(12)
@@ -262,7 +245,6 @@ class MainWindow(QWidget):
         main_layout.addLayout(nav_layout)
         main_layout.addSpacing(10)
 
-        # 3. Central Stacked Content Area
         self.stack = QStackedWidget()
         self.stack.addWidget(self.create_find_tab())
         self.stack.addWidget(self.create_results_tab())
@@ -270,7 +252,6 @@ class MainWindow(QWidget):
 
         main_layout.addWidget(self.stack)
 
-        # 4. Fallback Sticky Bottom Bar
         self.fallback_bar = QFrame(self)
         self.fallback_bar.setStyleSheet(f"""
             QFrame {{
@@ -294,7 +275,6 @@ class MainWindow(QWidget):
         main_layout.addWidget(self.fallback_bar, alignment=Qt.AlignmentFlag.AlignCenter)
 
     def create_card_frame(self):
-        """Helper to create stylized card container."""
         card = QFrame()
         card.setProperty("class", "Card")
         shadow = QGraphicsDropShadowEffect()
@@ -318,7 +298,6 @@ class MainWindow(QWidget):
         layout.addWidget(lbl_sub)
         layout.addSpacing(10)
 
-        # Section 1: Contractors
         sec1 = QFrame()
         sec1.setProperty("class", "SectionBox")
         sec1_layout = QVBoxLayout(sec1)
@@ -335,7 +314,6 @@ class MainWindow(QWidget):
         sec1_layout.addWidget(btn_browse1, alignment=Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(sec1)
 
-        # Section 2: Jobs
         sec2 = QFrame()
         sec2.setProperty("class", "SectionBox")
         sec2_layout = QVBoxLayout(sec2)
@@ -352,7 +330,6 @@ class MainWindow(QWidget):
         sec2_layout.addWidget(btn_browse2, alignment=Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(sec2)
 
-        # Scan Button
         btn_scan = QPushButton("🔍 FIND MATCHES")
         btn_scan.setProperty("class", "BtnPrimary")
         btn_scan.clicked.connect(self.trigger_scan)
@@ -379,7 +356,6 @@ class MainWindow(QWidget):
         layout.addWidget(lbl_sub)
         layout.addSpacing(10)
 
-        # Result Details Card
         res_card = QFrame()
         res_card.setProperty("class", "ResultCard")
         res_layout = QVBoxLayout(res_card)
@@ -481,7 +457,6 @@ class MainWindow(QWidget):
         QFileDialog.getOpenFileName(self, "Select File")
 
     def trigger_scan(self):
-        # Display Results Overlay Popup
         dialog = ScanCompleteDialog(self)
         if dialog.exec():
             self.switch_tab(1)
@@ -491,7 +466,6 @@ class MainWindow(QWidget):
 
 
 class ScanCompleteDialog(QWidget):
-    """Modal Overlay for showing scan complete status."""
     def __init__(self, parent=None):
         super().__init__(parent, Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
