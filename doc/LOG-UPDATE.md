@@ -52,6 +52,7 @@ The strong reviewer (`gemini-3.6-flash`) allows about 20 requests a day on the f
   - Re-run with a new API key: screenings reused; 10 review calls, all on 3.6 Flash, 113,149 tokens, 410 s.
   - **80% verdict agreement** with the benchmark, and **86%** with the earlier test of the same setup (its run-to-run variation). The project manager job is partial again.
   - A full run takes about 33 s per job.
+  - **Decision report:** [reports/2026-11-09-final-matching-setup.md](reports/2026-11-09-final-matching-setup.md) covers the setup, results, time and cost, why it was chosen, and open items.
 - Details are in the run report: [reports/2026-11-08-matching-run-v14.md](reports/2026-11-08-matching-run-v14.md).
 
 ### How to use
