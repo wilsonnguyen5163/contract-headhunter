@@ -1,416 +1,567 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
- <meta charset="utf-8">
- <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
- <title>do good talent · Desktop Matching Engine</title>
- <style>
-   :root {
-     --bg-purple: #5D3BA1;
-     --card-white: #FEFEFD;
-     --accent-magenta: #884596;
-     --text-black: #1A1A1A;
-     --text-grey: #6B6280;
-     --border-line: #E4DFF0;
+import sys
+from PyQt6.QtCore import Qt, QPropertyAnimation, QRectF, QPointF
+from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PyQt6.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QPushButton, QStackedWidget, QFrame, QGraphicsDropShadowEffect,
+    QFileDialog, QLineEdit
+)
 
-     /* Darker shade status colors for Results */
-     --fit-green: #1B7A43;
-     --fit-green-bg: #E3F4EB;
-     --fit-yellow: #B8860B;
-     --fit-yellow-bg: #FFF8E6;
-     --fit-red: #A31233;
-     --fit-red-bg: #FDE8EC;
-   }
+# Color Palette matching CSS variables
+COLOR_PURPLE = "#5D3BA1"
+COLOR_DARK_PURPLE = "#4A2E83"
+COLOR_WHITE = "#FEFEFD"
+COLOR_GREY = "#6B6280"
+COLOR_BORDER = "#E4DFF0"
 
-   * { box-sizing: border-box; margin: 0; padding: 0; }
+COLOR_FIT_GREEN = "#1B7A43"
+COLOR_FIT_GREEN_BG = "#E3F4EB"
+COLOR_FIT_YELLOW = "#B8860B"
+COLOR_FIT_YELLOW_BG = "#FFF8E6"
+COLOR_FIT_RED = "#A31233"
+COLOR_FIT_RED_BG = "#FDE8EC"
 
-   body {
-     background-color: var(--bg-purple);
-     color: var(--text-black);
-     font-family: "Inter", system-ui, -apple-system, sans-serif;
-     min-height: 100vh;
-     position: relative;
-     overflow-x: hidden;
-   }
+# Modern stylesheet definitions matching the web engine UI
+STYLE_SHEET = f"""
+    QWidget#CentralWidget {{
+        background-color: {COLOR_PURPLE};
+    }}
 
-   /* Background Circles */
-   .bg-deco {
-     position: fixed;
-     inset: 0;
-     pointer-events: none;
-     z-index: 0;
-   }
-   .bg-deco i {
-     position: absolute;
-     border-radius: 50%;
-     border: 2px solid rgba(255, 255, 255, 0.2);
-     background: rgba(136, 69, 150, 0.25);
-   }
+    .Card {{
+        background-color: {COLOR_WHITE};
+        border-radius: 24px;
+    }}
 
-   /* Header & Animated Infinity Logo */
-   header {
-     position: relative;
-     z-index: 2;
-     display: flex;
-     flex-direction: column;
-     align-items: center;
-     padding: 24px 20px 12px;
-   }
+    .SectionBox {{
+        border: 1.5px solid {COLOR_BORDER};
+        border-radius: 16px;
+        background-color: #FFFFFF;
+    }}
 
-   .brand-logo {
-     font-weight: 900;
-     font-size: 28px;
-     color: #FFFFFF;
-     letter-spacing: -0.03em;
-     text-align: center;
-     line-height: 1.1;
-     display: inline-flex;
-     flex-direction: column;
-     align-items: center;
-   }
+    .ResultCard {{
+        border: 1.5px solid {COLOR_BORDER};
+        border-radius: 16px;
+        background-color: #FFFFFF;
+    }}
 
-   .brand-title {
-     display: flex;
-     align-items: center;
-     gap: 4px;
-   }
+    QLabel.H1 {{
+        color: #1A1A1A;
+        font-size: 24px;
+        font-weight: 800;
+    }}
 
-   .infinity-symbol {
-     width: 32px;
-     height: 16px;
-     vertical-align: middle;
-     display: inline-block;
-     fill: none;
-     stroke: #FFFFFF;
-     stroke-width: 8px;
-     stroke-linecap: round;
-     stroke-linejoin: round;
-     animation: swing 3s ease-in-out infinite;
-     transform-origin: center;
-   }
+    QLabel.Subtitle {{
+        color: {COLOR_GREY};
+        font-size: 14px;
+    }}
 
-   /* 30 Degree Swinging Animation */
-   @keyframes swing {
-     0% { transform: rotate(0deg); }
-     25% { transform: rotate(30deg); }
-     50% { transform: rotate(0deg); }
-     75% { transform: rotate(-30deg); }
-     100% { transform: rotate(0deg); }
-   }
+    QLabel.SectionTitle {{
+        color: {COLOR_PURPLE};
+        font-size: 16px;
+        font-weight: 700;
+    }}
 
-   .brand-sub {
-     font-weight: 400;
-     opacity: 0.9;
-     font-size: 13px;
-     text-transform: lowercase;
-     letter-spacing: 0.06em;
-     margin-top: 2px;
-   }
+    /* Buttons */
+    QPushButton.BtnPrimary {{
+        background-color: {COLOR_PURPLE};
+        color: #FFFFFF;
+        border-radius: 14px;
+        font-weight: 700;
+        font-size: 14px;
+        padding: 12px 24px;
+        border: none;
+    }}
+    QPushButton.BtnPrimary:hover {{
+        background-color: {COLOR_DARK_PURPLE};
+    }}
 
-   /* Top Navigation Tabs */
-   nav.top-nav {
-     display: flex;
-     justify-content: center;
-     gap: 16px;
-     margin: 12px 0 20px;
-   }
-   .nav-tab {
-     background: rgba(255, 255, 255, 0.15);
-     color: #FFFFFF;
-     border: none;
-     padding: 8px 20px;
-     border-radius: 20px;
-     font-weight: 700;
-     font-size: 14px;
-     cursor: pointer;
-     transition: background 0.2s;
-   }
-   .nav-tab.active, .nav-tab:hover {
-     background: #FFFFFF;
-     color: var(--bg-purple);
-   }
+    QPushButton.BtnTransparent {{
+        background-color: rgba(93, 59, 161, 0.1);
+        color: {COLOR_PURPLE};
+        border-radius: 14px;
+        font-weight: 700;
+        font-size: 14px;
+        padding: 10px 20px;
+        border: none;
+    }}
+    QPushButton.BtnTransparent:hover {{
+        background-color: rgba(93, 59, 161, 0.2);
+    }}
 
-   /* Main Container & Rounded Cards */
-   main {
-     position: relative;
-     z-index: 2;
-     max-width: 860px;
-     margin: 0 auto 40px;
-     padding: 0 16px;
-   }
+    QPushButton.NavTab {{
+        background-color: rgba(255, 255, 255, 0.15);
+        color: #FFFFFF;
+        border-radius: 16px;
+        font-weight: 700;
+        font-size: 13px;
+        padding: 8px 20px;
+        border: none;
+    }}
+    QPushButton.NavTab:hover, QPushButton.NavTab[active="true"] {{
+        background-color: #FFFFFF;
+        color: {COLOR_PURPLE};
+    }}
 
-   .card {
-     background: var(--card-white);
-     border-radius: 24px;
-     padding: 32px;
-     box-shadow: 0 20px 50px rgba(20, 8, 50, 0.35);
-     margin-bottom: 24px;
-   }
+    /* Action Buttons */
+    QPushButton#BtnApprove {{
+        background-color: {COLOR_FIT_GREEN};
+        color: white;
+        border-radius: 10px;
+        font-weight: 700;
+        padding: 8px 16px;
+        border: none;
+    }}
+    QPushButton#BtnReject {{
+        background-color: {COLOR_FIT_RED};
+        color: white;
+        border-radius: 10px;
+        font-weight: 700;
+        padding: 8px 16px;
+        border: none;
+    }}
+    QPushButton#BtnInfo {{
+        background-color: {COLOR_FIT_YELLOW};
+        color: white;
+        border-radius: 10px;
+        font-weight: 700;
+        padding: 8px 16px;
+        border: none;
+    }}
 
-   h1, h2 {
-     color: var(--text-black);
-     font-weight: 800;
-     margin-bottom: 8px;
-   }
-   p.subtitle {
-     color: var(--text-grey);
-     font-size: 15px;
-     margin-bottom: 20px;
-   }
+    /* Badges */
+    QLabel.BadgeApprove {{
+        background-color: {COLOR_FIT_GREEN_BG};
+        color: {COLOR_FIT_GREEN};
+        border-radius: 10px;
+        font-size: 12px;
+        font-weight: 700;
+        padding: 4px 10px;
+    }}
 
-   /* Form & Input Components */
-   .section-box {
-     border: 1.5px solid var(--border-line);
-     border-radius: 16px;
-     padding: 20px;
-     margin-bottom: 20px;
-     background: #FFFFFF;
-   }
-   .section-title {
-     font-size: 16px;
-     font-weight: 700;
-     color: var(--bg-purple);
-     margin-bottom: 6px;
-   }
+    QLineEdit {{
+        border: 1px solid {COLOR_BORDER};
+        border-radius: 8px;
+        padding: 8px;
+        font-size: 14px;
+    }}
+"""
 
-   .btn {
-     display: inline-flex;
-     align-items: center;
-     justify-content: center;
-     gap: 8px;
-     font-weight: 700;
-     font-size: 15px;
-     border: 2px solid var(--bg-purple);
-     background: var(--bg-purple);
-     color: #FFFFFF;
-     padding: 12px 24px;
-     border-radius: 14px;
-     cursor: pointer;
-     transition: background 0.15s, transform 0.15s;
-   }
-   .btn:hover {
-     background: #4A2E83;
-     transform: translateY(-1deg);
-   }
-   .btn.transparent {
-     background: rgba(93, 59, 161, 0.1);
-     color: var(--bg-purple);
-     border-color: transparent;
-   }
-   .btn.transparent:hover {
-     background: rgba(93, 59, 161, 0.2);
-   }
 
-   /* Results Specific Styling */
-   .result-card {
-     border: 1.5px solid var(--border-line);
-     border-radius: 16px;
-     padding: 20px;
-     margin-bottom: 16px;
-     background: #FFFFFF;
-   }
-   .badge {
-     display: inline-block;
-     padding: 4px 12px;
-     border-radius: 12px;
-     font-size: 13px;
-     font-weight: 700;
-   }
-   .badge-approve {
-     background: var(--fit-green-bg);
-     color: var(--fit-green);
-   }
-   .badge-needs-info {
-     background: var(--fit-yellow-bg);
-     color: var(--fit-yellow);
-   }
-   .badge-reject {
-     background: var(--fit-red-bg);
-     color: var(--fit-red);
-   }
+class AnimatedInfinityLogo(QWidget):
+    """Custom paint widget rendering the animated swinging infinity icon."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(36, 20)
+        self._angle = 0.0
 
-   .action-btn-group {
-     display: flex;
-     gap: 10px;
-     margin-top: 14px;
-   }
-   .btn-approve { background: var(--fit-green); border-color: var(--fit-green); }
-   .btn-reject { background: var(--fit-red); border-color: var(--fit-red); }
-   .btn-info { background: var(--fit-yellow); border-color: var(--fit-yellow); }
+        self.animation = QPropertyAnimation(self, b"angle", self)
+        self.animation.setDuration(3000)
+        self.animation.setStartValue(0.0)
+        self.animation.setKeyValueAt(0.25, 30.0)
+        self.animation.setKeyValueAt(0.50, 0.0)
+        self.animation.setKeyValueAt(0.75, -30.0)
+        self.animation.setEndValue(0.0)
+        self.animation.setLoopCount(-1)
+        self.animation.start()
 
-   /* Modal Overlay ("See Results" popup) */
-   .modal-overlay {
-     position: fixed;
-     inset: 0;
-     background: rgba(20, 8, 50, 0.7);
-     z-index: 100;
-     display: flex;
-     align-items: center;
-     justify-content: center;
-     padding: 20px;
-   }
-   .modal-card {
-     background: var(--card-white);
-     border-radius: 24px;
-     padding: 32px;
-     max-width: 480px;
-     width: 100%;
-     text-align: center;
-     box-shadow: 0 25px 50px rgba(0,0,0,0.3);
-   }
+    def get_angle(self):
+        return self._angle
 
-   /* Fallback Sticky Bottom Bar (when popup declined) */
-   .bottom-bar {
-     position: fixed;
-     bottom: 20px;
-     left: 50%;
-     transform: translateX(-50%);
-     background: var(--card-white);
-     border: 2px solid var(--bg-purple);
-     border-radius: 20px;
-     padding: 12px 24px;
-     box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-     z-index: 90;
-     display: flex;
-     align-items: center;
-     gap: 16px;
-   }
+    def set_angle(self, angle):
+        self._angle = angle
+        self.update()
 
-   .hidden { display: none !important; }
- </style>
-</head>
-<body>
+    angle = property(get_angle, set_angle)
 
- <!-- Decorative Background Circles -->
- <div class="bg-deco" aria-hidden="true">
-   <i style="width:220px;height:220px;left:-60px;top:10%"></i>
-   <i style="width:120px;height:120px;right:5%;top:5%"></i>
-   <i style="width:280px;height:280px;right:-100px;bottom:15%"></i>
-   <i style="width:90px;height:90px;left:10%;bottom:5%"></i>
- </div>
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
- <!-- Header with Swinging Infinity Logo -->
- <header>
-   <div class="brand-logo">
-     <div class="brand-title">
-       do g<svg class="infinity-symbol" viewBox="0 0 100 50"><path d="M50 25C62 5 95 5 95 25C95 45 62 45 50 25C38 5 5 5 5 25C5 45 38 45 50 25Z"/></svg>d
-     </div>
-     <span class="brand-sub">a talent company</span>
-   </div>
- </header>
+        painter.translate(self.width() / 2, self.height() / 2)
+        painter.rotate(self._angle)
+        painter.translate(-self.width() / 2, -self.height() / 2)
 
- <!-- Navigation -->
- <nav class="top-nav">
-   <button class="nav-tab active" onclick="showTab('find')">FIND MATCHES</button>
-   <button class="nav-tab" onclick="showTab('results')">RESULTS</button>
-   <button class="nav-tab" onclick="showTab('settings')">SETTINGS</button>
- </nav>
+        pen = QPen(QColor("#FFFFFF"), 3.5)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
 
- <main>
-   <!-- FIND MATCHES TAB -->
-   <div id="tab-find" class="tab-content">
-     <div class="card">
-       <h2>Find Talent Matches</h2>
-       <p class="subtitle">Upload contractors and job postings to scan for best fits.</p>
+        path = QPainterPath()
+        path.moveTo(18, 10)
+        path.cubicTo(22.3, 2, 34, 2, 34, 10)
+        path.cubicTo(34, 18, 22.3, 18, 18, 10)
+        path.cubicTo(13.7, 2, 2, 2, 2, 10)
+        path.cubicTo(2, 18, 13.7, 18, 18, 10)
 
-       <div class="section-box">
-         <div class="section-title">1. Contractors (optional)</div>
-         <p class="subtitle">Select your contractor CSV or text file.</p>
-         <button class="btn transparent">Browse File...</button>
-       </div>
+        painter.drawPath(path)
 
-       <div class="section-box">
-         <div class="section-title">2. Jobs</div>
-         <p class="subtitle">Select your job descriptions file (.txt, .pdf).</p>
-         <button class="btn transparent">Browse File...</button>
-       </div>
 
-       <button class="btn" style="width: 100%; margin-top: 10px;" onclick="triggerScan()">🔍 FIND MATCHES</button>
-     </div>
-   </div>
+class MainWindow(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("do good talent · Desktop Matching Engine")
+        self.resize(900, 750)
+        self.setObjectName("CentralWidget")
+        self.setStyleSheet(STYLE_SHEET)
 
-   <!-- RESULTS TAB -->
-   <div id="tab-results" class="tab-content hidden">
-     <div class="card">
-       <h2>Match Results</h2>
-       <p class="subtitle">1 job with clear fits · 0 to check by hand</p>
+        self.init_ui()
 
-       <div class="result-card">
-         <div style="display:flex; justify-shadow:space-between; align-items:center; margin-bottom:8px;">
-           <h3>Content Producer</h3>
-           <span class="badge badge-approve">Clear Fit</span>
-         </div>
-         <p class="subtitle">Alexandra Rabbitte Hughes · Social Media Strategy & Community Lead (Score: 80)</p>
-         <p style="font-size:14px; margin: 8px 0; color: var(--text-grey);">Matches social media strategy, execution, and community management.</p>
+    def init_ui(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(20, 20, 20, 20)
 
-         <div class="action-btn-group">
-           <button class="btn btn-approve">✓ Approve</button>
-           <button class="btn btn-reject">✕ Reject</button>
-           <button class="btn btn-info">? Needs Info</button>
-         </div>
-       </div>
-     </div>
-   </div>
+        # 1. Header & Brand Title
+        header_layout = QVBoxLayout()
+        header_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-   <!-- SETTINGS TAB -->
-   <div id="tab-settings" class="tab-content hidden">
-     <div class="card">
-       <h2>Settings</h2>
-       <p class="subtitle">Manage API Keys and environment settings.</p>
+        title_container = QHBoxLayout()
+        title_container.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-       <div class="section-box">
-         <div class="section-title">Gemini API Key</div>
-         <p class="subtitle">Paste your Google AI Studio API key below.</p>
-         <button class="btn">Save Key</button>
-       </div>
-     </div>
-   </div>
- </main>
+        lbl_do = QLabel("do g")
+        lbl_do.setStyleSheet("font-size: 28px; font-weight: 900; color: #FFFFFF;")
+       
+        self.logo = AnimatedInfinityLogo()
 
- <!-- OVERLAY POPUP: Triggered after matching scan completes -->
- <div id="results-modal" class="modal-overlay hidden">
-   <div class="modal-card">
-     <h2 style="color: var(--bg-purple);">Scan Complete!</h2>
-     <p class="subtitle" style="margin: 12px 0 24px;">Matches have been calculated using Gemini AI.</p>
-     <div style="display: flex; gap: 12px; justify-content: center;">
-       <button class="btn" onclick="acceptModal()">See Results</button>
-       <button class="btn transparent" onclick="declineModal()">Decline</button>
-     </div>
-   </div>
- </div>
+        lbl_d = QLabel("d")
+        lbl_d.setStyleSheet("font-size: 28px; font-weight: 900; color: #FFFFFF;")
 
- <!-- FALLBACK STICKY BOTTOM BAR (Visible if Modal is Declined) -->
- <div id="fallback-bar" class="bottom-bar hidden">
-   <span style="font-weight: 700; color: var(--bg-purple); font-size: 14px;">Results ready</span>
-   <button class="btn" onclick="showTab('results')">See Results</button>
- </div>
+        title_container.addWidget(lbl_do)
+        title_container.addWidget(self.logo)
+        title_container.addWidget(lbl_d)
 
- <script>
-   function showTab(tabName) {
-     document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-     document.querySelectorAll('.nav-tab').forEach(el => el.classList.remove('active'));
+        lbl_sub = QLabel("a talent company")
+        lbl_sub.setStyleSheet("font-size: 13px; color: rgba(255,255,255,0.9); font-weight: 400;")
+        lbl_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-     document.getElementById('tab-' + tabName).classList.remove('hidden');
-     event.target.classList.add('active');
-   }
+        header_layout.addLayout(title_container)
+        header_layout.addWidget(lbl_sub)
+        main_layout.addLayout(header_layout)
 
-   function triggerScan() {
-     // Simulate scan process, then pop overlay
-     setTimeout(() => {
-       document.getElementById('results-modal').classList.remove('hidden');
-     }, 300);
-   }
+        # 2. Navigation Tabs
+        nav_layout = QHBoxLayout()
+        nav_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        nav_layout.setSpacing(12)
 
-   function acceptModal() {
-     document.getElementById('results-modal').classList.add('hidden');
-     document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-     document.getElementById('tab-results').classList.remove('hidden');
-   }
+        self.btn_tab_find = QPushButton("FIND MATCHES")
+        self.btn_tab_find.setProperty("class", "NavTab")
+        self.btn_tab_find.setProperty("active", "true")
+        self.btn_tab_find.clicked.connect(lambda: self.switch_tab(0))
 
-   function declineModal() {
-     document.getElementById('results-modal').classList.add('hidden');
-     document.getElementById('fallback-bar').classList.remove('hidden');
-   }
- </script>
-</body>
-</html>
+        self.btn_tab_results = QPushButton("RESULTS")
+        self.btn_tab_results.setProperty("class", "NavTab")
+        self.btn_tab_results.clicked.connect(lambda: self.switch_tab(1))
+
+        self.btn_tab_settings = QPushButton("SETTINGS")
+        self.btn_tab_settings.setProperty("class", "NavTab")
+        self.btn_tab_settings.clicked.connect(lambda: self.switch_tab(2))
+
+        nav_layout.addWidget(self.btn_tab_find)
+        nav_layout.addWidget(self.btn_tab_results)
+        nav_layout.addWidget(self.btn_tab_settings)
+
+        main_layout.addLayout(nav_layout)
+        main_layout.addSpacing(10)
+
+        # 3. Central Stacked Content Area
+        self.stack = QStackedWidget()
+        self.stack.addWidget(self.create_find_tab())
+        self.stack.addWidget(self.create_results_tab())
+        self.stack.addWidget(self.create_settings_tab())
+
+        main_layout.addWidget(self.stack)
+
+        # 4. Fallback Sticky Bottom Bar
+        self.fallback_bar = QFrame(self)
+        self.fallback_bar.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLOR_WHITE};
+                border: 2px solid {COLOR_PURPLE};
+                border-radius: 20px;
+            }}
+        """)
+        fallback_layout = QHBoxLayout(self.fallback_bar)
+        fallback_layout.setContentsMargins(20, 10, 20, 10)
+        lbl_status = QLabel("Results ready")
+        lbl_status.setStyleSheet(f"font-weight: 700; color: {COLOR_PURPLE}; font-size: 14px; border: none;")
+        btn_view = QPushButton("See Results")
+        btn_view.setProperty("class", "BtnPrimary")
+        btn_view.clicked.connect(lambda: self.switch_tab(1))
+       
+        fallback_layout.addWidget(lbl_status)
+        fallback_layout.addWidget(btn_view)
+       
+        self.fallback_bar.hide()
+        main_layout.addWidget(self.fallback_bar, alignment=Qt.AlignmentFlag.AlignCenter)
+
+    def create_card_frame(self):
+        """Helper to create stylized card container."""
+        card = QFrame()
+        card.setProperty("class", "Card")
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(40)
+        shadow.setColor(QColor(20, 8, 50, 90))
+        shadow.setOffsetY(10)
+        card.setGraphicsEffect(shadow)
+        return card
+
+    def create_find_tab(self):
+        card = self.create_card_frame()
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(32, 32, 32, 32)
+
+        lbl_title = QLabel("Find Talent Matches")
+        lbl_title.setProperty("class", "H1")
+        lbl_sub = QLabel("Upload contractors and job postings to scan for best fits.")
+        lbl_sub.setProperty("class", "Subtitle")
+
+        layout.addWidget(lbl_title)
+        layout.addWidget(lbl_sub)
+        layout.addSpacing(10)
+
+        # Section 1: Contractors
+        sec1 = QFrame()
+        sec1.setProperty("class", "SectionBox")
+        sec1_layout = QVBoxLayout(sec1)
+        sec1_title = QLabel("1. Contractors (optional)")
+        sec1_title.setProperty("class", "SectionTitle")
+        sec1_sub = QLabel("Select your contractor CSV or text file.")
+        sec1_sub.setProperty("class", "Subtitle")
+        btn_browse1 = QPushButton("Browse File...")
+        btn_browse1.setProperty("class", "BtnTransparent")
+        btn_browse1.clicked.connect(self.browse_file)
+
+        sec1_layout.addWidget(sec1_title)
+        sec1_layout.addWidget(sec1_sub)
+        sec1_layout.addWidget(btn_browse1, alignment=Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(sec1)
+
+        # Section 2: Jobs
+        sec2 = QFrame()
+        sec2.setProperty("class", "SectionBox")
+        sec2_layout = QVBoxLayout(sec2)
+        sec2_title = QLabel("2. Jobs")
+        sec2_title.setProperty("class", "SectionTitle")
+        sec2_sub = QLabel("Select your job descriptions file (.txt, .pdf).")
+        sec2_sub.setProperty("class", "Subtitle")
+        btn_browse2 = QPushButton("Browse File...")
+        btn_browse2.setProperty("class", "BtnTransparent")
+        btn_browse2.clicked.connect(self.browse_file)
+
+        sec2_layout.addWidget(sec2_title)
+        sec2_layout.addWidget(sec2_sub)
+        sec2_layout.addWidget(btn_browse2, alignment=Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(sec2)
+
+        # Scan Button
+        btn_scan = QPushButton("🔍 FIND MATCHES")
+        btn_scan.setProperty("class", "BtnPrimary")
+        btn_scan.clicked.connect(self.trigger_scan)
+        layout.addSpacing(10)
+        layout.addWidget(btn_scan)
+        layout.addStretch()
+
+        wrapper = QWidget()
+        wrap_layout = QVBoxLayout(wrapper)
+        wrap_layout.addWidget(card)
+        return wrapper
+
+    def create_results_tab(self):
+        card = self.create_card_frame()
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(32, 32, 32, 32)
+
+        lbl_title = QLabel("Match Results")
+        lbl_title.setProperty("class", "H1")
+        lbl_sub = QLabel("1 job with clear fits · 0 to check by hand")
+        lbl_sub.setProperty("class", "Subtitle")
+
+        layout.addWidget(lbl_title)
+        layout.addWidget(lbl_sub)
+        layout.addSpacing(10)
+
+        # Result Details Card
+        res_card = QFrame()
+        res_card.setProperty("class", "ResultCard")
+        res_layout = QVBoxLayout(res_card)
+
+        res_header = QHBoxLayout()
+        res_job_title = QLabel("Content Producer")
+        res_job_title.setStyleSheet("font-size: 18px; font-weight: 800;")
+        badge = QLabel("Clear Fit")
+        badge.setProperty("class", "BadgeApprove")
+
+        res_header.addWidget(res_job_title)
+        res_header.addStretch()
+        res_header.addWidget(badge)
+
+        lbl_candidate = QLabel("Alexandra Rabbitte Hughes · Social Media Strategy & Community Lead (Score: 80)")
+        lbl_candidate.setProperty("class", "Subtitle")
+
+        lbl_desc = QLabel("Matches social media strategy, execution, and community management.")
+        lbl_desc.setStyleSheet(f"font-size: 14px; color: {COLOR_GREY}; margin: 8px 0;")
+
+        btn_group = QHBoxLayout()
+        btn_approve = QPushButton("✓ Approve")
+        btn_approve.setObjectName("BtnApprove")
+        btn_reject = QPushButton("✕ Reject")
+        btn_reject.setObjectName("BtnReject")
+        btn_info = QPushButton("? Needs Info")
+        btn_info.setObjectName("BtnInfo")
+
+        btn_group.addWidget(btn_approve)
+        btn_group.addWidget(btn_reject)
+        btn_group.addWidget(btn_info)
+        btn_group.addStretch()
+
+        res_layout.addLayout(res_header)
+        res_layout.addWidget(lbl_candidate)
+        res_layout.addWidget(lbl_desc)
+        res_layout.addLayout(btn_group)
+
+        layout.addWidget(res_card)
+        layout.addStretch()
+
+        wrapper = QWidget()
+        wrap_layout = QVBoxLayout(wrapper)
+        wrap_layout.addWidget(card)
+        return wrapper
+
+    def create_settings_tab(self):
+        card = self.create_card_frame()
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(32, 32, 32, 32)
+
+        lbl_title = QLabel("Settings")
+        lbl_title.setProperty("class", "H1")
+        lbl_sub = QLabel("Manage API Keys and environment settings.")
+        lbl_sub.setProperty("class", "Subtitle")
+
+        layout.addWidget(lbl_title)
+        layout.addWidget(lbl_sub)
+        layout.addSpacing(10)
+
+        sec = QFrame()
+        sec.setProperty("class", "SectionBox")
+        sec_layout = QVBoxLayout(sec)
+
+        sec_title = QLabel("Gemini API Key")
+        sec_title.setProperty("class", "SectionTitle")
+        sec_sub = QLabel("Paste your Google AI Studio API key below.")
+        sec_sub.setProperty("class", "Subtitle")
+
+        input_key = QLineEdit()
+        input_key.setEchoMode(QLineEdit.EchoMode.Password)
+        input_key.setPlaceholderText("Enter API Key...")
+
+        btn_save = QPushButton("Save Key")
+        btn_save.setProperty("class", "BtnPrimary")
+
+        sec_layout.addWidget(sec_title)
+        sec_layout.addWidget(sec_sub)
+        sec_layout.addWidget(input_key)
+        sec_layout.addWidget(btn_save, alignment=Qt.AlignmentFlag.AlignLeft)
+
+        layout.addWidget(sec)
+        layout.addStretch()
+
+        wrapper = QWidget()
+        wrap_layout = QVBoxLayout(wrapper)
+        wrap_layout.addWidget(card)
+        return wrapper
+
+    def switch_tab(self, index):
+        self.stack.setCurrentIndex(index)
+        tabs = [self.btn_tab_find, self.btn_tab_results, self.btn_tab_settings]
+        for i, tab in enumerate(tabs):
+            tab.setProperty("active", "true" if i == index else "false")
+            tab.style().unpolish(tab)
+            tab.style().polish(tab)
+
+    def browse_file(self):
+        QFileDialog.getOpenFileName(self, "Select File")
+
+    def trigger_scan(self):
+        # Display Results Overlay Popup
+        dialog = ScanCompleteDialog(self)
+        if dialog.exec():
+            self.switch_tab(1)
+            self.fallback_bar.hide()
+        else:
+            self.fallback_bar.show()
+
+
+class ScanCompleteDialog(QWidget):
+    """Modal Overlay for showing scan complete status."""
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.result_status = False
+
+        container = QFrame(self)
+        container.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLOR_WHITE};
+                border-radius: 24px;
+            }}
+        """)
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(30)
+        shadow.setColor(QColor(0, 0, 0, 100))
+        container.setGraphicsEffect(shadow)
+
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(32, 32, 32, 32)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        title = QLabel("Scan Complete!")
+        title.setStyleSheet(f"font-size: 22px; font-weight: 800; color: {COLOR_PURPLE};")
+        subtitle = QLabel("Matches have been calculated using Gemini AI.")
+        subtitle.setStyleSheet(f"color: {COLOR_GREY}; font-size: 14px; margin: 12px 0 24px;")
+
+        btn_layout = QHBoxLayout()
+        btn_see = QPushButton("See Results")
+        btn_see.setProperty("class", "BtnPrimary")
+        btn_see.setStyleSheet(STYLE_SHEET)
+        btn_see.clicked.connect(self.accept)
+
+        btn_decline = QPushButton("Decline")
+        btn_decline.setProperty("class", "BtnTransparent")
+        btn_decline.setStyleSheet(STYLE_SHEET)
+        btn_decline.clicked.connect(self.reject)
+
+        btn_layout.addWidget(btn_see)
+        btn_layout.addWidget(btn_decline)
+
+        layout.addWidget(title, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(subtitle, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addLayout(btn_layout)
+
+        main_l = QVBoxLayout(self)
+        main_l.addWidget(container)
+        self.setFixedSize(440, 220)
+
+    def exec(self):
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.show()
+        self.loop = Qt.QEventLoop()
+        self.loop.exec()
+        return self.result_status
+
+    def accept(self):
+        self.result_status = True
+        self.close()
+        self.loop.quit()
+
+    def reject(self):
+        self.result_status = False
+        self.close()
+        self.loop.quit()
+
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())
+
+
