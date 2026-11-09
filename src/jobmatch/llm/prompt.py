@@ -67,7 +67,11 @@ from jobmatch.llm.provider import LlmRequest
 # taken as given; screening shortlists "partial" when unsure.
 # v14 (2026-11-08): eligibility flags only when the job text states the condition (v13 added
 # "confirm eligibility to work in Canada" to every candidate).
-PROMPT_VERSION = "2026-11-08.v14"
+# v15 (2026-11-09): reviews in batches (llm.review_batch_size jobs per call, user decision:
+# 2 to start): each job with its own shortlist, judged against that job only. Separate
+# version for the screening (unchanged since v14), so a review change never re-screens.
+SCREEN_VERSION = "2026-11-08.v14"  # the screening prompt and answer layout
+PROMPT_VERSION = "2026-11-09.v15"  # the whole judgment (screening + review)
 
 # fit_score range for each verdict, written into rule 3 and checked in check_output. They
 # match the results screen's colour bands (settings.yaml app.score_bands); change both
@@ -150,10 +154,12 @@ none fits, leave it empty. Never add someone just to reach the number. When unsu
 REVIEW_SYSTEM = (
     _INTRO
     + """
-Your task: the contractors below were shortlisted for this job. Review each of them in \
-depth, in "top", best first. For each, in this order: "reason", the "meets" table, the \
-requirements they miss, red flags, then the fit_score, then the "verdict", which follows \
-from the fit_score.
+Your task: each job below comes with the contractors shortlisted for it. In "jobs", give \
+one entry per job: its "job" id and, in "top", a deep review of each contractor shortlisted \
+for that job, best first. Judge each job's contractors against that job only: never use \
+another job's text, and never review a contractor for a job they were not shortlisted for. \
+For each contractor, in this order: "reason", the "meets" table, the requirements they \
+miss, red flags, then the fit_score, then the "verdict", which follows from the fit_score.
 The "reason" is exactly 2 sentences (at most 45 words). For "fit": why they fit, then what \
 is missing (if nothing, their strongest point for this job). For "partial": the part of the \
 job they fit, then what keeps them from a clear fit. For "no": why the gap is too big.
@@ -185,16 +191,22 @@ Screen every contractor above for this job. Shortlist at most {top_k}, only thos
 or partly fit.\
 """
 
-REVIEW_TEMPLATE = """\
-<job>
+REVIEW_JOB_TEMPLATE = """\
+<job id="{label}">
 {job}
 </job>
+"""
 
+REVIEW_TEMPLATE = """\
+{jobs}
 <contractors>
 {contractors}
 </contractors>
 
-Review each contractor above in depth for this job.\
+Shortlisted for each job:
+{shortlists}
+
+For each job, review its shortlisted contractors in depth, for that job only.\
 """
 
 
@@ -272,9 +284,20 @@ class ScreenOutput(_Answer):
 
 
 class ReviewOutput(_Answer):
-    """The deep-review call's answer (v12): one entry per shortlisted contractor."""
+    """One job's deep review: one entry per shortlisted contractor."""
 
     top: list[TopMatch]
+
+
+class JobReview(_Answer):
+    job: str  # the job's id in the request ("J1", "J2"...)
+    top: list[TopMatch]
+
+
+class ReviewBatchOutput(_Answer):
+    """The deep-review call's answer (v15): one entry per job of the batch."""
+
+    jobs: list[JobReview]
 
 
 class JudgeOutput(_Answer):
@@ -321,7 +344,7 @@ def screen_schema() -> dict[str, Any]:
 
 
 def review_schema() -> dict[str, Any]:
-    return _schema(ReviewOutput)
+    return _schema(ReviewBatchOutput)
 
 
 # ---- the request ----
@@ -339,13 +362,23 @@ class PreparedCall(BaseModel):
     estimated_total_tokens: int  # input plus expected output
 
     thinking: str = ""  # the thinking setting, part of the key: another setting, another answer
+    labels: dict[str, str] = {}  # review batches: "J1" -> job_id
+    review_thinking: str = ""  # llm.review_thinking_level, when set: part of the judgment key
+
+    def _key(self, model: str, version: str, extra: str = "") -> str:
+        parts = [model, version, self.thinking, self.job_hash, self.roster_hash]
+        raw = "|".join(parts + ([extra] if extra else []))
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
     def judge_key(self, model: str) -> str:
         """Same key = same question, same model, same thinking: no need to ask again. For a
-        job this is the screening call's key; the stored judgment (both calls) is filed
-        under it."""
-        raw = "|".join([model, PROMPT_VERSION, self.thinking, self.job_hash, self.roster_hash])
-        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+        job, the stored judgment (screening + review) is filed under it."""
+        return self._key(model, PROMPT_VERSION, self.review_thinking)
+
+    def screen_key(self, model: str) -> str:
+        """The screening answer's key: changes only with the screening prompt
+        (SCREEN_VERSION), so a review change never pays for a new screening."""
+        return self._key(model, SCREEN_VERSION)
 
 
 def _thinking(settings: LlmSettings) -> str:
@@ -373,8 +406,23 @@ def _prepare(
         roster_hash=roster.hash(),
         estimated_input_tokens=estimated,
         estimated_total_tokens=estimated + settings.payload.expected_output_tokens,
-        thinking=_thinking(settings),
+        # The screening model's own thinking (model_thinking can override thinking_level).
+        thinking=_thinking(settings.for_model(settings.model)),
+        review_thinking=_review_thinking(settings),
     )
+
+
+def _review_thinking(settings: LlmSettings) -> str:
+    """The thinking settings that shape the reviews, for the judgment key (another setting,
+    another judgment). Empty when neither is set, so older keys stay valid."""
+    parts = []
+    if settings.review_thinking_level:
+        parts.append(f"review={settings.review_thinking_level}")
+    if settings.model_thinking:
+        parts.append(
+            "models=" + ",".join(f"{m}:{t}" for m, t in sorted(settings.model_thinking.items()))
+        )
+    return ";".join(parts)
 
 
 def prepare_call(job: JobCard, roster: Roster, settings: LlmSettings) -> PreparedCall:
@@ -385,10 +433,24 @@ def prepare_call(job: JobCard, roster: Roster, settings: LlmSettings) -> Prepare
     return _prepare(job, roster, settings, SCREEN_SYSTEM, user, screen_schema())
 
 
-def prepare_review(job: JobCard, shortlisted: Roster, settings: LlmSettings) -> PreparedCall:
-    """The deep-review call: the job and only the shortlisted contractors."""
-    user = REVIEW_TEMPLATE.format(job=render_job(job), contractors=shortlisted.text())
-    return _prepare(job, shortlisted, settings, REVIEW_SYSTEM, user, review_schema())
+def prepare_review(
+    batch: list[tuple[JobCard, list[str]]], roster: Roster, settings: LlmSettings
+) -> PreparedCall:
+    """The deep-review call for a batch of jobs (v15): each job (labelled J1, J2...) with the
+    aliases shortlisted for it. Only the shortlisted contractors are sent, each once even
+    when shortlisted for more than one job."""
+    labels = {f"J{i}": card.job_id for i, (card, _) in enumerate(batch, start=1)}
+    jobs = "".join(
+        REVIEW_JOB_TEMPLATE.format(label=label, job=render_job(card))
+        for label, (card, _) in zip(labels, batch, strict=True)
+    )
+    shortlists = "\n".join(
+        f"{label}: {', '.join(aliases)}" for label, (_, aliases) in zip(labels, batch, strict=True)
+    )
+    sent = roster.subset({alias for _, aliases in batch for alias in aliases})
+    user = REVIEW_TEMPLATE.format(jobs=jobs, contractors=sent.text(), shortlists=shortlists)
+    call = _prepare(batch[0][0], sent, settings, REVIEW_SYSTEM, user, review_schema())
+    return call.model_copy(update={"job_ids": list(labels.values()), "labels": labels})
 
 
 # ---- structural checks ----

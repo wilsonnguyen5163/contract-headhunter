@@ -234,18 +234,28 @@ def _run(
             report.stopped = "not sent: the run needs a yes to use that much of today's quota"
             echo(report.stopped)
         else:
-            # 4. Gemini: one progress step per job (one "[llm] screen" line each; a review,
-            # when there is one, follows it)
-            sent = 0
-            progress(PROGRESS_IMPORTED, f"Asking Gemini: 0 of {calls}")
+            # 4. Gemini: every job is screened first (one "[llm] screen" line each), then the
+            # shortlists are reviewed in batches ("[llm] review" lines; at most one per batch,
+            # fewer when some jobs have nobody shortlisted). One progress step per line.
+            screened = reviewed = 0
+            batches = -(-calls // llm.review_batch_size)  # at most this many review calls
+            steps = calls + batches
+            progress(PROGRESS_IMPORTED, f"Screening jobs: 0 of {calls}")
 
             def echo_call(line: str) -> None:
-                nonlocal sent
+                nonlocal screened, reviewed
                 echo(line)
                 if line.startswith("[llm] screen"):
-                    sent += 1
-                    share = PROGRESS_IMPORTED + (PROGRESS_JUDGED - PROGRESS_IMPORTED) * sent / calls
-                    progress(min(share, PROGRESS_JUDGED), f"Asking Gemini: {sent} of {calls}")
+                    screened += 1
+                    label = f"Screening jobs: {screened} of {calls}"
+                elif line.startswith("[llm] review"):
+                    reviewed += 1
+                    label = f"Deep reviews: {reviewed} of up to {batches}"
+                else:
+                    return
+                done = screened + reviewed
+                share = PROGRESS_IMPORTED + (PROGRESS_JUDGED - PROGRESS_IMPORTED) * done / steps
+                progress(min(share, PROGRESS_JUDGED), label)
 
             report.judge = judge_jobs(
                 jobs, roster, llm, provider_factory(), ledger, folder, max_calls=calls,

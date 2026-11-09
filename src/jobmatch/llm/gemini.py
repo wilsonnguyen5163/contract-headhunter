@@ -122,11 +122,15 @@ class GeminiProvider:
         env = os.environ if env is None else env
         return cls(settings, env.get(settings.api_key_env, ""), client=client, sleep=sleep)
 
-    def with_model(self, model: str) -> "GeminiProvider":
-        """The same caller (key, HTTP client, settings) for another model of the chain."""
-        return GeminiProvider(
-            self.settings.for_model(model), self._key, client=self._client, sleep=self._sleep
-        )
+    def with_model(self, model: str, thinking_level: str | None = None) -> "GeminiProvider":
+        """The same caller (key, HTTP client, settings) for another model of the chain,
+        optionally with another thinking level (llm.review_thinking_level)."""
+        settings = self.settings.for_model(model)
+        if thinking_level is not None:
+            settings = settings.model_copy(
+                update={"thinking_level": thinking_level, "thinking_budget": None}
+            )
+        return GeminiProvider(settings, self._key, client=self._client, sleep=self._sleep)
 
     @property
     def url(self) -> str:

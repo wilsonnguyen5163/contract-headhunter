@@ -187,6 +187,18 @@ def test_with_model_keeps_the_key_and_settings_for_another_model() -> None:
     assert other.settings.temperature == first.settings.temperature
 
 
+def test_with_model_can_switch_the_thinking_level() -> None:
+    """llm.review_thinking_level: review calls may think harder than the screening."""
+    base = provider([(200, answer())], thinking_budget=None, thinking_level="medium")
+    review = base.with_model("gemini-3.6-flash", "high")
+    assert review.model == "gemini-3.6-flash"
+    assert build_body(review.settings, REQUEST)["generationConfig"]["thinkingConfig"] == {
+        "thinkingLevel": "high"
+    }
+    same = base.with_model("gemini-3.6-flash")
+    assert same.settings.thinking_level == "medium"
+
+
 def test_bad_request_fails_at_once_without_the_key() -> None:
     replies = [(400, {"error": {"message": "Invalid JSON payload"}})]
     with pytest.raises(LlmResponseError) as caught:

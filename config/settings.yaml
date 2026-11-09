@@ -59,6 +59,14 @@ llm:
     - gemini-3.6-flash
     - gemini-3-flash-preview
     - gemini-3.5-flash-lite
+  # Thinking per model, wherever it runs (screening or review); a model not listed uses
+  # thinking_level below. Empty since 2026-11-09 (user decision: back to the best-measured
+  # setup, Flash Lite screening at "medium" + 3.6 Flash reviews 2 per call = 86% agreement
+  # with the benchmark). Flash Lite at "high" everywhere measured 73-78%.
+  model_thinking: {}
+  # Jobs per review call (user decision 2026-11-09: start with 2). The strong models' daily
+  # limits count requests (3.6 Flash: about 20 a day), so 2 per call reviews about 40 jobs.
+  review_batch_size: 2
   # Per-model free-tier limits. GUESS: not published for these models; copy the real ones from
   # AI Studio. They pace calls and size the budget check; the switch to the next model happens
   # on Google's own "daily limit reached" answer, whatever these say.

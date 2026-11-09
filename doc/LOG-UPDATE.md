@@ -4,6 +4,66 @@ What each change solves, for the team. Newest first. Add an entry with every com
 
 ---
 
+## 2026-11-09 · Deep reviews in batches: 2 jobs per call (prompt v15)
+
+### What this solves
+The strong reviewer (`gemini-3.6-flash`) allows about 20 requests a day on the free tier, and its limit counts **requests, not tokens**. Reviewing 2 jobs per call doubles the jobs it can review in a day, to about 40, at no cost.
+- **New flow:**
+  1. Every new job is screened first (Flash Lite, one call per job, as before).
+  2. The jobs with a shortlist are reviewed **`llm.review_batch_size` per call** (now 2; user decision).
+- **One review call carries 2 postings** (labelled J1, J2), each with its own shortlist. A contractor shortlisted for both is sent once.
+  - The prompt tells the model to judge each job's contractors against that job only.
+  - The answer is split per job, and each job's "Meets" rows are checked against *its own* posting.
+  - Each job is saved separately, so the screen, shortlists and export are unchanged.
+- **If a batch answer leaves a job out, or the call fails,** only those jobs are retried next run. Their screening is reused. The fallback chain (3.6 Flash → 3 Flash → Flash Lite) works per batch.
+- **The screening has its own version number** (`SCREEN_VERSION`, still v14), so a change to the review never pays for a new screening. Existing v14 screenings are reused.
+- **Progress bar:** "Screening jobs: n of N", then "Deep reviews: n of up to M".
+
+### Test against the single-review benchmark
+- 19 jobs, reviewed **2 per call by 3.6 Flash, on the same screenings**: 10 calls, all answered, 111,987 tokens, 358 s.
+- **86% verdict agreement** with single reviews (Flash Lite alone: 71%). 20 of 23 job outcomes are the same. 0 "Meets" rows failed the check.
+- Slightly more generous near the 40-point cut-off: 6 no → partial.
+- Half the review requests, about 20% fewer tokens, the same time per job.
+- **3 per call was also tested:** 7 calls, 103,306 tokens.
+  - Only **76% agreement**. It was more lenient: 11 no → partial, fewer missing items listed, and 3 creative directors without video production rated fit for a video job.
+  - So the batch size stays at 2.
+- **3 per call with review thinking `high`** was tested too, using a new optional setting, `llm.review_thinking_level` (unset by default; it's part of each job's saved-answer key, so changing it re-reviews without re-screening).
+  - Only **70% agreement**, more generous (7 partial → fit), and the same creative-director mistake. 121,725 tokens, about 26 s per job.
+  - More thinking doesn't fix bigger batches.
+- **All Flash Lite (screening and review) at thinking `high`** was tested (34 calls, 483,543 tokens, about 35 s per job).
+  - **78% agreement**: better than Flash Lite reviewing at `medium` (71%), below 3.6 Flash in batches of 2 (86%).
+  - Its screening missed none of the benchmark's shown candidates.
+  - But it's more generous (+6.5 points), and it rated the marketing-programs project manager fit 72 for the IT project manager job again.
+  - Good as a fallback, not as the default.
+- **Flash Lite now thinks at `high` by default** (user decision), wherever it runs: screening, and review when it's the last fallback.
+  - This is the new per-model setting `llm.model_thinking`. Each model's thinking is part of the saved-answer keys, so **the next run re-screens and re-reviews the dev jobs once**.
+  - 3.6 Flash and 3 Flash stay at `medium`.
+- **Flash Lite `high` reviewing 1 job per call** was tested against the 1-job benchmark: 21 calls, 162,862 tokens.
+  - 75% agreement, no better than 2 per call (78%), with the same leniency (project manager fit 72, fits without "essential" tools).
+  - For Flash Lite, batching isn't the issue; its own judgement is.
+- **Final setup going forward** (user decision 2026-11-09):
+  - Flash Lite (`high`) screens.
+  - 3.6 Flash (`medium`) reviews 2 jobs per call (1 if alone), then 3 Flash (`medium`), then Flash Lite (`high`).
+  - **Final re-judge of the 23 dev jobs:** 35 calls, 490,278 tokens, about 42 s per job.
+  - 3.6 Flash ran out after 16 jobs, and 3 Flash reviewed the other 5 (fallback worked).
+  - Result: 8 fit, 12 partial, 3 no match; **73% verdict agreement** with the benchmark (lower than the 86% test, mainly because of 3 Flash and the more generous `high` screening).
+  - See the run report's "Final run" section and its open points.
+- **Reverted to the best-measured setup** (user decision, same day): **Flash Lite screens at `medium`** (`llm.model_thinking` emptied); **3.6 Flash reviews 2 jobs per call (1 if alone)**; fallbacks 3 Flash, then Flash Lite, all at `medium`.
+  - Re-run with a new API key: screenings reused; 10 review calls, all on 3.6 Flash, 113,149 tokens, 410 s.
+  - **80% verdict agreement** with the benchmark, and **86%** with the earlier test of the same setup (its run-to-run variation). The project manager job is partial again.
+  - A full run takes about 33 s per job.
+- Details are in the run report: [reports/2026-11-08-matching-run-v14.md](reports/2026-11-08-matching-run-v14.md).
+
+### How to use
+- Nothing to do. To change the batch size, set `llm.review_batch_size` in `config/settings.yaml` (1–6).
+- **The next run re-reviews the 23 dev jobs once** (the prompt version changed): about 10 review calls and roughly 110k tokens. The screenings are reused.
+
+### Checks run
+- `pytest`: 756 passed. The judge, pipeline and app tests were updated for the batch flow. New tests cover batch labels, a contractor sent once for two jobs, splitting an answer per job, and missing or unknown jobs.
+- `ruff check .` and `ruff format --check .`: pass.
+
+---
+
 ## 2026-11-08 · Talent IDs instead of codenames, summary reasons, score colours, multi-file jobs, smaller dev data
 
 ### What this solves
@@ -148,6 +208,15 @@ What each change solves, for the team. Newest first. Add an entry with every com
   - **Result:** 4 jobs with clear fits, 14 with a partial, 5 with no match (was 3 / 10 / 10 in v12).
     - The reviewer changed 27 screening verdicts (18 partial to no, 8 fit to partial, 1 fit to no). Screening now shortlists generously.
     - Eligibility flags: 5 across all reviews (v13 had put one on every candidate). No age mentions in any shown text.
+  - **Groq was tested, then removed** (user decision).
+    - `openai/gpt-oss-120b` was benchmarked as a reviewer against the 3.6 Flash results: 15 of 19 reviews answered (8,000 tokens per minute is too tight), 63% verdict agreement (Flash Lite: 73%), more lenient, and 25 "Meets" rows that failed the word-for-word check.
+    - All Groq code, settings, tests and the `GROQ_API_KEY` entry in `.env.example` were then removed, and `llm.budget.call_max_tpm_share` went back to 0.5. The findings stay in the run report.
+  - **NVIDIA NIM tested** (user decision, rule 4 OK for testing).
+    - `src/jobmatch/llm/openai_compat.py` is a general OpenAI-compatible caller for review models named `<provider>:<model>` (settings `llm.compat_providers`; key `NVIDIA_API_KEY`).
+    - `nvidia/nemotron-3-ultra-550b-a55b` against the 3.6 Flash benchmark: 18 of 19 reviews answered, 68% verdict agreement, about 2 minutes per review.
+    - It was the strictest reviewer, and it rejected people on rate or location. 17 "Meets" rows failed the word-for-word check.
+    - It's not in the review chain.
+    - Then removed (user decision 2026-11-09): the caller, its settings, tests and the `NVIDIA_API_KEY` entry in `.env.example`. The findings stay in the run report.
   - **Run report** with timing (about 32 s per job), token usage per model and quality metrics: [reports/2026-11-08-matching-run-v14.md](reports/2026-11-08-matching-run-v14.md).
 
 ### How to use

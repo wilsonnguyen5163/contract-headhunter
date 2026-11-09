@@ -103,8 +103,9 @@ def app_settings(settings: Settings, data_dir: Path) -> Settings:
 def staged_answer(combined: dict[str, Any], request: Any) -> str:
     """Test fakes write one combined answer (verdicts, top, no_fit). Since v12 a job takes two
     calls: the screening call gets the verdicts plus a shortlist of the detailed aliases, the
-    deep-review call gets the detailed entries."""
+    deep-review call (v15: a batch of jobs) gets the detailed entries for each job in it."""
     import json
+    import re
 
     from jobmatch.llm.prompt import SCREEN_SYSTEM
 
@@ -119,7 +120,8 @@ def staged_answer(combined: dict[str, Any], request: Any) -> str:
                 "no_fit": combined["no_fit"],
             }
         )
-    return json.dumps({"top": top})
+    labels = re.findall(r'<job id="(J\d+)">', request.user)
+    return json.dumps({"jobs": [{"job": label, "top": top} for label in labels]})
 
 
 @pytest.fixture

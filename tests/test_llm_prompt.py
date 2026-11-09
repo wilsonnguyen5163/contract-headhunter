@@ -19,6 +19,7 @@ from jobmatch.llm.prompt import (
     review_schema,
     screen_schema,
 )
+from jobmatch.llm.trial import parse_review
 from jobmatch.schemas import ContractorProfile, Job
 
 SYSTEM = REVIEW_SYSTEM  # the deep review carries every judgement and writing rule
@@ -126,16 +127,79 @@ def test_v13_rules_in_both_prompts() -> None:
 
 def test_the_review_call_sends_only_the_shortlisted(make_job: Callable[..., Job]) -> None:
     card = job_card(a_job(make_job), llm_settings().payload)
-    call = prepare_review(card, ROSTER.subset(["C02"]), llm_settings())
+    call = prepare_review([(card, ["C02"])], ROSTER, llm_settings())
     assert call.request.system == REVIEW_SYSTEM
     assert "[C02]" in call.request.user and "[C01]" not in call.request.user
     assert call.aliases == {"C02": "TAL-2"}
+    assert call.labels == {"J1": card.job_id} and call.job_ids == [card.job_id]
+
+
+def test_a_review_batch_labels_each_job_and_sends_each_contractor_once(
+    make_job: Callable[..., Job],
+) -> None:
+    """v15 (user decision 2026-11-09): several jobs per review call, each with its own
+    shortlist; a contractor shortlisted for two jobs is sent once."""
+    settings = llm_settings()
+    ux = job_card(a_job(make_job), settings.payload)
+    fr = job_card(
+        make_job(job_id="paste:fr", title_norm="Rédacteur UX", requirements=["Microcopie"]),
+        settings.payload,
+    )
+    call = prepare_review([(ux, ["C01", "C02"]), (fr, ["C01"])], ROSTER, settings)
+    user = call.request.user
+    assert call.labels == {"J1": ux.job_id, "J2": "paste:fr"}
+    assert user.index('<job id="J1">') < user.index('<job id="J2">') < user.index("<contractors>")
+    assert user.count("[C01]") == 1 and "[C02]" in user
+    assert "J1: C01, C02" in user and "J2: C01" in user
+    assert "against that job only" in REVIEW_SYSTEM
+
+
+def test_a_batch_answer_is_split_per_job_and_missing_jobs_are_reported() -> None:
+    labels = {"J1": "paste:1", "J2": "paste:2", "J3": "paste:3"}
+    entry = {"alias": "C01", "reason": "r", "meets": [], "requirements_missing": [],
+             "red_flags": [], "fit_score": 80, "verdict": "fit"}  # fmt: skip
+    text = json.dumps(
+        {"jobs": [{"job": "J2", "top": [entry]}, {"job": "J9", "top": []},
+                  {"job": "J1", "top": []}]}
+    )  # fmt: skip
+    reviews, problems, error = parse_review(text, labels)
+    assert error is None
+    assert set(reviews) == {"paste:1", "paste:2"} and reviews["paste:2"].top[0].fit_score == 80
+    assert problems == ["review for unknown job J9", "no review for job J3"]
+    assert parse_review("not json", labels)[2] is not None
+
+
+def test_review_thinking_changes_the_judgment_not_the_screening(
+    make_job: Callable[..., Job],
+) -> None:
+    card = job_card(a_job(make_job), llm_settings().payload)
+    plain = prepare_call(card, ROSTER, llm_settings(review_thinking_level=None))
+    high = prepare_call(card, ROSTER, llm_settings(review_thinking_level="high"))
+    assert plain.screen_key("m") == high.screen_key("m")  # the screening is reused
+    assert plain.judge_key("m") != high.judge_key("m")  # but it's another judgment
+
+
+def test_per_model_thinking_applies_to_that_model_and_the_keys(
+    make_job: Callable[..., Job],
+) -> None:
+    """User decision 2026-11-09: Flash Lite thinks "high" wherever it runs."""
+    base = llm_settings(thinking_level="medium", model_thinking={})
+    lite_high = llm_settings(
+        thinking_level="medium", model_thinking={"gemini-3.5-flash-lite": "high"}
+    )
+    assert lite_high.for_model("gemini-3.5-flash-lite").thinking_level == "high"
+    assert lite_high.for_model("gemini-3.6-flash").thinking_level == "medium"
+    card = job_card(a_job(make_job), base.payload)
+    # The screening model is Flash Lite: its key follows its real thinking level.
+    assert lite_high.model == "gemini-3.5-flash-lite"
+    a, b = prepare_call(card, ROSTER, base), prepare_call(card, ROSTER, lite_high)
+    assert a.screen_key("m") != b.screen_key("m") and a.judge_key("m") != b.judge_key("m")
 
 
 def test_another_thinking_setting_is_another_question(make_job: Callable[..., Job]) -> None:
     card = job_card(a_job(make_job), llm_settings().payload)
-    low = prepare_call(card, ROSTER, llm_settings(thinking_level="minimal"))
-    medium = prepare_call(card, ROSTER, llm_settings(thinking_level="medium"))
+    low = prepare_call(card, ROSTER, llm_settings(thinking_level="minimal", model_thinking={}))
+    medium = prepare_call(card, ROSTER, llm_settings(thinking_level="medium", model_thinking={}))
     assert low.judge_key("m") != medium.judge_key("m")
 
 
@@ -219,8 +283,10 @@ def test_answer_schema_follows_the_recruiter_flow() -> None:
     """v8: screen everyone, then deep reviews (justification, description, score, final
     verdict), then no_fit. Every field is required and none may be null in what is sent."""
     schema = review_schema()
-    assert list(schema["properties"]) == ["top"]
-    top = schema["properties"]["top"]["items"]
+    assert list(schema["properties"]) == ["jobs"]  # v15: one entry per job of the batch
+    job = schema["properties"]["jobs"]["items"]
+    assert list(job["properties"]) == ["job", "top"]
+    top = job["properties"]["top"]["items"]
     assert list(top["properties"]) == [
         "alias", "reason", "meets", "requirements_missing", "red_flags", "fit_score", "verdict",
     ]  # fmt: skip

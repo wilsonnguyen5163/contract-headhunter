@@ -116,6 +116,14 @@ class LlmSettings(StrictModel):
     model: str = Field(min_length=1)  # the screening model (the one with the largest quota)
     # Deep-review models, strongest first. Empty: `model` reviews too.
     review_models: list[str] = []
+    # Jobs reviewed per review call (v15). The strong models' daily limits count requests, so
+    # 2 jobs per call doubles the jobs reviewed per day.
+    review_batch_size: int = Field(default=1, ge=1, le=6)
+    # Thinking level for review calls only (Gemini 3); null: the same as thinking_level.
+    review_thinking_level: Literal["minimal", "low", "medium", "high"] | None = None
+    # Thinking level per model, overriding thinking_level for that model wherever it runs
+    # (screening or review). User decision 2026-11-09: gemini-3.5-flash-lite at "high".
+    model_thinking: dict[str, Literal["minimal", "low", "medium", "high"]] = {}
     # Free-tier limits per model; a model not listed uses `limits`.
     model_limits: dict[str, LlmLimits] = {}
     base_url: str = Field(min_length=1)
@@ -151,10 +159,12 @@ class LlmSettings(StrictModel):
         return list(self.review_models) or [self.model]
 
     def for_model(self, model: str) -> "LlmSettings":
-        """These settings for one model: its name and its own limits."""
-        return self.model_copy(
-            update={"model": model, "limits": self.model_limits.get(model, self.limits)}
-        )
+        """These settings for one model: its name, its own limits and its own thinking level
+        (model_thinking), when set."""
+        update: dict = {"model": model, "limits": self.model_limits.get(model, self.limits)}
+        if model in self.model_thinking:
+            update |= {"thinking_level": self.model_thinking[model], "thinking_budget": None}
+        return self.model_copy(update=update)
 
 
 class ScoreBands(StrictModel):

@@ -18,6 +18,7 @@ from jobmatch.llm.evidence import verify_evidence
 from jobmatch.llm.prompt import (
     PROMPT_VERSION,
     JudgeOutput,
+    ReviewBatchOutput,
     ReviewOutput,
     ScreenOutput,
     check_output,
@@ -60,11 +61,31 @@ def parse_screen(text: str, roster: Roster, top_k: int) -> Screened:
     return Screened(output=raw.model_copy(update={"shortlist": shortlist}), problems=problems)
 
 
-def parse_review(text: str) -> tuple[ReviewOutput | None, str | None]:
+def parse_review(
+    text: str, labels: dict[str, str]
+) -> tuple[dict[str, ReviewOutput], list[str], str | None]:
+    """A batch review answer (v15) split per job: (job_id -> its review, problems, error).
+    `labels` maps the ids used in the request ("J1") to job IDs. A job missing from the
+    answer is simply absent (it is reviewed again next run); an unknown or repeated id is a
+    problem and is ignored."""
     try:
-        return ReviewOutput.model_validate(json.loads(text)), None
+        raw = ReviewBatchOutput.model_validate(json.loads(text))
     except (ValueError, ValidationError) as exc:
-        return None, f"not the expected JSON: {exc}"
+        return {}, [], f"not the expected JSON: {exc}"
+    reviews: dict[str, ReviewOutput] = {}
+    problems: list[str] = []
+    for entry in raw.jobs:
+        job_id = labels.get(entry.job)
+        if job_id is None:
+            problems.append(f"review for unknown job {entry.job}")
+        elif job_id in reviews:
+            problems.append(f"more than one review for job {entry.job}")
+        else:
+            reviews[job_id] = ReviewOutput(top=entry.top)
+    for label, job_id in labels.items():
+        if job_id not in reviews:
+            problems.append(f"no review for job {label}")
+    return reviews, problems, None
 
 
 def join_answers(
@@ -98,8 +119,9 @@ class TrialResult(BaseModel):
     raw_text: str | None  # the screening answer as received
     # v12: the deep review (None when nothing was shortlisted, or before v12).
     review_model: str | None = None
-    review_usage: LlmUsage | None = None
+    review_usage: LlmUsage | None = None  # the whole review call (shared by its batch)
     review_raw_text: str | None = None
+    review_batch: list[str] = []  # v15: the job IDs reviewed in the same call
 
 
 def write_result(result: TrialResult, folder: Path, name: str) -> Path:

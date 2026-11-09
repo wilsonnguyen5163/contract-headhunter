@@ -111,12 +111,14 @@ def test_jobs_are_judged_cached_and_paced(
         batch, ROSTER, llm(), fake, ledger(store), folder,
         echo=lines.append, sleep=sleep, clock=clock,
     )  # fmt: skip
-    # Each job: a screening call, then a review of its shortlist (C01): 2 calls per job.
-    assert (report.sent, report.ok, report.failed, report.cached) == (6, 3, 0, 0)
-    assert report.reviews == 3
-    assert report.total_tokens == 33_000
-    assert len(lines) == 6 and all("total 5,500" in line for line in lines)
-    assert [line.split()[1] for line in lines] == ["screen", "review"] * 3
+    # Every job is screened first, then the shortlists are reviewed 2 jobs per call (v15):
+    # 3 screenings + 2 review calls.
+    assert (report.sent, report.ok, report.failed, report.cached) == (5, 3, 0, 0)
+    assert (report.reviews, report.review_calls) == (3, 2)
+    assert report.total_tokens == 27_500
+    assert len(lines) == 5 and all("total 5,500" in line for line in lines)
+    assert [line.split()[1] for line in lines] == ["screen"] * 3 + ["review"] * 2
+    assert "a:0,a:1" in lines[3] and "a:2" in lines[4]  # the batches
     assert sleeps and all(s > 0 for s in sleeps)  # each model spaced by 60 / RPM
     assert all(p.cached for p in plan_jobs(batch, ROSTER, llm(), folder))
 
@@ -125,7 +127,7 @@ def test_jobs_are_judged_cached_and_paced(
         echo=lines.append, sleep=sleep, clock=clock,
     )  # fmt: skip
     assert (again.sent, again.cached) == (0, 3)
-    assert fake.calls == 6
+    assert fake.calls == 5
 
 
 def test_daily_limit_on_screening_stops_the_run_and_keeps_what_was_done(
@@ -137,14 +139,18 @@ def test_daily_limit_on_screening_stops_the_run_and_keeps_what_was_done(
         batch, ROSTER, llm(), Fake(fail_after=2), ledger(store), folder,
         echo=lambda s: None, sleep=clock.sleep, clock=clock,
     )  # fmt: skip
-    # Job 1: screen + review; job 2: the screening call hits the daily limit.
-    assert (report.sent, report.ok, report.failed) == (3, 1, 1)
+    # Jobs 1 and 2 are screened; job 3's screening hits the daily limit, so screening stops.
+    # The batch of jobs 1+2 is still sent for review, but this fake refuses every call from
+    # then on: 2 tries (3.6 Flash, 3 Flash). Flash Lite, last in the chain, is the screening
+    # model and already used up, so it's skipped without a call.
+    assert (report.sent, report.ok, report.failed) == (5, 0, 2)
     assert report.stopped is not None and "screening model reached its daily limit" in (
         report.stopped
-    )
+    )  # the first reason is the one reported
     plan = plan_jobs(batch, ROSTER, llm(), folder)
-    assert [p.cached for p in plan] == [True, False, False, False]
-    assert load_judgment(folder, plan[0].key) is not None
+    assert [p.cached for p in plan] == [False] * 4
+    # The two screenings are kept: the next run only reviews them.
+    assert len(list((folder / "screening").glob("*.json"))) == 2
 
 
 class ChainFake:
@@ -187,10 +193,10 @@ def test_review_falls_back_down_the_chain_when_a_model_is_used_up(
         batch, ROSTER, settings, fake, ledger(store), folder,
         echo=lines.append, sleep=clock.sleep, clock=clock,
     )  # fmt: skip
-    assert (report.ok, report.failed, report.reviews) == (2, 0, 2)
+    assert (report.ok, report.failed, report.reviews, report.review_calls) == (2, 0, 2, 1)
     assert report.exhausted == [first]
-    # Job 1 tries the first model once, then the second; job 2 goes straight to the second.
-    assert fake.log == [settings.model, first, second, settings.model, second]
+    # Both jobs are screened; their batch tries the first model once, then the second.
+    assert fake.log == [settings.model, settings.model, first, second]
     assert any(f"{first} reached its daily limit" in line for line in lines)
     result = load_judgment(folder, plan_jobs(batch, ROSTER, settings, folder)[0].key)
     assert result is not None and result.review_model == second and result.model == second
@@ -208,7 +214,7 @@ def test_a_review_model_that_times_out_is_skipped_for_the_run(
         echo=lines.append, sleep=clock.sleep, clock=clock,
     )  # fmt: skip
     assert (report.ok, report.reviews, report.timed_out) == (2, 2, [first])
-    assert fake.log == [settings.model, first, second, settings.model, second]
+    assert fake.log == [settings.model, settings.model, first, second]
     assert any(f"{first} did not answer in time" in line for line in lines)
     assert any("· timeout ·" in line for line in lines)  # logged as a timeout
 

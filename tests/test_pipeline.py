@@ -123,8 +123,9 @@ def test_full_run_then_rerun_costs_nothing(
     fake = FakeGemini()
     report = go(app_settings, fake, contractor_file=contractor_file(tmp_path))
     assert report.contractors is not None and report.contractors.added == ["TAL-1"]
-    # 2 jobs with a fit: screening + review each; the recruiting job: screening only.
-    assert fake.calls == 5
+    # 3 screenings, then the 2 jobs with a fit reviewed together in one call (v15 batch of 2);
+    # the recruiting job has nobody shortlisted, so no review.
+    assert fake.calls == 4
     assert (report.jobs_matched, report.jobs_no_match, report.matches_added) == (2, 1, 2)
     statuses = {j.job_id: j.status for j in CsvJobRepository(store).list_all()}
     assert statuses == {
@@ -137,7 +138,7 @@ def test_full_run_then_rerun_costs_nothing(
     }  # fmt: skip
 
     again = go(app_settings, fake)
-    assert fake.calls == 5 and again.judge is None
+    assert fake.calls == 4 and again.judge is None
     assert again.matches_added == 0
     runs = CsvRunRepository(store).list_all()
     assert [r.run_id.startswith("run-") for r in runs[-2:]] == [True, True]
