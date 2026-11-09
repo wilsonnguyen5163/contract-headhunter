@@ -29,13 +29,16 @@ from pydantic import BaseModel, ValidationError
 
 from jobmatch.schemas import (
     SCHEMA_VERSION,
+    Application,
     ContractorProfile,
     Job,
     JobStatus,
     LlmMatch,
     LlmUsage,
     Review,
+    RoundEvent,
     Run,
+    ScanRecord,
 )
 from jobmatch.storage.files import atomic_open, atomic_write_text
 
@@ -326,6 +329,7 @@ class CsvTable[M: BaseModel]:
                     writer.writerow(self.columns)
                     writer.writerows(cells)
             else:
+                self._upgrade_header()
                 self._require_exact_header()
                 needs_newline = not _ends_with_newline(self.path)
                 with self.path.open("a", encoding="utf-8", newline="") as f:
@@ -367,9 +371,23 @@ class CsvTable[M: BaseModel]:
         if rewrite and self.mode is TableMode.APPEND_ONLY:
             raise AppendOnlyTableError(f"{self.path.name} is append-only")
 
-    def _require_exact_header(self) -> None:
+    def _read_header(self) -> list[str]:
         with self.path.open(encoding="utf-8-sig", newline="") as f:
-            header = [h.strip() for h in next(csv.reader(f), [])]
+            return [h.strip() for h in next(csv.reader(f), [])]
+
+    def _upgrade_header(self) -> None:
+        """A rewritable file written before optional columns were added (e.g. jobs.csv before
+        availability): rewrite it with the current columns, after a timestamped backup, so
+        new rows can be appended. Anything else is left for _require_exact_header."""
+        if self.mode is not TableMode.READ_WRITE:
+            return
+        header = self._read_header()
+        if header == self.columns or self._header_errors(header):
+            return
+        self.rewrite(self.read_all())
+
+    def _require_exact_header(self) -> None:
+        header = self._read_header()
         if header != self.columns:
             raise CsvValidationError(
                 [
@@ -393,8 +411,19 @@ class CsvTable[M: BaseModel]:
     # -- schema sidecar --
 
     def _ensure_sidecar(self) -> None:
+        """Write the sidecar when missing, or refresh its column list after optional columns
+        were added (same schema_version: older files still load)."""
         if self.sidecar_path.exists():
-            return
+            try:
+                current = json.loads(self.sidecar_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return  # left for _check_sidecar to report
+            if (
+                not isinstance(current, dict)
+                or current.get("columns") == self.columns
+                or current.get("schema_version") != SCHEMA_VERSION
+            ):
+                return
         payload = {
             "schema_version": SCHEMA_VERSION,
             "model": self.model.__name__,
@@ -449,6 +478,11 @@ class CsvStore:
         self.llm_usage = table("llm_usage.csv", LlmUsage, TableMode.APPEND_ONLY, ("call_id",))
         # v1: Gemini's shortlists (run-once). Rows are only added, never changed.
         self.llm_matches = table("llm_matches.csv", LlmMatch, TableMode.APPEND_ONLY, ("match_id",))
+        # 0.4: who was judged for which job, the rounds of recommendations, and the
+        # application status of approved candidates. All append-only (history kept).
+        self.job_scans = table("job_scans.csv", ScanRecord, TableMode.APPEND_ONLY)
+        self.job_rounds = table("job_rounds.csv", RoundEvent, TableMode.APPEND_ONLY)
+        self.applications = table("applications.csv", Application, TableMode.APPEND_ONLY)
 
     def all_tables(self) -> list[CsvTable[Any]]:
         return [
@@ -457,6 +491,9 @@ class CsvStore:
             self.runs,
             self.llm_usage,
             self.llm_matches,
+            self.job_scans,
+            self.job_rounds,
+            self.applications,
         ]
 
 
@@ -625,6 +662,19 @@ class CsvContractorProfileRepository:
         self._table.path.parent.mkdir(parents=True, exist_ok=True)
         backup = self._table.rewrite(profiles)
         return str(backup) if backup else None
+
+
+class CsvAppendRepository[M: BaseModel]:
+    """An append-only table read whole: job_scans.csv, job_rounds.csv, applications.csv."""
+
+    def __init__(self, table: "CsvTable[M]") -> None:
+        self._table = table
+
+    def list_all(self) -> list[M]:
+        return self._table.read_all()
+
+    def add_many(self, rows: Iterable[M]) -> int:
+        return self._table.append(rows)
 
 
 class CsvUsageRepository:

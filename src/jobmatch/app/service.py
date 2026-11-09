@@ -16,19 +16,24 @@ from pydantic import BaseModel
 from jobmatch import secrets_file
 from jobmatch.config import Settings
 from jobmatch.llm.export import ExportResult, export_current
-from jobmatch.llm.payload import ACTIVE_STATUSES
+from jobmatch.llm.payload import ACTIVE_STATUSES, is_active
 from jobmatch.llm.provider import LLMProvider
+from jobmatch.llm.rounds import latest_applications, latest_reviews, rank
 from jobmatch.llm.usage import RunCheck, UsageLedger
-from jobmatch.pipeline import RunOnceReport, current_judge_keys, run_once
+from jobmatch.pipeline import RunOnceReport, run_once
 from jobmatch.schemas import (
+    Application,
+    ApplicationStatus,
     ContractorProfile,
     Decision,
     Job,
+    JobAvailability,
     LlmMatch,
     LlmVerdict,
     ReasonCode,
     Review,
 )
+from jobmatch.shortlists import pair_states, sync_rounds
 from jobmatch.sources.contractor_upsert import read_contractor_file
 from jobmatch.sources.saved_files import SAVED_SUFFIXES
 from jobmatch.storage.csv_store import to_cell
@@ -70,6 +75,53 @@ class JobResult(BaseModel):
     job: Job
     outcome: JobOutcome
     matches: list[MatchView]
+    rejected: list[MatchView] = []  # the reviewer's rejections, behind "Show rejected"
+
+
+# The Jobs screen's four states:
+#   matched  (1, green)  scanned, someone recommended (reviewed or not, hire in progress or not)
+#   no_match (2, red)    scanned, nobody recommended; stays available for later runs
+#   waiting  (3, yellow) contractors still to scan (a new or reopened job, new contractors)
+#   inactive (4, grey)   marked completed or unavailable: never sent to Gemini
+JobState = Literal["matched", "no_match", "waiting", "inactive"]
+JobAction = Literal["completed", "unavailable", "reopen"]
+
+
+class Candidate(BaseModel):
+    """An approved contractor in a job's table on the Jobs screen."""
+
+    talent_id: str
+    name: str | None
+    headline: str | None
+    match: LlmMatch | None  # their newest row for the job (verdict, score)
+    status: ApplicationStatus  # latest; not_referred when never set
+    removed: bool  # application rejected or ghosted: out of consideration (Undo restores)
+
+
+class JobOverview(BaseModel):
+    job: Job
+    state: JobState
+    summary: str  # "3 matches · best score 92", "best score 58", "no match", "" (not scanned)
+    candidates: list[Candidate] = []  # approved for this job, best first
+
+
+def job_summary(job: Job, matches: list[LlmMatch] | None) -> str:
+    """The matching summary line on the Jobs screen. `matches` is the current shortlist,
+    None when the job is not analyzed with the current contractor list."""
+    if job.availability is JobAvailability.COMPLETED:
+        return "completed"
+    if job.availability is JobAvailability.UNAVAILABLE:
+        return "unavailable"
+    if matches is None:
+        return ""  # the screen's state label already says "Not scanned yet"
+    if not matches:
+        return "no match"
+    scores = [m.fit_score for m in matches if m.fit_score is not None]
+    best = f"best score {max(scores)}" if scores else "no score"
+    fits = sum(1 for m in matches if m.verdict is LlmVerdict.FIT)
+    if not fits:
+        return best  # the single best partial
+    return f"{fits} match{'es' if fits != 1 else ''} · {best}"
 
 
 class Quota(BaseModel):
@@ -251,49 +303,219 @@ class AppService:
 
     # ---- results and decisions ----
 
+    def _profiles(self, loader: DataLoader) -> dict[str, ContractorProfile]:
+        contractors = loader.contractors
+        return {p.talent_id: p for p in contractors.list_all()} if contractors.exists() else {}
+
     def results(self) -> list[JobResult]:
-        """Every active job with its current shortlist and the latest decision on each
-        match. Jobs with fits first, then those with a partial to check, then no match,
-        then not judged yet; newest first within each group."""
+        """Every active job with its recommendations (llm/rounds.py) and the latest decision
+        on each. Jobs with fits first, then those with a partial to check, then no match,
+        then not judged yet; newest first within each group. Brings the rounds up to date
+        first (no API call)."""
         loader = self._loader()
-        jobs = [j for j in loader.jobs.list_all() if j.status in ACTIVE_STATUSES]
-        profiles: dict[str, ContractorProfile] = (
-            {p.talent_id: p for p in loader.contractors.list_all()}
-            if loader.contractors.exists()
-            else {}
-        )
-        keys = current_judge_keys(self.settings, loader)
-        current = loader.llm_matches.current(keys)
-        decisions = loader.reviews.latest_by_match()
+        pictures = sync_rounds(self.settings, loader)
+        profiles = self._profiles(loader)
+        decisions = latest_reviews(loader.llm_matches.list_all(), loader.reviews.latest_by_match())
+
+        def view(m: LlmMatch) -> MatchView:
+            profile = profiles.get(m.talent_id)
+            return MatchView(
+                match=m,
+                name=profile.talent_name if profile else None,
+                headline=profile.standardized_headline if profile else None,
+                decision=_current_decision(decisions.get((m.job_id, m.talent_id))),
+            )
+
         out: list[JobResult] = []
-        for job in jobs:
-            matches = current.get(job.job_id)
-            if matches is None:
+        for job in loader.jobs.list_all():
+            if not is_active(job):
+                continue
+            picture = pictures[job.job_id]
+            shown = picture.shortlist.shown
+            if not shown and picture.to_scan:
                 outcome: JobOutcome = "not_judged"
-            elif not matches:
+            elif not shown:
                 outcome = "no_match"
-            elif any(m.verdict is LlmVerdict.FIT for m in matches):
+            elif any(m.verdict is LlmVerdict.FIT for m in shown):
                 outcome = "fits"
             else:
                 outcome = "check_partial"
-            views = [
-                MatchView(
-                    match=m,
-                    name=profiles[m.talent_id].talent_name if m.talent_id in profiles else None,
-                    headline=(
-                        profiles[m.talent_id].standardized_headline
-                        if m.talent_id in profiles
-                        else None
-                    ),
-                    decision=_current_decision(decisions.get(m.match_id)),
+            out.append(
+                JobResult(
+                    job=job,
+                    outcome=outcome,
+                    matches=[view(m) for m in shown],
+                    rejected=[view(m) for m in picture.shortlist.rejected],
                 )
-                for m in matches or []
-            ]
-            out.append(JobResult(job=job, outcome=outcome, matches=views))
+            )
         order = {"fits": 0, "check_partial": 1, "no_match": 2, "not_judged": 3}
         out.sort(key=lambda r: r.job.first_seen_at, reverse=True)
         out.sort(key=lambda r: order[r.outcome])
         return out
+
+    def job_result(self, job_id: str) -> JobResult | None:
+        """One job's card on Results, fresh (after a reject or a reset); None when the job
+        is no longer active."""
+        return next((r for r in self.results() if r.job.job_id == job_id), None)
+
+    # ---- the Jobs screen ----
+
+    def jobs_overview(self) -> list[JobOverview]:
+        """Every imported job with its state, matching summary and approved candidates: open
+        jobs A–Z by title, then closed jobs A–Z. Jobs the import left out (not contract, not
+        Canada, duplicates, stubs without details) are not listed: they were never
+        candidates."""
+        loader = self._loader()
+        jobs = [
+            j
+            for j in loader.jobs.list_all()
+            if j.status in ACTIVE_STATUSES or j.availability is not JobAvailability.AVAILABLE
+        ]
+        pictures = sync_rounds(self.settings, loader)
+        profiles = self._profiles(loader)
+        applications = latest_applications(loader.applications.list_all())
+        out: list[JobOverview] = []
+        for job in jobs:
+            picture = pictures[job.job_id]
+            shown = picture.shortlist.shown
+            if not is_active(job):
+                state: JobState = "inactive"
+            elif picture.to_scan:
+                state = "waiting"
+            elif shown:
+                state = "matched"
+            else:
+                state = "no_match"
+            matches = shown if shown or not picture.to_scan else None
+            candidates = []
+            for talent_id, s in picture.states.items():
+                if s not in ("approved", "removed"):
+                    continue
+                profile = profiles.get(talent_id)
+                application = applications.get((job.job_id, talent_id))
+                status = application.status if application else ApplicationStatus.NOT_REFERRED
+                candidates.append(
+                    Candidate(
+                        talent_id=talent_id,
+                        name=profile.talent_name if profile else None,
+                        headline=profile.standardized_headline if profile else None,
+                        match=picture.rows.get(talent_id),
+                        status=status,
+                        removed=s == "removed",
+                    )
+                )
+            candidates.sort(key=lambda c: (c.removed, rank(c.match) if c.match else (True,)))
+            out.append(
+                JobOverview(
+                    job=job, state=state, summary=job_summary(job, matches), candidates=candidates
+                )
+            )
+        # Open jobs A–Z, then closed ones (completed or unavailable) A–Z at the bottom.
+        out.sort(
+            key=lambda o: (
+                o.state == "inactive",
+                (o.job.title_norm or o.job.title_raw).casefold(),
+                o.job.job_id,
+            )
+        )
+        return out
+
+    def set_job_availability(
+        self, job_id: str, action: JobAction, now: datetime | None = None
+    ) -> Job:
+        """The Jobs screen toggles. completed / unavailable: the job leaves Results and is
+        never sent to Gemini. reopen (only from those two): available again; the next run sends
+        only contractors not judged for it yet (shortlists.py). One atomic rewrite of jobs.csv,
+        after a timestamped backup."""
+        jobs = self._loader().jobs
+        job = jobs.get(job_id)
+        if job is None:
+            raise AppError("That job is not in the job list any more.")
+        now = now or datetime.now(UTC)
+        inactive = job.availability is not JobAvailability.AVAILABLE
+        if action == "reopen":
+            if not inactive:
+                raise AppError("Only a completed or unavailable job can be reopened.")
+            update = {
+                "availability": JobAvailability.AVAILABLE,
+                "availability_changed_at": now,
+                "reopened_at": now,
+            }
+        else:
+            if inactive:
+                raise AppError("This job is already marked completed or unavailable.")
+            update = {"availability": JobAvailability(action), "availability_changed_at": now}
+        changed = job.model_copy(update=update)
+        jobs.replace([changed])
+        return changed
+
+    def _history(self, loader: DataLoader, job_id: str, talent_id: str) -> list[Application]:
+        rows = [
+            a
+            for a in loader.applications.list_all()
+            if a.job_id == job_id and a.talent_id == talent_id
+        ]
+        return sorted(rows, key=lambda a: a.updated_at)  # stable: file order on ties
+
+    def set_application(
+        self,
+        job_id: str,
+        talent_id: str,
+        status: ApplicationStatus,
+        now: datetime | None = None,
+    ) -> None:
+        """Save an approved candidate's application status (Jobs screen). "rejected"
+        (rejection or ghosted) takes them out of consideration for this job; "hired" marks
+        the job completed. Appended to applications.csv (the latest counts)."""
+        loader = self._loader()
+        job = loader.jobs.get(job_id)
+        if job is None:
+            raise AppError("That job is not in the job list any more.")
+        state = pair_states(loader).get((job_id, talent_id))
+        if state not in ("approved", "removed"):
+            raise AppError("Only a candidate approved on Results has an application status.")
+        if state == "removed":
+            raise AppError("This candidate's application was rejected: use Undo first.")
+        now = now or datetime.now(UTC)
+        loader.applications.add_many(
+            [
+                Application(
+                    job_id=job_id,
+                    talent_id=talent_id,
+                    status=status,
+                    reviewer=self.reviewer(),
+                    updated_at=now,
+                )  # fmt: skip
+            ]
+        )
+        if status is ApplicationStatus.HIRED and job.availability is JobAvailability.AVAILABLE:
+            self.set_job_availability(job_id, "completed", now)
+
+    def undo_application_rejection(
+        self, job_id: str, talent_id: str, now: datetime | None = None
+    ) -> ApplicationStatus:
+        """Bring back a candidate whose application was rejected or ghosted (a misclick,
+        usually): their status goes back to what it was before. Returns that status."""
+        loader = self._loader()
+        history = self._history(loader, job_id, talent_id)
+        if not history or history[-1].status is not ApplicationStatus.REJECTED:
+            raise AppError("This candidate's application is not rejected: nothing to undo.")
+        before = next(
+            (a.status for a in reversed(history) if a.status is not ApplicationStatus.REJECTED),
+            ApplicationStatus.NOT_REFERRED,
+        )
+        loader.applications.add_many(
+            [
+                Application(
+                    job_id=job_id,
+                    talent_id=talent_id,
+                    status=before,
+                    reviewer=self.reviewer(),
+                    updated_at=now or datetime.now(UTC),
+                )  # fmt: skip
+            ]
+        )
+        return before
 
     def decide(
         self,

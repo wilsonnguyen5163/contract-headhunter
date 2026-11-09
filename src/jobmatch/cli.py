@@ -392,7 +392,7 @@ def _llm_inputs(
     the reason. Prints counts only (talent IDs, never names)."""
     from jobmatch.config import load_professions
     from jobmatch.llm.anonymize import build_roster
-    from jobmatch.llm.payload import ACTIVE_STATUSES
+    from jobmatch.llm.payload import is_active
     from jobmatch.llm.preview import profession_problems
     from jobmatch.storage.csv_store import CsvStoreError
 
@@ -405,7 +405,7 @@ def _llm_inputs(
         typer.echo("No contractor list yet. Run build-contractors first.")
         raise typer.Exit(1)
     try:
-        jobs = [j for j in loader.jobs.list_all() if j.status in ACTIVE_STATUSES]
+        jobs = [j for j in loader.jobs.list_all() if is_active(j)]
         profiles = loader.contractors.list_all()
     except CsvStoreError as exc:
         typer.echo(f"Cannot read data: {exc}")

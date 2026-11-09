@@ -163,8 +163,12 @@ def select(candidates: list[_Candidate], rules: LlmShortlistSettings) -> list[_C
     return partials[: rules.partials_when_no_fit]
 
 
-def judged_job(result: TrialResult, rules: LlmShortlistSettings) -> JudgedJob | None:
-    """None when the judgment has no usable answer (the job keeps its status)."""
+def judged_job(
+    result: TrialResult, rules: LlmShortlistSettings, *, everyone: bool = False
+) -> JudgedJob | None:
+    """None when the judgment has no usable answer (the job keeps its status). `everyone`:
+    a row for every contractor judged fit or partial, best first, not just the shortlist
+    (0.4: the job's candidate pool; llm/rounds.py picks who is shown)."""
     if result.judged is None or result.judged.output is None:
         return None
     unverified = result.judged.unverified
@@ -188,7 +192,8 @@ def judged_job(result: TrialResult, rules: LlmShortlistSettings) -> JudgedJob | 
             out.append(f"{skill}{MEETS_SEP}{summary}" if summary else skill)
         return out
 
-    for c in select(_candidates(result), rules):
+    candidates = _candidates(result)
+    for c in candidates if everyone else select(candidates, rules):
         top = c.top
         rows.append(
             LlmMatch(

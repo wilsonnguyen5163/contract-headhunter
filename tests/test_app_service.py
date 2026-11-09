@@ -121,7 +121,8 @@ def test_decisions_are_stored_and_the_latest_shows(
     path = contractor_file(tmp_path)
     service.pick_contractor_file(path.name, path=path)
     service.run(echo=lambda s: None, confirm=lambda c: False)
-    match_id = service.results()[0].matches[0].match.match_id
+    first = service.results()[0]
+    match_id = first.matches[0].match.match_id
 
     with pytest.raises(AppError, match="reason"):
         service.decide(match_id, Decision.REJECTED)
@@ -130,7 +131,10 @@ def test_decisions_are_stored_and_the_latest_shows(
     reviews = CsvReviewRepository(store).list_all()
     assert [r.decision for r in reviews] == [Decision.APPROVED, Decision.REJECTED]
     assert reviews[-1].notes == "trop junior" and reviews[-1].reviewer == "reviewer"
-    latest = service.results()[0].matches[0].decision
+    # A rejection is hidden behind "Show rejected", with its decision (0.4).
+    [job] = [r for r in service.results() if r.job.job_id == first.job.job_id]
+    assert job.matches == []
+    latest = job.rejected[0].decision
     assert latest is not None and latest.reason_code is ReasonCode.SENIORITY
 
 

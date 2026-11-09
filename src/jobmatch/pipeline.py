@@ -33,14 +33,14 @@ from pydantic import BaseModel
 from jobmatch.config import LlmSettings, Settings
 from jobmatch.ingest import IngestReport, ingest_links, ingest_paste_files
 from jobmatch.llm.anonymize import build_roster
-from jobmatch.llm.judge import JudgeRunReport, judge_jobs, judgments_dir, load_judgment, plan_jobs
-from jobmatch.llm.matches import judged_job
-from jobmatch.llm.payload import ACTIVE_STATUSES
+from jobmatch.llm.judge import JudgeRunReport, judge_jobs, judgments_dir, plan_jobs
+from jobmatch.llm.payload import is_active
 from jobmatch.llm.prompt import PROMPT_VERSION
 from jobmatch.llm.provider import LLMProvider
 from jobmatch.llm.usage import RunCheck, UsageLedger, check_run
 from jobmatch.normalize.pipeline import Normalizer
 from jobmatch.schemas import JobStatus, Run, RunStatus
+from jobmatch.shortlists import absorb_cached, contractors_to_scan, pair_states, sync_rounds
 from jobmatch.sources.contractor_upsert import (
     UpsertReport,
     load_contractor_file,
@@ -201,7 +201,7 @@ def _run(
     # 3. budget
     progress(PROGRESS_IMPORTED, "Checking today's Gemini quota")
     jobs_repo = loader.jobs
-    jobs = [j for j in jobs_repo.list_all() if j.status in ACTIVE_STATUSES]
+    jobs = [j for j in jobs_repo.list_all() if is_active(j)]
     profiles = loader.contractors.list_all()
     roster = build_roster(profiles, llm.payload)
     for ex in roster.excluded:
@@ -210,7 +210,10 @@ def _run(
         raise PipelineError("no contractor can be sent (all left out); check the contractor list")
     report.active_jobs = len(jobs)
     folder = judgments_dir(data_dir)
-    plan = plan_jobs(jobs, roster, llm, folder)
+    # 0.4: each job is sent only the contractors not judged for it yet (shortlists.py).
+    states = pair_states(loader)
+    rosters = contractors_to_scan(jobs, roster, llm, loader.job_scans.list_all(), states)
+    plan = plan_jobs(jobs, roster, llm, folder, rosters)
     todo = [p for p in plan if not p.cached]
     ledger = UsageLedger(loader.llm_usage)
     calls = min(len(todo), max_calls) if max_calls else len(todo)
@@ -259,7 +262,7 @@ def _run(
 
             report.judge = judge_jobs(
                 jobs, roster, llm, provider_factory(), ledger, folder, max_calls=calls,
-                echo=echo_call,
+                echo=echo_call, rosters=rosters,
             )  # fmt: skip
             j = report.judge
             echo(
@@ -274,28 +277,26 @@ def _run(
             if j.stopped:
                 report.stopped = j.stopped
     else:
-        echo(f"{len(jobs)} active job(s) · all already judged (no API call)")
+        echo(f"{len(jobs)} active job(s) · nobody new to scan (no API call)")
 
-    # 5. store shortlists and statuses from the cache
+    # 5. store every candidate (the pool) and who was scanned, then the rounds and statuses
     progress(PROGRESS_JUDGED, "Saving shortlists")
-    matches_repo = loader.llm_matches
-    rows = []
+    now = datetime.now(UTC)
+    report.matches_added = absorb_cached(settings, loader, now)
+    pictures = sync_rounds(settings, loader, now)
     statuses: dict[str, tuple[JobStatus, str | None]] = {}
-    by_id = {j.job_id: j for j in jobs}
-    for item in plan:
-        result = load_judgment(folder, item.key)
-        judged = judged_job(result, llm.shortlist) if result is not None else None
-        if judged is None:
+    for job in jobs:
+        picture = pictures[job.job_id]
+        if picture.to_scan:
             report.jobs_not_judged += 1
             continue
-        rows += judged.matches
-        if judged.status is JobStatus.MATCHED:
+        status = JobStatus.MATCHED if picture.shortlist.shown else JobStatus.NO_MATCH
+        if status is JobStatus.MATCHED:
             report.jobs_matched += 1
         else:
             report.jobs_no_match += 1
-        if by_id[item.job_id].status is not judged.status:
-            statuses[item.job_id] = (judged.status, None)
-    report.matches_added = len(matches_repo.add_many(rows))
+        if job.status is not status:
+            statuses[job.job_id] = (status, None)
     jobs_repo.update_statuses(statuses)
     echo(
         f"Shortlists: {report.jobs_matched} job(s) with matches · {report.jobs_no_match} with "
@@ -313,21 +314,6 @@ def echo_today(llm: LlmSettings, ledger: UsageLedger, echo: Callable[[str], None
         if day.requests:
             limits = llm.for_model(model).limits
             echo(f"  {model}: {day.requests}/{limits.rpd} requests · {day.tokens:,} tokens")
-
-
-def current_judge_keys(settings: Settings, loader: DataLoader | None = None) -> dict[str, str]:
-    """job_id -> judge_key, for each active job whose current question (job text, roster,
-    model, prompt) has a usable cached answer. No API call. Used to pick the current
-    shortlists out of the stored matches; an active job missing here is not judged yet."""
-    llm = settings.llm
-    loader = loader or create_loader(settings)
-    if llm is None or not loader.contractors.exists():
-        return {}
-    jobs = [j for j in loader.jobs.list_all() if j.status in ACTIVE_STATUSES]
-    profiles = loader.contractors.list_all()
-    roster = build_roster(profiles, llm.payload)
-    folder = judgments_dir(settings.paths.data_dir)
-    return {p.job_id: p.key for p in plan_jobs(jobs, roster, llm, folder) if p.cached}
 
 
 def _web_fetcher(settings: Settings) -> PageFetcher:

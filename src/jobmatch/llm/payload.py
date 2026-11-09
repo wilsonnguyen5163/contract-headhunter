@@ -18,10 +18,24 @@ import re
 from pydantic import BaseModel
 
 from jobmatch.config import LlmPayloadSettings
-from jobmatch.schemas import Commitment, EmploymentType, Job, JobStatus, RemoteType
+from jobmatch.schemas import (
+    Commitment,
+    EmploymentType,
+    Job,
+    JobAvailability,
+    JobStatus,
+    RemoteType,
+)
 
 # Jobs a run judges: the same set v0 matched (kept here so v1 does not import match/).
 ACTIVE_STATUSES = (JobStatus.NEW, JobStatus.MATCHED, JobStatus.NO_MATCH)
+
+
+def is_active(job: Job) -> bool:
+    """Sent to Gemini and shown in Results: an imported contract job that the reviewer has
+    not marked completed or unavailable."""
+    return job.status in ACTIVE_STATUSES and job.availability is JobAvailability.AVAILABLE
+
 
 _SPACES = re.compile(r"\s+")
 

@@ -5,6 +5,8 @@ Screens:
 - "/"         Find matches: pick a contractor file and a jobs file, run, watch progress.
 - "/results"  One card per job: up to 3 fits, or the best partial to check, or no match;
               approve / reject / needs info on each; export to Excel; start a new search.
+- "/jobs"     Every job A–Z, coloured by state (matched / no match / waiting / closed), with
+              Completed / Unavailable toggles and Reopen for closed jobs.
 - "/settings" Gemini key (never shown back), reviewer name, data folder.
 
 The run is blocking, so it goes to a worker thread (run.io_bound). Its progress lines reach
@@ -22,21 +24,24 @@ from pathlib import Path
 
 from nicegui import app as nicegui_app
 from nicegui import run, ui
-from nicegui.events import UploadEventArguments
+from nicegui.events import UploadEventArguments, ValueChangeEventArguments
 
 from jobmatch.app.service import (
     CONTRACTOR_SUFFIXES,
     JOB_SUFFIXES,
     AppError,
     AppService,
+    JobAction,
+    JobOverview,
     JobResult,
+    JobState,
     MatchView,
 )
 from jobmatch.app_paths import APP_TITLE
 from jobmatch.llm.matches import MEETS_SEP
 from jobmatch.llm.usage import RunCheck
 from jobmatch.pipeline import PipelineError
-from jobmatch.schemas import Decision, ReasonCode
+from jobmatch.schemas import ApplicationStatus, Decision, ReasonCode, Review
 from jobmatch.sources.contractor_upsert import ContractorFileError
 from jobmatch.storage.csv_store import CsvStoreError
 from jobmatch.storage.loader import StorageBackendUnavailable
@@ -401,9 +406,25 @@ def score_shade(service: AppService, score: int | None, fit: bool) -> str:
     return SCORE_SHADE["low"]
 
 
-def _match_row(service: AppService, view: MatchView) -> None:
+def _rejected(review: Review | None) -> bool:
+    return review is not None and review.decision is Decision.REJECTED
+
+
+def _match_row(
+    service: AppService, view: MatchView, moved: Callable[[], None] | None = None
+) -> None:
+    """One contractor on a Results card. `moved`: called when a decision moves them in or
+    out of "Show rejected" (a reject, or a reset or approve of a rejection), so the card
+    redraws at once (user decision 2026-11-09; Results only)."""
     m = view.match
     state = {"review": view.decision}
+
+    def after(before: Review | None) -> None:
+        if moved is not None and _rejected(before) != _rejected(state["review"]):
+            moved()
+            return
+        judgement.refresh()
+        paint()
 
     @ui.refreshable
     def judgement() -> None:
@@ -418,37 +439,41 @@ def _match_row(service: AppService, view: MatchView) -> None:
                 f"background-color: {SHADE[DECISION_SHADE[review.decision]]}; color: {TEXT_DARK};"
             )
             ui.button(icon="restart_alt", on_click=reset).props("flat round dense size=sm").mark(
-                "reset-decision"
+                "reset-decision", f"reset:{m.talent_id}"
             ).tooltip("Reset the decision")
 
     def save(decision: Decision, reason: ReasonCode | None = None, notes: str = "") -> None:
+        before = state["review"]
         try:
             state["review"] = service.decide(m.match_id, decision, reason, notes)
         except (AppError, CsvStoreError) as exc:
             ui.notify(str(exc), type="negative")
             return
-        judgement.refresh()
-        paint()
+        after(before)
 
     def reset() -> None:
+        before = state["review"]
         try:
             service.clear_decision(m.match_id)
         except CsvStoreError as exc:
             ui.notify(str(exc), type="negative")
             return
         state["review"] = None
-        judgement.refresh()
-        paint()
+        after(before)
 
     async def reject() -> None:
         with ui.dialog() as dialog, ui.card():
             ui.label("Why reject this match?").classes("text-h6")
-            reason = ui.select(
-                {code.value: text for code, text in REASON_TEXT.items()}, label="Reason"
-            ).classes("w-64")
+            reason = (
+                ui.select({code.value: text for code, text in REASON_TEXT.items()}, label="Reason")
+                .classes("w-64")
+                .mark("reject-reason")
+            )
             notes = ui.input("Notes (optional)").classes("w-64")
             with ui.row():
-                ui.button("Reject", on_click=lambda: dialog.submit(True)).props("color=negative")
+                ui.button("Reject", on_click=lambda: dialog.submit(True)).props(
+                    "color=negative"
+                ).mark("reject-confirm")
                 ui.button("Cancel", on_click=lambda: dialog.submit(False)).props("flat")
         ok = await dialog
         chosen = reason.value
@@ -525,7 +550,7 @@ def _match_row(service: AppService, view: MatchView) -> None:
                 ).classes("text-grey-7")
         with ui.row().classes("gap-2 flex-wrap"):
             _shade_button("Approve", "green", lambda: save(Decision.APPROVED), icon="check")
-            _shade_button("Reject", "red", reject, icon="close")
+            _shade_button("Reject", "red", reject, icon="close").mark(f"reject:{m.talent_id}")
             _shade_button(
                 "Needs info", "yellow", lambda: save(Decision.NEEDS_INFO), icon="help_outline"
             )
@@ -543,6 +568,33 @@ def _chip(text: str, icon: str, shade: str | None = None) -> None:
 
 
 def _job_card(service: AppService, result: JobResult) -> None:
+    """One job on Results. Redraws itself when a reject or a reset moves someone in or out
+    of "Show rejected" (that section stays open if it was)."""
+    state = {"result": result, "open": False}
+
+    def moved() -> None:
+        fresh = service.job_result(result.job.job_id)
+        if fresh is not None:
+            state["result"] = fresh
+        card.refresh()
+
+    def remember(e: ValueChangeEventArguments) -> None:
+        state["open"] = bool(e.value)
+
+    @ui.refreshable
+    def card() -> None:
+        _job_card_body(service, state["result"], moved, bool(state["open"]), remember)
+
+    card()
+
+
+def _job_card_body(
+    service: AppService,
+    result: JobResult,
+    moved: Callable[[], None],
+    rejected_open: bool,
+    remember: Callable[[ValueChangeEventArguments], None],
+) -> None:
     job = result.job
     text, _ = OUTCOME_TEXT[result.outcome]
     shade = OUTCOME_SHADE.get(result.outcome)
@@ -564,7 +616,24 @@ def _job_card(service: AppService, result: JobResult) -> None:
         if result.matches:
             with ui.column().classes("w-full gap-3 p-4"):
                 for view in result.matches:
-                    _match_row(service, view)
+                    _match_row(service, view, moved)
+        if result.rejected:
+            # The reviewer's rejections: hidden, still holding their slot in the round, and
+            # brought back with Reset (user decision 2026-11-09: rejections are often
+            # misclicks).
+            with (
+                ui.expansion(
+                    f"Show rejected ({len(result.rejected)})",
+                    icon="visibility_off",
+                    value=rejected_open,
+                    on_value_change=remember,
+                )
+                .classes("w-full px-4 pb-2 text-sm text-grey-8")
+                .mark("show-rejected"),
+                ui.column().classes("w-full gap-3 py-2"),
+            ):
+                for view in result.rejected:
+                    _match_row(service, view, moved)
 
 
 def results_page(service: AppService, native: bool) -> None:
@@ -600,6 +669,210 @@ def results_page(service: AppService, native: bool) -> None:
             ui.button(
                 "Add jobs / new search", icon="add", on_click=lambda: ui.navigate.to("/")
             ).props("color=primary")
+
+
+# ---- screen: jobs ----
+
+# (background, border) per state. Green: matched; red: analyzed, nobody fits (still open for
+# later runs); yellow: waiting to be analyzed; grey: completed or unavailable (never sent).
+JOB_STATE_STYLE: dict[JobState, tuple[str, str]] = {
+    "matched": ("#ccf5bc", "#4CAF50"),
+    "no_match": ("#ff7d7d", "#D32F2F"),
+    "waiting": ("#fff385", "#F9A825"),
+    "inactive": ("#EEEEEE", "#BDBDBD"),
+}
+JOB_STATE_TEXT: dict[JobState, str] = {
+    "matched": "Scanned",
+    "no_match": "Scanned",
+    "waiting": "Not scanned yet",
+    "inactive": "Closed",
+}
+
+
+# The application statuses, in the dropdown's order (user wording 2026-11-09).
+APPLICATION_TEXT: dict[ApplicationStatus, str] = {
+    ApplicationStatus.NOT_REFERRED: "Not referred yet",
+    ApplicationStatus.OUTREACHED: "Outreached to HR",
+    ApplicationStatus.IN_PROGRESS: "HR replied, in progress",
+    ApplicationStatus.REJECTED: "Rejection / Ghosted",
+    ApplicationStatus.HIRED: "Hired",
+}
+
+
+def _candidates_table(service: AppService, item: JobOverview, refresh: Callable[[], None]) -> None:
+    """The approved candidates of one job: name, headline, score, the application status
+    dropdown with Save; a rejected or ghosted application is greyed with Undo."""
+    job_id = item.job.job_id
+    if not item.candidates:
+        ui.label("No approved candidates yet. Approve them on Results.").classes(
+            "text-sm text-grey-7"
+        )
+        return
+
+    def run_action(action: Callable[[], object], done: str) -> None:
+        try:
+            action()
+        except RUN_ERRORS as exc:
+            ui.notify(str(exc), type="warning")
+            return
+        ui.notify(done, type="positive")
+        refresh()
+
+    with ui.element("div").classes(
+        "w-full grid grid-cols-[minmax(8rem,1fr)_minmax(8rem,2fr)_auto_minmax(13rem,auto)_auto] "
+        "items-center gap-x-4 gap-y-2 text-sm"
+    ):
+        for header in ("Candidate", "Headline", "Score", "Application status", ""):
+            ui.label(header).classes("text-xs text-grey-7 uppercase border-b border-grey-4 pb-1")
+        for c in item.candidates:
+            key = f"{job_id}:{c.talent_id}"
+            dim = " opacity-50 line-through" if c.removed else ""
+            ui.label(c.name or c.talent_id).classes("font-bold" + dim)
+            ui.label(c.headline or "").classes("text-grey-8" + dim)
+            score = c.match.fit_score if c.match and c.match.fit_score is not None else None
+            ui.label("—" if score is None else str(score)).classes(dim)
+            if c.removed:
+                ui.label(APPLICATION_TEXT[ApplicationStatus.REJECTED]).classes("text-grey-7")
+                ui.button(
+                    "Undo",
+                    icon="undo",
+                    on_click=lambda t=c.talent_id: run_action(
+                        lambda: service.undo_application_rejection(job_id, t), "Brought back."
+                    ),
+                ).props("outline dense no-caps").classes("bg-white").mark(f"undo:{key}")
+                continue
+            choice = (
+                ui.select({s.value: text for s, text in APPLICATION_TEXT.items()}, value=c.status)
+                .props("dense outlined bg-color=white")
+                .classes("w-full")
+                .mark(f"status:{key}")
+            )
+
+            def save(t: str = c.talent_id, box: ui.select = choice) -> None:
+                status = ApplicationStatus(box.value)
+                note = (
+                    "Saved. The job is marked completed."
+                    if status is ApplicationStatus.HIRED
+                    else "Saved."
+                )
+                run_action(lambda: service.set_application(job_id, t, status), note)
+
+            ui.button("Save", icon="save", on_click=save).props("outline dense no-caps").classes(
+                "bg-white"
+            ).mark(f"save-status:{key}")
+
+
+def _jobs_card(
+    service: AppService, item: JobOverview, refresh: Callable[[], None], opened: set[str]
+) -> None:
+    job = item.job
+    background, border = JOB_STATE_STYLE[item.state]
+    grey = item.state == "inactive"
+
+    def act(action: JobAction) -> Callable[[], None]:
+        def handler() -> None:
+            try:
+                service.set_job_availability(job.job_id, action)
+            except RUN_ERRORS as exc:
+                ui.notify(str(exc), type="warning")
+                return
+            refresh()
+
+        return handler
+
+    def remember(e: ValueChangeEventArguments) -> None:
+        (opened.add if e.value else opened.discard)(job.job_id)
+
+    card = ui.card().props("flat").classes("w-full px-4 py-3 gap-1 rounded-lg")
+    card.style(f"background-color: {background}; border: 2px solid {border};")
+    card.mark("job-card", f"job-state-{item.state}")
+    with card:
+        _jobs_card_head(item, act, grey)
+        active = [c for c in item.candidates if not c.removed]
+        with (
+            ui.expansion(
+                f"Approved candidates ({len(active)})",
+                icon="groups",
+                value=job.job_id in opened,
+                on_value_change=remember,
+            )
+            .props("dense")
+            .classes("w-full text-sm")
+            .mark(f"candidates:{job.job_id}")
+        ):
+            _candidates_table(service, item, refresh)
+
+
+def _jobs_card_head(
+    item: JobOverview, act: Callable[[JobAction], Callable[[], None]], grey: bool
+) -> None:
+    job = item.job
+    with ui.row().classes("w-full items-start justify-between no-wrap gap-3"):
+        with ui.column().classes("flex-1 min-w-0 gap-0" + (" opacity-60" if grey else "")):
+            ui.label(title_case(job.title_norm or job.title_raw)).classes("text-h6")
+            where = " · ".join(p for p in (job.company_raw, job.location_raw) if p)
+            if where:
+                ui.label(where).classes("text-sm text-grey-8")
+            line = JOB_STATE_TEXT[item.state]
+            if item.summary:
+                line += f" · {item.summary}"
+            ui.label(line).classes("text-sm font-medium pt-1").mark("job-summary")
+        with ui.row().classes("items-center gap-2 no-wrap"):
+            ui.button(icon="open_in_new", on_click=_open_url(job.url)).props(
+                'outline round dense aria-label="Open posting"'
+            ).classes("bg-white").tooltip("Open posting")
+            toggles: list[tuple[str, str, JobAction, str]]
+            if grey:
+                toggles = [("Reopen", "replay", "reopen", "Available again for matching")]
+            else:
+                toggles = [
+                    ("Completed", "task_alt", "completed", "Hired, or the position was filled"),
+                    ("Unavailable", "block", "unavailable", "The posting expired or is not valid"),
+                ]
+            for text, icon, action, tip in toggles:
+                # Icon and text centred; extra room after the text (user request 2026-11-09).
+                ui.button(text, icon=icon, on_click=act(action)).props(
+                    "outline dense no-caps align=center"
+                ).classes("bg-white items-center pl-1 pr-3").mark(f"{action}:{job.job_id}").tooltip(
+                    tip
+                )
+
+
+def keep_order(jobs: list[JobOverview], order: list[str]) -> list[JobOverview]:
+    """`jobs` in the order already on screen (job IDs in `order`); any job not shown yet
+    goes after them, in the service's order. A toggle repaints the cards without moving them;
+    the new order shows on the next visit or page refresh."""
+    place = {job_id: i for i, job_id in enumerate(order)}
+    return sorted(jobs, key=lambda o: place.get(o.job.job_id, len(place)))
+
+
+def jobs_page(service: AppService, native: bool) -> None:
+    shown: list[str] = []  # job IDs in on-screen order, fixed when the page opens
+    opened: set[str] = set()  # cards whose candidates table is open (kept across repaints)
+
+    @ui.refreshable
+    def body() -> None:
+        jobs = keep_order(service.jobs_overview(), shown)
+        shown[:] = [o.job.job_id for o in jobs]
+        counts = {s: sum(j.state == s for j in jobs) for s in JOB_STATE_STYLE}
+        scanned = counts["matched"] + counts["no_match"]
+        ui.label(
+            f"{len(jobs)} job(s) · {scanned} scanned ({counts['matched']} with matches, "
+            f"{counts['no_match']} with no match) · {counts['waiting']} not scanned yet · "
+            f"{counts['inactive']} closed"
+        ).classes("text-sm text-grey-8")
+        if not jobs:
+            ui.label("No jobs yet. Add a jobs file and click Find matches.")
+        for item in jobs:
+            _jobs_card(service, item, body.refresh, opened)
+
+    with ui.column().classes(f"{PAGE} gap-3"):
+        ui.label("Jobs").classes("text-h5")
+        ui.label(
+            "Mark a job Completed or Unavailable to stop matching it. Reopen puts it back, "
+            "and the next Find matches analyzes it again."
+        ).classes("text-xs text-grey-7")
+        body()
 
 
 # ---- screen: settings ----
@@ -680,6 +953,7 @@ def build_root(service: AppService, *, native: bool) -> Callable[[], None]:
             for text, path in (
                 ("Find matches", "/"),
                 ("Results", "/results"),
+                ("Jobs", "/jobs"),
                 ("Settings", "/settings"),
             ):
                 ui.button(text, on_click=_go(path)).props("flat color=white")
@@ -689,6 +963,7 @@ def build_root(service: AppService, *, native: bool) -> Callable[[], None]:
             {
                 "/": lambda: home_page(service, native),
                 "/results": lambda: results_page(service, native),
+                "/jobs": lambda: jobs_page(service, native),
                 "/settings": lambda: settings_page(service, native),
             }
         ).classes("w-full items-center")

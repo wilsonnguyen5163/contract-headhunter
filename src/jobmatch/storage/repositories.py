@@ -8,13 +8,16 @@ from collections.abc import Iterable, Mapping
 from typing import Protocol
 
 from jobmatch.schemas import (
+    Application,
     ContractorProfile,
     Job,
     JobStatus,
     LlmMatch,
     LlmUsage,
     Review,
+    RoundEvent,
     Run,
+    ScanRecord,
 )
 
 
@@ -87,11 +90,22 @@ class UsageRepository(Protocol):
     def list_all(self) -> list[LlmUsage]: ...
 
 
+class AppendRepository[M](Protocol):
+    """Append-only rows read whole: job scans, rounds, application statuses."""
+
+    def list_all(self) -> list[M]: ...
+
+    def add_many(self, rows: Iterable[M]) -> int: ...
+
+
 class DataLoader(Protocol):
     """Every repository for one storage backend (storage.loader.create_loader)."""
 
     backend: str
     jobs: JobRepository
+    job_scans: AppendRepository[ScanRecord]
+    job_rounds: AppendRepository[RoundEvent]
+    applications: AppendRepository[Application]
     contractors: ContractorProfileRepository
     llm_matches: LlmMatchRepository
     reviews: ReviewRepository

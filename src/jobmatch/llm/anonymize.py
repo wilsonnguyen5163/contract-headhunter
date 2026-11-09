@@ -201,6 +201,12 @@ def render_card(card: ContractorCard) -> str:
     return "\n".join(lines)
 
 
+def card_hash(card: ContractorCard) -> str:
+    """The profile as sent, without its alias (aliases shift when contractors are added): a
+    change means the contractor is sent again for jobs that already judged them."""
+    return content_hash(render_card(card.model_copy(update={"alias": "-"})))
+
+
 def render_roster(cards: Iterable[ContractorCard]) -> str:
     return "\n\n".join(render_card(c) for c in cards)
 

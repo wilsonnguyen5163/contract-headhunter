@@ -16,8 +16,9 @@ exports/
 *.tmp
 *.csv
 
-# ---- Local helper scripts (not shared) ----
+# ---- Local helper scripts and notes (not shared) ----
 scripts/rename_manual_templates.sh
+TODO.md
 
 # ---- Secrets and local configuration ----
 .env
