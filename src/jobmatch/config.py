@@ -57,6 +57,7 @@ class NormalizeSettings(StrictModel):
     freshness_days: int = Field(gt=0)
     contract_score_threshold: float = Field(gt=0)
     language_min_hits: int = Field(ge=1)
+    full_time_hours_per_week: float = Field(gt=0)
     bilingual_min_share: float = Field(gt=0, le=0.5)
     language_filter_min_words: int = Field(ge=1)
     max_section_items: int = Field(ge=1)

@@ -403,7 +403,11 @@ def collect_job_csv_files(paths: Iterable[Path]) -> list[Path]:
 
 
 def ingest_job_csv_files(
-    paths: Sequence[Path], *, loader: DataLoader, now: datetime | None = None
+    paths: Sequence[Path],
+    *,
+    loader: DataLoader,
+    full_time_hours: float | None = None,
+    now: datetime | None = None,
 ) -> IngestReport:
     """Store the jobs a reviewer entered, as given: no normaliser, no filters (user decisions
     2026-11-10). A job whose link is already stored is left as it is ("already stored").
@@ -417,7 +421,7 @@ def ingest_job_csv_files(
     new: list[Job] = []
     for path in paths:
         try:
-            rows = read_job_csv(path, now)
+            rows = read_job_csv(path, now, full_time_hours=full_time_hours)
         except (JobCsvError, OSError) as exc:
             outcomes.append(FileOutcome(file=str(path), outcome="error", detail=str(exc)))
             continue

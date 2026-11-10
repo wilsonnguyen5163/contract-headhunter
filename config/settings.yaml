@@ -23,6 +23,9 @@ normalize:
   freshness_days: 999
   contract_score_threshold: 0.8 # GUESS: net phrase score to call a posting contract (or, if negative, permanent)
   language_min_hits: 4 # GUESS: EN/FR function words needed before trusting language detection
+  # Jobs entered by hand (jobs CSV / form): this many hours per week or more is full-time (FT),
+  # fewer is part-time (PT). 30 is Statistics Canada's definition (user decision 2026-11-10).
+  full_time_hours_per_week: 30
   bilingual_min_share: 0.25 # GUESS: minority-language share of those words to call a text bilingual
   language_filter_min_words: 40 # GUESS: filter as unsupported language only for texts at least this long
   max_section_items: 20 # bullets kept per list (requirements, nice to have)
