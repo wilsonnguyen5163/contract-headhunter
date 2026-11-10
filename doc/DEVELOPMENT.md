@@ -94,6 +94,19 @@ This file is the pipeline's contractor list (`paths.contractors_csv`). `build-co
 - a new `talent_id` is added, a changed row replaces the stored one, contractors missing from the file are kept (removal is not decided);
 - the list is rewritten only when something changed, after a backup in `data/contractors/backups/`; skills are not learned on upsert.
 
+`--contractors` (and the app's **Choose folder…**) can also take a **contractor folder** (`sources/resumes.py`):
+```
+<folder>/
+  contractors.csv          exactly one .xlsx or .csv at the top, any name
+  resume/                  optional ("resume" or "resumes", any case)
+    TAL-CAN-0001.pdf       one PDF per contractor, named by talent ID (case ignored)
+```
+- After the upsert, each PDF named by a talent ID in the list is copied to `data/contractors/resumes/<talent_id>.pdf` (atomic). An identical file is skipped; a changed one replaces the copy after the old one is moved to `resumes/old/<talent_id>-<UTC stamp>.pdf`.
+- Other PDFs, and files that aren't real PDFs, are skipped. Their names are shown on screen only, never in logs or run reports (a file name can hold a person's name).
+- Résumés are never sent to Gemini and don't change the profile, so a new résumé triggers no rescan.
+- The browser version can't pick a folder: its upload box takes the contractor file and the PDFs together.
+- The Talent card shows a **Résumé** button when a copy exists; it opens `/resume/<talent_id>` in the browser's or webview's own PDF viewer. The route serves only stored files of contractors in the list, looked up by ID.
+
 ## Matching (v1, Gemini)
 
 Design and decisions: [V1_PLAN.md](V1_PLAN.md). Code in `src/jobmatch/llm/` and `src/jobmatch/pipeline.py`.
@@ -126,7 +139,7 @@ docker compose run --rm app python -m jobmatch build-contractors data/contractor
 docker compose run --rm app python -m jobmatch validate-data
 docker compose run --rm app python -m jobmatch validate-data --data-dir data/samples
 docker compose run --rm app python -m jobmatch llm-judge --dry-run       # calls needed, quota check; sends nothing
-docker compose run --rm app python -m jobmatch run-once [--contractors <file>] [--yes] [--max-calls N]
+docker compose run --rm app python -m jobmatch run-once [--contractors <folder or file>] [--yes] [--max-calls N]
 docker compose run --rm app python -m jobmatch export-llm-matches
 docker compose run --rm app python -m jobmatch llm-compare
 docker compose run --rm app pytest
@@ -142,7 +155,7 @@ Option A: a native app with no Docker (NiceGUI in a pywebview window, packaged w
 - **Dependencies:** the `app` extra (`nicegui`, `pywebview`) and the `build` group (`pyinstaller`). Docker installs neither. `uv.lock` covers linux x86_64, macOS x86_64 and Windows AMD64; every compiled package has a wheel for each platform that needs it (checked 2026-11-06).
 - **Folders** (`app_paths.py`): user data root `~/Library/Application Support/dogoodtalent` (Mac) or `%APPDATA%\dogoodtalent` (Windows), holding `data/`, `exports/` and `.env`; config is bundled read-only (`sys._MEIPASS/config`). The app calls `load_settings(bundled_config_dir(), data_root=user_data_root())`.
 - **Secrets** (`secrets_file.py`): the app loads its `.env` into the environment at startup and saves the Gemini key from its Settings screen (atomic write, owner-only file, never logged).
-- **Screens** (`app/ui.py`, NiceGUI 3 `ui.sub_pages`): `/` find matches, `/results`, `/jobs` (every job A–Z by state, with Completed / Unavailable / Reopen, and a caret per job with its approved candidates' application status), `/settings`. All logic is in `app/service.py` (`AppService`), tested without a UI; the screens are tested with NiceGUI's simulated user (`user_simulation`, run with `asyncio.run`, no pytest-asyncio). The run goes to a worker thread (`run.io_bound`); progress reaches the screen through a queue, and the quota question through a dialog awaited on the UI loop.
+- **Screens** (`app/ui.py`, NiceGUI 3 `ui.sub_pages`): `/` find matches, `/results`, `/jobs` (every job A–Z by state, with Completed / Unavailable / Reopen, and a caret per job with its approved candidates' application status), `/talent` (every contractor, the "Available for matching" toggle stored in `talent_availability.csv`, the jobs each was approved for; `build_roster(..., available=)` applies the toggle, and `reset_toggles_on_import` lets a new or changed imported profile take precedence), `/settings`. All logic is in `app/service.py` (`AppService`), tested without a UI; the screens are tested with NiceGUI's simulated user (`user_simulation`, run with `asyncio.run`, no pytest-asyncio). The run goes to a worker thread (`run.io_bound`); progress reaches the screen through a queue, and the quota question through a dialog awaited on the UI loop.
 - **Start:** `python -m jobmatch.app` (native window, user data root) or `python -m jobmatch.app --browser` (repo data). Preview in Docker: `docker compose run --rm --service-ports app python -m jobmatch.app --browser --host 0.0.0.0`, then http://localhost:8080 (published on 127.0.0.1 only).
 
 ### Packaging (G3)
@@ -175,7 +188,8 @@ Option A: a native app with no Docker (NiceGUI in a pywebview window, packaged w
 
 
 - `data/contractors/contractors.csv` is built from the human-maintained workbook (`build-contractors`) or upserted from a contractor file (`run-once --contractors`); both back up the old file first. The workbook itself is never written.
-- `reviews.csv`, `runs.csv`, `llm_usage.csv`, `llm_matches.csv`, `job_scans.csv`, `job_rounds.csv` and `applications.csv` are append-only. Every rewrite of another CSV is preceded by a timestamped copy in `data/backups/`.
+- `data/contractors/resumes/` holds the résumé copies (`<talent_id>.pdf`), with replaced ones kept in `old/`. Personal data: never sent anywhere.
+- `reviews.csv`, `runs.csv`, `llm_usage.csv`, `llm_matches.csv`, `job_scans.csv`, `job_rounds.csv`, `applications.csv`, `talent_availability.csv` and `contractor_changes.csv` are append-only. Rows leave them only through a deletion the reviewer confirmed (Delete job / Delete talent: `CsvTable.purge`, backup first). `removed_jobs.csv` keeps deleted jobs on the Talent screen. Deleting a talent also deletes the decisions on them: a deliberate exception to "every decision is kept" (user decisions 2026-11-10). `contractor_changes.csv` drives rescans: see `shortlists.py` (only contractors never judged for a job, or changed since, are sent). Every rewrite of another CSV is preceded by a timestamped copy in `data/backups/`.
 - Each CSV jobmatch writes gets a `<name>.schema.json` sidecar recording its `schema_version` (jobs: version 3). After a schema change, rebuild with `scripts/reset_reimport.sh`.
 - `data/raw/<source>-YYYY-MM.jsonl` keeps every posting as received: paste files, and the extracted `JobPosting` data or main page HTML for links. Identical records are written once.
 - Multi-value cells use `|`. A literal `|` or `\` inside an item is escaped with a backslash.

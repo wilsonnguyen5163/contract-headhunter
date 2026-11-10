@@ -26,7 +26,7 @@ from pydantic import BaseModel
 
 from jobmatch.normalize.dedupe import DedupeDecision, DedupeOutcome, dedupe
 from jobmatch.normalize.pipeline import Normalizer
-from jobmatch.schemas import JobStatus, RawJob, RawRecord, Run, RunStatus
+from jobmatch.schemas import Job, JobStatus, RawJob, RawRecord, Run, RunStatus
 from jobmatch.sources.links import collect_link_files, read_links
 from jobmatch.sources.paste import PasteFormatError, canonical_url, read_paste_file
 from jobmatch.sources.saved_files import SAVED_SUFFIXES, read_saved_file
@@ -382,4 +382,60 @@ def _run_row(report: IngestReport, now: datetime, seconds: float, source_name: s
         filtered_out=report.count("filtered") + report.count("duplicate"),
         errors=errors,
         duration_seconds=round(seconds, 3),
+    )
+
+
+# ---- jobs entered by a reviewer (jobs CSV file, or the app's form) ----
+
+
+def collect_job_csv_files(paths: Iterable[Path]) -> list[Path]:
+    """Jobs CSV files in the given folders (or the given files); "_" names are skipped."""
+    from jobmatch.sources.job_csv import JOB_CSV_SUFFIX
+
+    files: list[Path] = []
+    for path in paths:
+        candidates = sorted(path.glob(f"*{JOB_CSV_SUFFIX}")) if path.is_dir() else [path]
+        files += [
+            p for p in candidates
+            if p.is_file() and p.suffix.lower() == JOB_CSV_SUFFIX and not p.name.startswith("_")
+        ]  # fmt: skip
+    return files
+
+
+def ingest_job_csv_files(
+    paths: Sequence[Path], *, loader: DataLoader, now: datetime | None = None
+) -> IngestReport:
+    """Store the jobs a reviewer entered, as given: no normaliser, no filters (user decisions
+    2026-11-10). A job whose link is already stored is left as it is ("already stored").
+    Outcomes are labelled "<file>:<row>", so a file whose rows all went in leaves the inbox
+    (pipeline._clear_inbox) and a file with a bad row stays for the next run."""
+    from jobmatch.sources.job_csv import JobCsvError, read_job_csv
+
+    now = now or datetime.now(UTC)
+    outcomes: list[FileOutcome] = []
+    known = {j.job_id for j in loader.jobs.list_all()}
+    new: list[Job] = []
+    for path in paths:
+        try:
+            rows = read_job_csv(path, now)
+        except (JobCsvError, OSError) as exc:
+            outcomes.append(FileOutcome(file=str(path), outcome="error", detail=str(exc)))
+            continue
+        for row in rows:
+            label = f"{path.name}:{row.row}"
+            if row.job is None:
+                detail = f"{path.name} row {row.row}: {row.error}"
+                outcomes.append(FileOutcome(file=label, outcome="error", detail=detail))
+            elif row.job.job_id in known:
+                outcomes.append(
+                    FileOutcome(file=label, outcome="already_stored", job_id=row.job.job_id)
+                )
+            else:
+                known.add(row.job.job_id)
+                new.append(row.job)
+                outcomes.append(FileOutcome(file=label, outcome="new", job_id=row.job.job_id))
+    if new:
+        loader.jobs.add_new(new)
+    return IngestReport(
+        run_id=f"entered-{now:%Y%m%dT%H%M%SZ}", dry_run=False, outcomes=outcomes, fetched=0
     )

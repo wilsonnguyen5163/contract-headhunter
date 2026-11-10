@@ -15,7 +15,7 @@ from nicegui.testing.user_simulation import user_simulation
 
 from jobmatch.app.service import AppError, AppService, job_summary
 from jobmatch.app.ui import build_root, keep_order
-from jobmatch.schemas import Job, JobAvailability, LlmMatch, LlmVerdict
+from jobmatch.schemas import Decision, Job, JobAvailability, LlmMatch, LlmVerdict
 from jobmatch.storage.csv_store import CsvJobRepository, CsvStore
 from test_pipeline import add_jobs, contractor_file
 
@@ -146,8 +146,11 @@ def test_older_jobs_csv_loads_and_is_upgraded_with_a_backup(
 ) -> None:
     repo = CsvJobRepository(store)
     repo.add_new([make_job(job_id="paste:1", source_id="1")])
-    new_columns = ["availability", "availability_changed_at", "reopened_at"]
-    # Rewrite the file as 0.3 wrote it: no availability columns.
+    new_columns = [
+        "availability", "availability_changed_at", "reopened_at", "contact_email",
+        "hours_per_week",
+    ]  # fmt: skip
+    # Rewrite the file as 0.3 wrote it: no availability or contact columns.
     with store.jobs.path.open(encoding="utf-8", newline="") as f:
         rows = list(csv.reader(f))
     keep = [i for i, name in enumerate(rows[0]) if name not in new_columns]
@@ -162,10 +165,10 @@ def test_older_jobs_csv_loads_and_is_upgraded_with_a_backup(
     repo.add_new([make_job(job_id="paste:2", source_id="2", title_raw="Analyste (mandat)")])
     assert [j.job_id for j in repo.list_all()] == ["paste:1", "paste:2"]
     with store.jobs.path.open(encoding="utf-8", newline="") as f:
-        assert next(csv.reader(f))[-3:] == new_columns
+        assert next(csv.reader(f))[-5:] == new_columns
     assert list(store.backups_dir.glob("jobs.*.csv"))  # the old file was kept
     sidecar = json.loads(store.jobs.sidecar_path.read_text(encoding="utf-8"))
-    assert sidecar["columns"][-3:] == new_columns
+    assert sidecar["columns"][-5:] == new_columns
 
 
 # ---- the screen ----
@@ -181,7 +184,7 @@ def test_jobs_screen_colours_and_toggles(judged: AppService) -> None:
         await user.should_see("Scanned · no match", marker="job-summary")
         await user.should_see("3 job(s) · 3 scanned (2 with matches, 1 with no match)")
         red = next(iter(user.find(marker="job-state-no_match").elements))
-        assert "background-color: #ff7d7d" in _css(red)
+        assert "background-color: #ffcfcf" in _css(red)
         await user.should_not_see(marker="reopen:paste:3")  # Reopen: closed jobs only
         user.find(marker="unavailable:paste:3").click()  # the French recruiting job
         await user.should_see("Closed · unavailable", marker="job-summary")
@@ -189,18 +192,29 @@ def test_jobs_screen_colours_and_toggles(judged: AppService) -> None:
         grey = next(iter(user.find(marker="job-state-inactive").elements))
         assert "background-color: #EEEEEE" in _css(grey)
         # The first card (Analyste de données) is closed: it stays first until the page reloads.
-        user.find(marker="completed:paste:2").click()
+        await user.should_not_see(marker="completed:paste:2")  # no Completed button (11-10)
+        await user.should_not_see(marker="delete-job:paste:2")  # Delete: closed jobs only
+        user.find(marker="unavailable:paste:2").click()
         await user.should_see(marker="reopen:paste:2")
-        assert _lines(user)[0] == "Closed · completed"
+        assert _lines(user)[0] == "Closed · unavailable"
         await user.open("/jobs")
-        assert _lines(user)[-2:] == ["Closed · completed", "Closed · unavailable"]  # A–Z
+        assert _lines(user)[-2:] == ["Closed · unavailable", "Closed · unavailable"]  # A–Z
+        # Delete asks first; Cancel keeps the job.
+        user.find(marker="delete-job:paste:3").click()
+        await user.should_see(marker="delete-confirm")
+        user.find(marker="delete-cancel").click()
+        await user.should_see(marker="delete-job:paste:3")
+        user.find(marker="delete-job:paste:3").click()
+        await user.should_see(marker="delete-confirm")
+        user.find(marker="delete-confirm").click()
+        await user.should_not_see(marker="delete-job:paste:3")
 
     async def main() -> None:
         async with user_simulation(root=build_root(service, native=False)) as user:
             await scenario(user)
 
     asyncio.run(main())
-    assert _states(service)["paste:3"] == _states(service)["paste:2"] == "inactive"
+    assert _states(service)["paste:2"] == "inactive" and "paste:3" not in _states(service)
 
 
 def _lines(user) -> list[str]:  # noqa: ANN001
@@ -211,3 +225,63 @@ def _lines(user) -> list[str]:  # noqa: ANN001
 
 def _css(element: ui.element) -> str:
     return "; ".join(f"{k}: {v}" for k, v in element.style.items())
+
+
+def test_jobs_search_title_and_company(judged: AppService) -> None:
+    """User request 2026-11-10: search the Jobs screen by job title or company; accents and
+    case do not matter."""
+    from jobmatch.app.ui import job_matches_search
+
+    jobs = {o.job.job_id: o.job for o in judged.jobs_overview()}
+    french = jobs["paste:2"].model_copy(update={"company_raw": "Ville de Québec"})
+    assert job_matches_search(french, ["analyste", "quebec"])
+    assert job_matches_search(french, ["DONNÉES"])
+    assert not job_matches_search(french, ["recruteur"])
+    assert job_matches_search(french, [])
+
+    async def scenario(user) -> None:  # noqa: ANN001
+        await user.open("/jobs")
+        user.find(marker="jobs-search").type("recruteur")
+        await user.should_see("Recruteur")
+        await user.should_not_see("Analyste de Données")
+        user.find(marker="jobs-search").clear()
+        await user.should_see("Analyste de Données")
+        user.find(marker="jobs-search").type("zzz")
+        await user.should_see("No job matches the search.")
+
+    async def main() -> None:
+        async with user_simulation(root=build_root(judged, native=False)) as user:
+            await scenario(user)
+
+    asyncio.run(main())
+
+
+def test_jobs_filters(judged: AppService) -> None:
+    """User request 2026-11-10: All (A–Z), with approved candidates, unavailable."""
+    from jobmatch.app.ui import job_in_filter
+
+    first = judged.results()[0].matches[0].match
+    judged.decide(first.match_id, Decision.APPROVED)
+    judged.set_job_availability("paste:3", "unavailable")
+    overview = judged.jobs_overview()
+    pick = lambda name: {o.job.job_id for o in overview if job_in_filter(o, name)}  # noqa: E731
+    assert pick("all") == {"paste:1", "paste:2", "paste:3"}
+    assert pick("approved") == {first.job_id}
+    assert pick("unavailable") == {"paste:3"}
+
+    async def scenario(user) -> None:  # noqa: ANN001
+        await user.open("/jobs")
+        await user.should_see("Analyste de Données")
+        user.find(marker="jobs-filter").click()
+        user.find(marker="jobs-filter:unavailable").click()
+        await user.should_see("Recruteur")
+        await user.should_not_see("Analyste de Données")
+        user.find(marker="jobs-filter").click()
+        user.find(marker="jobs-filter:all").click()
+        await user.should_see("Analyste de Données")
+
+    async def main() -> None:
+        async with user_simulation(root=build_root(judged, native=False)) as user:
+            await scenario(user)
+
+    asyncio.run(main())

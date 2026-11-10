@@ -4,6 +4,208 @@ What each change solves, for the team. Newest first. Add an entry with every com
 
 ---
 
+## 2026-11-10 · Release v0.5.0
+
+### What this solves
+Everything since 0.4.0, described in the entries below:
+- **Talent screen:** every contractor, their availability for matching and the jobs they were approved for, with their résumé.
+- **Contractor folder:** one folder with the contractor file and a `resume/` folder of `<talent ID>.pdf`.
+- **Ingest button:** stores contractors and jobs without matching, and the inbox clears as files are stored.
+- **Rematch only changed contractors:** Gemini is asked again only about contractors whose profile changed.
+- **Hires make the contractor not available.** Closed jobs and contractors can be deleted, with confirmation.
+- **Jobs screen:** search, filter, HR contact email with a copy button, and links between Jobs and Results.
+- **Enter jobs yourself:** a jobs CSV file or the "Add a job by hand" form, stored as entered.
+- **Back up or move the app:** an encrypted export and a checked import of all data.
+
+### How to use
+- The version is `0.5.0` in `pyproject.toml`, and the project's own entry in `uv.lock` matches.
+- **New package:** `pyzipper 0.3.6` (with `pycryptodomex 3.24.0`). Rebuild the image with `docker compose build app`.
+- **Existing data keeps working.** The new columns in `jobs.csv` (`contact_email`, `hours_per_week`) are added on the first write, after a backup. The new files (`talent_availability.csv`, `contractor_changes.csv`, `removed_jobs.csv`) are created when first needed.
+- Release with tag `v0.5.0` on `main` after the pull request is merged.
+
+---
+
+## 2026-11-10 · Back up or move the app: export and import all data
+
+### What this solves
+There was no way to back up the app or move it to another computer or person (a change of role, a new machine, a reset) other than copying folders by hand.
+
+### How to use
+- **Settings → Back up or move the app → Export all data:**
+  - Choose a password (at least 10 characters) and where to save. The result is one file, e.g. `do-good-talent-backup-2026-11-10T2105Z.zip`, encrypted with AES-256.
+  - **Without the password the file can't be opened, and the password can't be recovered.** Keep it apart from the file.
+  - **In the file:** all jobs, contractors and résumés, decisions, rounds, applications, availability, Gemini's saved answers (so nothing is paid for twice), the raw posting store and the inbox, plus a manifest with a checksum per file.
+  - **Not in the file:** the app's timestamped backup folders, lock files, and the Gemini key and reviewer name (`.env`).
+- **Settings → Import a backup:**
+  - Pick the file and type its password, then **Check backup**.
+  - **Everything is checked before anything changes:** the password, every checksum, that no file lands outside the data folder, that the data format matches this app, and that every CSV is valid.
+  - A popup compares what's there now with what's in the backup. **Replace data** then swaps them.
+  - **Nothing is deleted:** the previous data moves to `data/backups/before-import-<time>/`. Moving it back undoes the import.
+  - On a new computer, enter the Gemini key and reviewer name in Settings afterwards.
+- **New package:** `pyzipper 0.3.6` (with `pycryptodomex 3.24.0`) for the encrypted zip. Rebuild the image with `docker compose build app`.
+- **Tests:** `tests/test_backup.py`.
+
+---
+
+## 2026-11-10 · Enter jobs yourself: jobs CSV file and "Add a job by hand" form
+
+### What this solves
+Many job sites block automated reading, and saved pages can come out empty. A reviewer can now enter postings directly, either many at once in a CSV file or one at a time in a form, and the app stores them exactly as entered.
+
+### How to use
+- **Jobs CSV:** on Find matches → Jobs, click **Get CSV template**. Fill one row per posting with the columns `url, job_title, company, location, work_mode, hours_per_week, pay, pay_type, posted_date, responsibility, qualification`, then pick the file with **Choose files…**.
+  - **Required:** `url` and `job_title`. The link is how the app recognises the same job again.
+  - **Several items in one cell:** `responsibility` and `qualification` take one item per line (Alt+Enter in Excel) or items separated by `|`.
+  - **Work mode:** `on-site`, `hybrid` or `remote` (French accepted: `sur place`, `hybride`, `à distance`/`télétravail`), or empty.
+  - **Hours per week:** a number, e.g. `40` or `37.5` (between 1 and 80).
+  - **Pay:** a number only (Canadian dollars), e.g. `90` or `95000`, with `pay_type` `hourly` or `salary` (per year). A pay without a type is refused.
+  - **Dates:** `posted_date` as `YYYY-MM-DD`, or with a month name ("8 Nov 2026", "8 novembre 2026"). A date written only in numbers (03/04/2026) is refused because day and month can't be told apart.
+  - **Saving from Excel:** use "CSV UTF-8 (comma delimited)".
+  - **Bad rows:** each one is listed right away ("Skipped: Row 7: url: is empty"). The other rows still go in, and the file stays in the inbox so you can fix it and pick it again.
+- **Add a job by hand:** opens a form with the same fields, each with a hint. Work mode and pay type are drop-downs; hours and pay are number boxes. **Save** or **Save and add another**. Saved entries are listed under Jobs with a remove (×) button, which asks first, until the next Ingest or Find matches stores them.
+- **Stored as entered:**
+  - No normaliser and no filters. Each cell is only cleaned of what copying drags along: HTML tags, bullets and numbering, bold markers, odd spaces and empty lines.
+  - A job whose link is already stored is left as it is.
+  - Work mode, hours and pay show on the Jobs and Results cards. Work mode and hours are sent to Gemini; pay isn't.
+- **Older ways still work:** `.txt` link lists, the pasted-posting template, saved `.html` and `.pdf`.
+- **Tests:** `tests/test_job_csv.py`.
+
+---
+
+## 2026-11-10 · HR contact email, Jobs ↔ Results links, job search and filter
+
+### What this solves
+Reaching out to a job's HR contact meant opening the posting to find their email, and moving between a job's Jobs card and its Results card meant scrolling and searching by hand.
+
+### How to use
+- **HR contact email:** when a posting includes one, the job's Jobs and Results cards show it with a **copy** button ("No contact email in the posting" otherwise).
+  - Taken from the posting text only (English and French), skipping automated mailboxes (`noreply@`, `privacy@`…). When there are several, the first usable one is shown.
+  - Jobs imported earlier get theirs on the next Ingest or Find matches (read from their stored text; `jobs.csv` is backed up first).
+  - The app never sends email, and addresses are masked as `[email]` in what Gemini receives (they're personal data and say nothing about fit).
+  - Stored in a new optional `contact_email` column of `jobs.csv` (older files still load).
+- **See on Results** (open Jobs cards) and **See on Jobs** (every Results card): opens the other screen, scrolls to that job's card and outlines it in purple for about 2 seconds. From Results, the job's approved-candidates table opens.
+- **Jobs screen search and filter:** search by job title or company (accents and case don't matter); the filter icon's dropdown shows All (A–Z), With approved candidates, or Unavailable.
+- **Tests:** `tests/test_contact_email.py`, `tests/test_jobs_view.py`.
+
+---
+
+## 2026-11-10 · Hires set availability; delete closed jobs and contractors
+
+### What this solves
+A hired contractor kept being matched to new jobs until someone switched them off by hand, and closed jobs and departed contractors could never be cleared out of the app.
+
+### How to use
+- **No more Completed button** on the Jobs screen. A job is completed when an approved candidate's application is set to **Hired**. Unavailable and Reopen are unchanged.
+- **Hired makes the contractor not available** (recorded as set by "hire", with the job in the note). The job is already in their "Approved for jobs" list on the Talent screen.
+  - **Undoing a hire** (setting the status back to anything else) restores their availability from before the hire, unless a reviewer changed it in between: then the reviewer's choice stays.
+- **Delete job** (red, on Completed or Unavailable job cards):
+  - A pop-up asks first; Cancel keeps the job.
+  - The job leaves `jobs.csv`, the Jobs and Results screens and future matching. Its scans, rounds and application statuses are deleted.
+  - Contractors approved for it still see it on the Talent screen, marked "(removed)", with their application status (`data/removed_jobs.csv`).
+  - Kept: the shortlist rows and your decisions for it, as evaluation data (IDs only).
+- **Delete talent** (red, on cards of contractors who aren't available):
+  - A pop-up asks first.
+  - Deletes everything about them: their row in the app's contractor list, résumé and old copies, availability, change marks, scans, round slots, shortlist rows, **your decisions on them**, application statuses and removed-job rows.
+  - Your contractor folder isn't touched: importing it again adds them back as new.
+- **Backups:** every CSV is backed up with a timestamp before it's rewritten (`data/backups/`, `data/contractors/backups/`), so deleted data stays in the backups until those are cleared.
+- **Tests:** `tests/test_deletions.py`.
+
+---
+
+## 2026-11-10 · Rematch only changed contractors
+
+### What this solves
+Find matches could resend contractors who hadn't really changed (for example after a job text, model or prompt change), using Gemini quota for nothing. Now an import records exactly who changed, and only they are sent again.
+
+### How it works
+- **At import,** the new rows are compared with the stored ones. A row goes to `data/contractor_changes.csv` (append-only: talent ID, added or updated, the changed column names, time; never the values) for:
+  - every new contractor;
+  - every edited contractor whose anonymized profile (what Gemini sees) differs.
+- **Edits Gemini never sees aren't a change:** a new name, phone or email is recorded nowhere and sends nobody.
+- **Find matches sends a contractor for a job only when:**
+  - they were never judged for it (a new job, a new contractor, someone switched back to available), or
+  - their latest change is newer than their last judgment for that job.
+- **Nothing else resends anyone,** including a changed job text, model or prompt version. (A forced rescan is on the TODO list.) A contractor with a decision for a job is still never sent again for it.
+- The log says e.g. "1 contractor(s) to match again (what Gemini sees has changed)".
+- **Also:** the contractor helper text on Find matches is now just "N contractor(s) processed."
+- **Tests:** `tests/test_contractor_changes.py`.
+
+---
+
+## 2026-11-10 · Find matches: Ingest button and tidier pickers
+
+### What this solves
+The reviewer could only store new contractors and jobs by running a full match. **Ingest** stores them without matching, so profiles and jobs can be checked and corrected first.
+
+### How to use
+- **Ingest** (left of **Find matches**): stores the picked contractor folder (profiles and résumés) and the picked jobs files, then stops.
+  - Nothing is sent to Gemini. New posting links are still fetched, as in a full run.
+  - The status line says what was stored, e.g. "Ingested: 2 contractor(s) added, 0 updated · 2 résumé(s) stored · 5 job(s) imported. Nothing sent to Gemini."
+  - Ingested jobs show on Results as not judged yet. **Find matches** later matches everything stored.
+  - Logged in `data/runs.csv` with `ingest_only=1`.
+- **The inbox is cleared as files are stored** (Ingest and Find matches): a jobs file whose postings are all stored moves to `data/inbox/<links|manual>/done/`, so the next run reports only what's new. A file with an error (a link that couldn't be fetched, a malformed posting) stays in the inbox and is retried next time. Nothing is deleted.
+- **Pickers:** both sections now use the same row, an icon button with the picked path beside it ("Nothing picked yet" until something is picked). The browser preview shows file names instead, since browsers hide paths. Picks are cleared after Ingest or Find matches.
+- **Wording:** section titles lost their numbers ("Contractors (optional)", "Jobs"), and the helper texts were rewritten.
+- **Tests:** `tests/test_ingest_only.py`.
+
+---
+
+## 2026-11-09 · Contractor folder with résumés
+
+### What this solves
+Résumés had no place in the app. Now the contractor data comes as one folder: the contractor file plus a `resume` folder of PDFs, and each contractor's résumé opens from their Talent card.
+
+### How to use
+- **Prepare the folder:**
+  ```
+  Contractors/
+    contractors.csv        (or the .xlsx workbook; exactly one at the top)
+    resume/
+      TAL-CAN-0001.pdf     one PDF per person, named by their talent ID
+  ```
+  The `resume` folder is optional and can also be called `resumes`.
+- **Find matches, step 1:** click **Choose folder…** and pick the folder. The line under it shows the contractor count and the number of résumés found. PDFs not named by a talent ID are listed in orange and skipped; rename them and pick the folder again.
+- **Then click Find matches.** Contractors are added or updated as before, and the résumés are copied into the app (`data/contractors/resumes/`), so the original folder can be moved afterwards.
+  - A résumé that hasn't changed is left alone.
+  - A changed one replaces the app's copy; the old copy is kept in `resumes/old/`.
+- **Talent screen:** every card has a **Résumé** button next to **Profile**. It opens the PDF in a pop-up, and is greyed out ("No résumé on file") when there isn't one.
+- **Only you see résumés.** They're never sent to Gemini, a new or changed résumé doesn't trigger a rescan, and nothing in the contractor list is ever taken from a résumé (the app doesn't read their content).
+- **Browser version** (dev preview): it can't pick a folder, so select the contractor file and the PDFs together in the upload box.
+- **Command line:** `run-once --contractors <folder>` does the same; a single file still works.
+- **Also in this change:** unavailable contractors' cards on the Talent screen are a clearer grey, and the availability switch has its own narrow section on the left of the card.
+- **Tests:** `tests/test_resumes.py`.
+
+---
+
+## 2026-11-09 · Talent screen: every contractor, availability for matching, approved jobs
+
+### What this solves
+There was no way to see a contractor's whole picture, or to stop matching someone who isn't looking for a project. The new **Talent** screen (header button) lists every contractor in the contractor list.
+
+### How to use
+- **Each card shows:**
+  - the name and standardized headline, plus a read-only **Profile** button (the same pop-up as on Results);
+  - a caret, **Approved for jobs (N)**, with a table: job title, company, location and the application status set on the Jobs screen (read-only here). Closed jobs and rejected or ghosted applications are greyed.
+- **"Available for matching"** (switch, optional note, **Save**) is the reviewer's call, after checking with the contractor:
+  - **Off:**
+    - they're never sent to Gemini;
+    - their recommendations still awaiting review leave their round, so the next best candidate takes the slot;
+    - those already approved stay, tagged "Not available for new projects" on Results.
+  - **On again:** the next **Find matches** sends them only for the jobs not yet judged for them.
+  - **Nothing else changes it.** A hire or an application status never does.
+- **Where the starting value comes from:**
+  - Without a toggle, availability follows the contractor's own answer in their profile (open to contract work or not).
+  - A toggle overrides that either way. The card shows "Profile says: …" when the two disagree.
+  - **The import wins over an earlier toggle.** When a contractor import brings a new or changed profile (the contractor filled the intake form again), their own answer is applied, recorded as a toggle by "contractor import". You can toggle again afterwards. Contractors imported unchanged keep your toggle.
+- **Profiles can't be edited here.** Changes go through the intake form and the next contractor import. `contractors.csv` is never written by the app.
+- **Order:** available contractors A–Z, then the others A–Z. A toggle doesn't move the card until the page is opened again.
+- **Search** by name or headline.
+- **Stored in** `data/talent_availability.csv` (append-only: talent ID, available, note, reviewer, time; the latest counts).
+- **Checked again:** a job marked Completed, Unavailable or filled by a hire is off Results and the export, and never scanned, even when new contractors arrive.
+- **Tests:** `tests/test_talent.py`.
+
+---
+
 ## 2026-11-09 · Recommendations in rounds, rescans of newcomers only, application tracking
 
 ### What this solves
@@ -48,8 +250,8 @@ There was no way to stop matching a job once it was filled or had expired. Every
 
 | State | Colour | Meaning |
 |---|---|---|
-| Scanned, with matches | light green, green border | Someone was recommended (reviewed or not, hiring in progress or not) |
-| Scanned, no match | light red, red border | Nobody fits. Stays open, so later runs try again with new contractors |
+| Scanned, with matches | light green (`#c7ffd2`), green border | Someone was recommended (reviewed or not, hiring in progress or not) |
+| Scanned, no match | light red (`#ffcfcf`), red border | Nobody fits. Stays open, so later runs try again with new contractors |
 | Not scanned yet | light yellow, yellow border | New, reopened, or the contractor list changed since |
 | Closed | grey | Marked Completed or Unavailable: never sent to Gemini, not in Results or the export |
 

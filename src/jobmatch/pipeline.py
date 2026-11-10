@@ -1,12 +1,16 @@
 """One full v1 run (phase 6): contractors -> jobs -> Gemini -> shortlists. Used by the
 run-once command and, later, by the desktop app's "Find matches" button.
 
-    1. contractors: upsert the contractor file a person picked, if any (no network)
+    1. contractors: upsert the contractor file a person picked, if any (no network), and
+       store the résumés picked with it (a contractor folder: sources/resumes.py)
     2. jobs: ingest posting links and pasted postings (fetches only new links)
     3. budget: estimate the calls still needed and compare with today's quota
     4. Gemini: judge each active job not judged yet (cached answers cost nothing)
     5. store: shortlists to data/llm_matches.csv, job status matched / no_match
     6. log: one summary row in data/runs.csv
+
+With match=False ("Ingest" in the app) the run stops after step 2: contractors, résumés and
+jobs are stored and nothing is sent to Gemini, so the reviewer can check them first.
 
 v1 never uses the v0 matcher: nothing here imports embed/ or match/.
 
@@ -20,9 +24,10 @@ today's quota ("warn") or cannot finish today ("exceeds"; confirming then runs o
 calls that fit). Without a yes, no call is sent and the shortlists come from the cache.
 """
 
+import os
 import statistics
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
@@ -31,21 +36,38 @@ from filelock import FileLock, Timeout
 from pydantic import BaseModel
 
 from jobmatch.config import LlmSettings, Settings
-from jobmatch.ingest import IngestReport, ingest_links, ingest_paste_files
+from jobmatch.ingest import (
+    IngestReport,
+    collect_job_csv_files,
+    ingest_job_csv_files,
+    ingest_links,
+    ingest_paste_files,
+)
 from jobmatch.llm.anonymize import build_roster
 from jobmatch.llm.judge import JudgeRunReport, judge_jobs, judgments_dir, plan_jobs
 from jobmatch.llm.payload import is_active
 from jobmatch.llm.prompt import PROMPT_VERSION
 from jobmatch.llm.provider import LLMProvider
 from jobmatch.llm.usage import RunCheck, UsageLedger, check_run
+from jobmatch.normalize.contact import contact_email
 from jobmatch.normalize.pipeline import Normalizer
 from jobmatch.schemas import JobStatus, Run, RunStatus
-from jobmatch.shortlists import absorb_cached, contractors_to_scan, pair_states, sync_rounds
+from jobmatch.shortlists import (
+    absorb_cached,
+    contractors_to_scan,
+    latest_changes,
+    mark_changes,
+    pair_states,
+    reset_toggles_on_import,
+    sync_rounds,
+    toggles,
+)
 from jobmatch.sources.contractor_upsert import (
     UpsertReport,
     load_contractor_file,
     upsert_contractors,
 )
+from jobmatch.sources.resumes import ResumeReport, read_contractor_folder, store_resumes
 from jobmatch.sources.web import PageFetcher
 from jobmatch.storage.loader import create_loader
 from jobmatch.storage.repositories import DataLoader
@@ -68,6 +90,8 @@ class PipelineError(Exception):
 class RunOnceReport(BaseModel):
     run_id: str
     contractors: UpsertReport | None = None
+    resumes: ResumeReport | None = None
+    ingest_only: bool = False  # stopped after storing contractors and jobs (no Gemini)
     ingest: list[IngestReport] = []
     budget: RunCheck | None = None
     confirmed: bool | None = None  # None: no question was needed
@@ -92,6 +116,8 @@ def run_once(
     *,
     provider_factory: Callable[[], LLMProvider],
     contractor_file: Path | None = None,
+    resumes: Mapping[str, Path] | None = None,
+    match: bool = True,
     link_paths: Sequence[Path] | None = None,
     paste_paths: Sequence[Path] | None = None,
     confirm: Callable[[RunCheck], bool] = lambda check: False,
@@ -103,7 +129,9 @@ def run_once(
     """link_paths / paste_paths default to data/inbox/links and data/inbox/manual.
     provider_factory is only called when a call is about to be sent, so a run that needs
     no call works without an API key. fetcher_factory is for tests (default: WebFetcher).
-    progress(share, stage) reports how far the run is (0 to 1), for a progress bar."""
+    progress(share, stage) reports how far the run is (0 to 1), for a progress bar.
+    contractor_file may be a contractor folder (its file plus resume/); `resumes` adds
+    résumés picked one by one ({file stem: PDF})."""
     llm = settings.llm
     if llm is None:
         raise PipelineError("settings.yaml has no llm section")
@@ -111,14 +139,17 @@ def run_once(
     timeout = settings.storage.lock_timeout_seconds
     now = datetime.now(UTC)
     started = perf_counter()
-    report = RunOnceReport(run_id=f"run-{now:%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex[:6]}")
+    report = RunOnceReport(
+        run_id=f"run-{now:%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex[:6]}", ingest_only=not match
+    )
     data_dir.mkdir(parents=True, exist_ok=True)
     loader = create_loader(settings)
     try:
         with FileLock(str(data_dir / PIPELINE_LOCK_FILE), timeout=timeout):
             on_progress = progress or (lambda share, stage: None)
-            _run(settings, loader, report, provider_factory, contractor_file, link_paths,
-                 paste_paths, confirm, max_calls, echo, fetcher_factory, on_progress)  # fmt: skip
+            _run(settings, loader, report, provider_factory, contractor_file, resumes or {},
+                 link_paths, paste_paths, confirm, max_calls, echo, fetcher_factory,
+                 on_progress)  # fmt: skip
     except Timeout as exc:
         raise PipelineError("another run is in progress; try again when it ends") from exc
     report.seconds = round(perf_counter() - started, 3)
@@ -132,6 +163,7 @@ def _run(
     report: RunOnceReport,
     provider_factory: Callable[[], LLMProvider],
     contractor_file: Path | None,
+    resumes: Mapping[str, Path],
     link_paths: Sequence[Path] | None,
     paste_paths: Sequence[Path] | None,
     confirm: Callable[[RunCheck], bool],
@@ -147,6 +179,9 @@ def _run(
 
     # 1. contractors
     progress(0.0, "Loading contractors")
+    if contractor_file is not None and contractor_file.is_dir():
+        folder = read_contractor_folder(contractor_file)
+        contractor_file, resumes = folder.contractor_file, {**folder.resumes, **resumes}
     if contractor_file is not None:
         echo(f"Loading contractors from {contractor_file.name}")
         stored = loader.contractors.list_all() if loader.contractors.exists() else []
@@ -167,7 +202,20 @@ def _run(
             f"  {len(c.added)} added · {len(c.updated)} updated · {c.unchanged} unchanged · "
             f"{c.kept_not_in_file} kept (not in the file)"
         )
-    if not loader.contractors.exists():
+        marked = mark_changes(loader, stored, c, llm.payload, datetime.now(UTC))
+        if marked:
+            echo(f"  {marked} contractor(s) to match again (what Gemini sees has changed)")
+        reset = reset_toggles_on_import(loader, c.added + c.updated, datetime.now(UTC))
+        if reset:
+            echo(f"  availability set from the new profile for {reset} contractor(s)")
+    if resumes and loader.contractors.exists():
+        known = [c.talent_id for c in loader.contractors.list_all()]
+        report.resumes = r = store_resumes(resumes, known, data_dir, datetime.now(UTC))
+        echo(
+            f"  résumés: {r.added} added · {r.replaced} replaced · {r.unchanged} unchanged"
+            + (f" · {r.unmatched} skipped (not a talent ID, or not a PDF)" if r.unmatched else "")
+        )
+    if not report.ingest_only and not loader.contractors.exists():
         raise PipelineError("no contractor list yet: load a contractor file first")
 
     # 2. jobs
@@ -175,6 +223,9 @@ def _run(
     default_links, default_pastes = inbox_folders(data_dir)
     links = list(link_paths) if link_paths is not None else default_links
     pastes = list(paste_paths) if paste_paths is not None else default_pastes
+    # Only the app's own inbox is cleared; files named on the command line are left alone.
+    inbox_links = link_paths is None and bool(default_links)
+    inbox_pastes = paste_paths is None and bool(default_pastes)
     normalizer = Normalizer.from_settings(settings) if links or pastes else None
     if links and normalizer:
         echo("Importing posting links")
@@ -190,6 +241,8 @@ def _run(
                 close()
         report.ingest.append(ingest)
         echo(f"  {_ingest_line(ingest)}")
+        if inbox_links:
+            _clear_inbox(default_links[0], ingest, echo)
     if pastes and normalizer:
         echo("Importing pasted postings")
         ingest = ingest_paste_files(
@@ -197,13 +250,33 @@ def _run(
         )
         report.ingest.append(ingest)
         echo(f"  {_ingest_line(ingest)}")
+        if inbox_pastes:
+            _clear_inbox(default_pastes[0], ingest, echo)
+    entered = collect_job_csv_files(pastes)
+    if entered:
+        echo("Importing jobs entered by hand (jobs CSV and form)")
+        ingest = ingest_job_csv_files(entered, loader=loader)
+        report.ingest.append(ingest)
+        echo(f"  {_ingest_line(ingest)}")
+        for o in ingest.outcomes:
+            if o.outcome == "error" and o.detail:
+                echo(f"  {o.detail}")
+        if inbox_pastes:
+            _clear_inbox(default_pastes[0], ingest, echo)
+    filled = fill_contact_emails(loader)
+    if filled:
+        echo(f"  contact email found for {filled} job(s) imported earlier")
+    if report.ingest_only:
+        progress(1.0, "Stored")
+        echo("Stored. Nothing was sent to Gemini: click Find matches when ready.")
+        return
 
     # 3. budget
     progress(PROGRESS_IMPORTED, "Checking today's Gemini quota")
     jobs_repo = loader.jobs
     jobs = [j for j in jobs_repo.list_all() if is_active(j)]
     profiles = loader.contractors.list_all()
-    roster = build_roster(profiles, llm.payload)
+    roster = build_roster(profiles, llm.payload, toggles(loader))  # Talent screen toggles
     for ex in roster.excluded:
         echo(f"  contractor left out of the call: {ex.talent_id} ({ex.reason})")
     if not roster.cards:
@@ -212,7 +285,9 @@ def _run(
     folder = judgments_dir(data_dir)
     # 0.4: each job is sent only the contractors not judged for it yet (shortlists.py).
     states = pair_states(loader)
-    rosters = contractors_to_scan(jobs, roster, llm, loader.job_scans.list_all(), states)
+    rosters = contractors_to_scan(
+        jobs, roster, loader.job_scans.list_all(), states, latest_changes(loader)
+    )
     plan = plan_jobs(jobs, roster, llm, folder, rosters)
     todo = [p for p in plan if not p.cached]
     ledger = UsageLedger(loader.llm_usage)
@@ -340,6 +415,55 @@ def _ingest_line(report: IngestReport) -> str:
     return ", ".join(parts) or "nothing new"
 
 
+INBOX_DONE = "done"
+
+
+def fill_contact_emails(loader: DataLoader) -> int:
+    """Jobs imported before contact emails were read (TODO 1, user decisions 2026-11-10):
+    take the address from their stored posting text. Local only; jobs.csv is rewritten (after
+    a backup) only when an address is found, so this settles after its first run."""
+    found = []
+    for job in loader.jobs.list_all():
+        if job.contact_email is None and job.description_raw and "@" in job.description_raw:
+            address = contact_email(job.description_raw)
+            if address:
+                found.append(job.model_copy(update={"contact_email": address}))
+    if found:
+        loader.jobs.replace(found)
+    return len(found)
+
+
+def _clear_inbox(folder: Path, ingest: IngestReport, echo: Callable[[str], None]) -> None:
+    """Move each inbox file whose jobs are all stored into <folder>/done/, so the next run
+    does not read it again (user request 2026-11-10). A file with an error (a link that
+    could not be fetched, a malformed paste) stays for the next run. Never deletes."""
+    outcomes: dict[str, set[str]] = {}
+    for o in ingest.outcomes:
+        name = Path(o.file).name
+        head, sep, tail = name.rpartition(":")  # a link: "links.txt:<line>"
+        outcomes.setdefault(head if sep and tail.isdigit() else name, set()).add(o.outcome)
+    moved = kept = 0
+    stamp = f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}"
+    for name, seen in sorted(outcomes.items()):
+        source = folder / name
+        if name.startswith("_") or not source.is_file() or seen <= {"skipped"}:
+            continue
+        if "error" in seen:
+            kept += 1
+            continue
+        done = folder / INBOX_DONE
+        done.mkdir(exist_ok=True)
+        dest = done / name
+        if dest.exists():
+            dest = done / f"{source.stem}-{stamp}{source.suffix}"
+        os.replace(source, dest)
+        moved += 1
+    if moved:
+        echo(f"  {moved} file(s) done, moved out of the inbox")
+    if kept:
+        echo(f"  {kept} file(s) with errors stay in the inbox for the next run")
+
+
 def _run_row(report: RunOnceReport, started_at: datetime, model: str) -> Run:
     failed = report.judge.failed if report.judge else 0
     ingest_errors = sum(r.count("error") for r in report.ingest)
@@ -349,7 +473,8 @@ def _run_row(report: RunOnceReport, started_at: datetime, model: str) -> Run:
         started_at=started_at,
         finished_at=datetime.now(UTC),
         status=RunStatus.PARTIAL if partial else RunStatus.OK,
-        source_counts=[f"llm_calls={report.judge.sent if report.judge else 0}"],
+        source_counts=[f"llm_calls={report.judge.sent if report.judge else 0}"]
+        + (["ingest_only=1"] if report.ingest_only else []),
         fetched=sum(r.fetched for r in report.ingest),
         new_jobs=sum(r.count("new") + r.count("needs_details") for r in report.ingest),
         filtered_out=sum(r.count("filtered") + r.count("duplicate") for r in report.ingest),

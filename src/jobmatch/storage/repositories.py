@@ -4,20 +4,23 @@ Code outside storage/ asks storage.loader.create_loader(settings) for a DataLoad
 uses these interfaces, so the CSV files can later be swapped for MongoDB (or SQLite) by
 changing `storage.backend` in settings.yaml, without touching callers."""
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Protocol
 
 from jobmatch.schemas import (
     Application,
+    ContractorChange,
     ContractorProfile,
     Job,
     JobStatus,
     LlmMatch,
     LlmUsage,
+    RemovedJob,
     Review,
     RoundEvent,
     Run,
     ScanRecord,
+    TalentAvailability,
 )
 
 
@@ -31,6 +34,10 @@ class JobRepository(Protocol):
         ...
 
     def update_statuses(self, updates: Mapping[str, tuple[JobStatus, str | None]]) -> None: ...
+
+    def remove(self, job_id: str) -> int:
+        """Delete one job, after a backup (a confirmed deletion)."""
+        ...
 
     def replace(self, jobs: Iterable[Job]) -> None:
         """Replace stored jobs with the same job_id (e.g. a stub filled with details)."""
@@ -54,6 +61,8 @@ class ContractorProfileRepository(Protocol):
 
     def list_all(self) -> list[ContractorProfile]: ...
 
+    def remove_where(self, drop: Callable[[ContractorProfile], bool]) -> int: ...
+
     def replace_all(self, profiles: Iterable[ContractorProfile]) -> str | None:
         """Store this list in place of the current one, keeping a copy of the old one first.
         Returns where that copy is (for the report), or None when there was nothing yet."""
@@ -71,6 +80,8 @@ class LlmMatchRepository(Protocol):
 
     def current(self, judge_keys: Mapping[str, str]) -> dict[str, list[LlmMatch]]: ...
 
+    def remove_where(self, drop: Callable[[LlmMatch], bool]) -> int: ...
+
 
 class ReviewRepository(Protocol):
     """Append-only: every decision is kept as evaluation data."""
@@ -80,6 +91,8 @@ class ReviewRepository(Protocol):
     def list_all(self) -> list[Review]: ...
 
     def latest_by_match(self) -> dict[str, Review]: ...
+
+    def remove_where(self, drop: Callable[[Review], bool]) -> int: ...
 
 
 class UsageRepository(Protocol):
@@ -97,6 +110,10 @@ class AppendRepository[M](Protocol):
 
     def add_many(self, rows: Iterable[M]) -> int: ...
 
+    def remove_where(self, drop: Callable[[M], bool]) -> int:
+        """Delete rows, after a backup: only for a deletion the reviewer confirmed."""
+        ...
+
 
 class DataLoader(Protocol):
     """Every repository for one storage backend (storage.loader.create_loader)."""
@@ -106,6 +123,9 @@ class DataLoader(Protocol):
     job_scans: AppendRepository[ScanRecord]
     job_rounds: AppendRepository[RoundEvent]
     applications: AppendRepository[Application]
+    talent_availability: AppendRepository[TalentAvailability]
+    contractor_changes: AppendRepository[ContractorChange]
+    removed_jobs: AppendRepository[RemovedJob]
     contractors: ContractorProfileRepository
     llm_matches: LlmMatchRepository
     reviews: ReviewRepository
