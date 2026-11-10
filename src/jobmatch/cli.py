@@ -112,7 +112,8 @@ def run_once(
         Path | None,
         typer.Option(
             "--contractors",
-            help="Contractor file to load first (.xlsx workbook or .csv): new talent IDs are "
+            help="Contractor folder (one .xlsx or .csv plus an optional resume/ folder of "
+            "<talent_id>.pdf) or a single contractor file, loaded first: new talent IDs are "
             "added, changed ones updated, others kept.",
         ),
     ] = None,

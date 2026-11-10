@@ -5,7 +5,7 @@ IDs and NOC codes are always strings (Excel strips leading zeros).
 """
 
 from enum import StrEnum
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
@@ -212,6 +212,11 @@ class Job(Record):
     availability_changed_at: AwareDatetime | None = None
     # Set by "Reopen": part of the job's cache keys, so a reopened job is scanned again.
     reopened_at: AwareDatetime | None = None
+    # Added in 0.5: the HR contact's email from the posting text (normalize/contact.py).
+    # Personal data: shown and copied on screen only; never logged or sent to Gemini.
+    contact_email: str | None = None
+    # Added in 0.5 for jobs a reviewer entered (jobs CSV or the app's form):
+    hours_per_week: float | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def _pay_range(self) -> "Job":
@@ -271,6 +276,55 @@ class Application(Record):
     status: ApplicationStatus
     reviewer: NonEmptyStr
     updated_at: AwareDatetime
+
+
+class ContractorChange(Record):
+    """A contractor import that changed what Gemini sees about someone
+    (data/contractor_changes.csv, append-only; user decisions 2026-11-10).
+
+    Written when an import adds a contractor, or edits a profile so that its anonymized card
+    (the text sent to Gemini) differs. Edits Gemini never sees (name, phone, email, address)
+    are not a change. Find matches sends a contractor again for a job already judged for them
+    only when their latest change is newer than that judgment. `columns` names the changed
+    columns, never their values."""
+
+    talent_id: NonEmptyStr
+    change: Literal["added", "updated"]
+    columns: list[str] = []
+    changed_at: AwareDatetime
+
+
+class RemovedJob(Record):
+    """A job the reviewer deleted (Jobs screen, user decisions 2026-11-10), as the Talent
+    screen still lists it: one row per contractor approved for it, with their application
+    status at the time (data/removed_jobs.csv, append-only)."""
+
+    job_id: NonEmptyStr
+    talent_id: NonEmptyStr
+    title: NonEmptyStr
+    company: str | None = None
+    location: str | None = None
+    status: ApplicationStatus
+    removed_at: AwareDatetime
+    removed_by: NonEmptyStr
+
+
+class TalentAvailability(Record):
+    """The reviewer's "Available for matching" toggle for one contractor (Talent screen;
+    data/talent_availability.csv, append-only, the latest counts).
+
+    Without a row, availability follows the contractor's own profile (`contract`). A row
+    overrides it either way, until a contractor import brings a new or changed profile for
+    them: the import then writes a row with the profile's answer, which takes precedence
+    (user decisions 2026-11-09). A hire sets it to not available (reviewer "hire"); undoing
+    the hire restores the value before it (reviewer "hire undone"), unless a reviewer changed
+    it in between (user decisions 2026-11-10)."""
+
+    talent_id: NonEmptyStr
+    available: bool
+    note: str | None = None
+    reviewer: NonEmptyStr
+    changed_at: AwareDatetime
 
 
 class Review(Record):

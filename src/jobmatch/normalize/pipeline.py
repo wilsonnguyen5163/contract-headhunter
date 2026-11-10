@@ -23,6 +23,7 @@ from jobmatch.config import (
 )
 from jobmatch.normalize.commitment import CommitmentDetector
 from jobmatch.normalize.company import CompanyNormalizer
+from jobmatch.normalize.contact import contact_email
 from jobmatch.normalize.contract import ContractAssessment, ContractDetector
 from jobmatch.normalize.dedupe import TitleSimilarity
 from jobmatch.normalize.description import compose_description
@@ -189,6 +190,7 @@ class Normalizer:
             fingerprint=job_fingerprint(company_norm, title_norm, location.city),
             status=status,
             filter_reason=filter_reason,
+            contact_email=contact_email(description),
         )
 
     @staticmethod
