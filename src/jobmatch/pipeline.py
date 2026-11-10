@@ -255,7 +255,9 @@ def _run(
     entered = collect_job_csv_files(pastes)
     if entered:
         echo("Importing jobs entered by hand (jobs CSV and form)")
-        ingest = ingest_job_csv_files(entered, loader=loader)
+        ingest = ingest_job_csv_files(
+            entered, loader=loader, full_time_hours=settings.normalize.full_time_hours_per_week
+        )
         report.ingest.append(ingest)
         echo(f"  {_ingest_line(ingest)}")
         for o in ingest.outcomes:

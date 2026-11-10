@@ -4,6 +4,21 @@ What each change solves, for the team. Newest first. Add an entry with every com
 
 ---
 
+## 2026-11-10 · Pay ranges and FT/PT beside job titles
+
+### What this solves
+Postings often give a pay range, which the jobs CSV and form refused, and the full-time or part-time status of a job wasn't visible at a glance.
+
+### How to use
+- **Pay range:** the `pay` column and the form's Pay box accept a number or a range (`85–95`, `85 - 95`, `$85,000 to $95,000`, `90 000 $ à 110 000 $`). The lower end is kept.
+- **FT/PT next to the title:** Jobs and Results cards show e.g. "Bilingual (Fr/Eng) - PT" in smaller text after the title.
+  - **Jobs entered by hand (CSV or form):** taken from hours per week. 30 or more is FT, fewer is PT (Statistics Canada's definition), set by `normalize.full_time_hours_per_week` in `settings.yaml`. No hours, no label.
+  - **Imported postings:** as detected from the posting text, as before.
+  - Gemini already receives full-time / part-time with the job.
+- **Tests:** `tests/test_job_csv.py`.
+
+---
+
 ## 2026-11-10 · Release v0.5.0
 
 ### What this solves
@@ -58,7 +73,7 @@ Many job sites block automated reading, and saved pages can come out empty. A re
   - **Several items in one cell:** `responsibility` and `qualification` take one item per line (Alt+Enter in Excel) or items separated by `|`.
   - **Work mode:** `on-site`, `hybrid` or `remote` (French accepted: `sur place`, `hybride`, `à distance`/`télétravail`), or empty.
   - **Hours per week:** a number, e.g. `40` or `37.5` (between 1 and 80).
-  - **Pay:** a number only (Canadian dollars), e.g. `90` or `95000`, with `pay_type` `hourly` or `salary` (per year). A pay without a type is refused.
+  - **Pay:** a number or a range (Canadian dollars), e.g. `90`, `95000` or `85–95` (the lower end is kept), with `pay_type` `hourly` or `salary` (per year). A pay without a type is refused.
   - **Dates:** `posted_date` as `YYYY-MM-DD`, or with a month name ("8 Nov 2026", "8 novembre 2026"). A date written only in numbers (03/04/2026) is refused because day and month can't be told apart.
   - **Saving from Excel:** use "CSV UTF-8 (comma delimited)".
   - **Bad rows:** each one is listed right away ("Skipped: Row 7: url: is empty"). The other rows still go in, and the file stays in the inbox so you can fix it and pick it again.

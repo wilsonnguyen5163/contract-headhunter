@@ -315,7 +315,9 @@ class AppService:
         dest.write_bytes(data)
         if Path(name).suffix.lower() == JOB_CSV_SUFFIX:
             try:
-                rows = read_job_csv(dest, now or datetime.now(UTC))
+                rows = read_job_csv(
+                    dest, now or datetime.now(UTC), full_time_hours=self._full_time_hours()
+                )
             except JobCsvError as exc:
                 dest.unlink()  # our own copy, just made: nothing to keep
                 raise AppError(str(exc).replace(dest.name, name)) from exc
@@ -395,6 +397,9 @@ class AppService:
 
     # ---- jobs entered with the form (user decisions 2026-11-10) ----
 
+    def _full_time_hours(self) -> float:
+        return self.settings.normalize.full_time_hours_per_week
+
     def _manual_inbox(self) -> Path:
         return self.data_dir / "inbox" / "manual"
 
@@ -405,7 +410,7 @@ class AppService:
         now = now or datetime.now(UTC)
         try:
             entry = JobEntry.from_cells(dict(fields))
-            entry.to_job(now)
+            entry.to_job(now, full_time_hours=self._full_time_hours())
         except ValueError as exc:
             raise AppError(_entry_problem(exc)) from exc
         slug = re.sub(r"[^a-z0-9]+", "-", entry.job_title.lower()).strip("-")[:40] or "job"

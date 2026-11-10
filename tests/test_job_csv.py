@@ -10,13 +10,14 @@ import pytest
 from jobmatch.app.service import AppError, AppService
 from jobmatch.config import Settings
 from jobmatch.llm.payload import job_card, render_job
-from jobmatch.schemas import JobStatus, PayUnit, RemoteType
+from jobmatch.schemas import Commitment, JobStatus, PayUnit, RemoteType
 from jobmatch.sources.job_csv import (
     COLUMNS,
     JobCsvError,
     clean_cell,
     clean_items,
     parse_number,
+    parse_pay,
     parse_posted,
     read_job_csv,
 )
@@ -110,6 +111,27 @@ def test_rows_stored_as_given(tmp_path: Path) -> None:
     assert rows[5].job is None and "between 1 and 80" in (rows[5].error or "")
 
 
+@pytest.mark.parametrize(
+    ("text", "kept"),
+    [("90", 90), ("85–95", 85), ("85 - 95", 85), ("$85,000 to $95,000", 85000),
+     ("90 000 $ à 110 000 $", 90000), ("95-85", 85)],
+)  # fmt: skip
+def test_pay_range_keeps_the_lower_end(text: str, kept: float) -> None:
+    assert parse_pay(text) == kept
+
+
+def test_hours_give_full_or_part_time(tmp_path: Path) -> None:
+    path = write(tmp_path, (
+        "https://x.ca/j/1,Analyst,,,,40,,,,,\n"
+        "https://x.ca/j/2,Bilingual (Fr/Eng),,,,20,,,,,\n"
+        "https://x.ca/j/3,No hours,,,,,,,,,\n"
+    ))  # fmt: skip
+    rows = read_job_csv(path, NOW, full_time_hours=30)
+    assert [r.job.commitment for r in rows if r.job] == [
+        Commitment.FULL_TIME, Commitment.PART_TIME, Commitment.UNKNOWN,
+    ]  # fmt: skip
+
+
 def test_pay_needs_a_type(tmp_path: Path) -> None:
     path = write(tmp_path, "https://x.ca/j/1,Analyst,,,remote,40 h/week,85,,,,\n")
     [row] = read_job_csv(path, NOW)
@@ -197,6 +219,8 @@ def test_form_on_screen(service: AppService) -> None:
         await user.should_see(marker="job-field:responsibility")
         user.find(marker="job-field:url").type("https://www.example.ca/jobs/7")
         user.find(marker="job-field:job_title").type("Rédacteur (contrat)")
+        user.find(marker="job-field:hours_per_week").type("20")
+        user.find(marker="job-field:pay").type("85–95")
         user.find(marker="job-save").click()
         await user.should_see("Entered by hand (1)")
         await user.should_see("Rédacteur (contrat)")
@@ -208,3 +232,25 @@ def test_form_on_screen(service: AppService) -> None:
 
     run_ui(service, scenario)
     assert service.pending_entries() == []
+
+
+def test_title_shows_full_or_part_time(service: AppService) -> None:
+    service.add_job_entry(
+        {
+            "url": "https://x.ca/j/5",
+            "job_title": "Bilingual (Fr/Eng)",
+            "hours_per_week": "20",
+            "pay": "85-95",
+            "pay_type": "hourly",
+        }
+    )
+    report = service.run(echo=lambda s: None, confirm=lambda c: True, match=False)
+    assert [o.outcome for i in report.ingest for o in i.outcomes] == ["new"]
+    [job] = service._loader().jobs.list_all()
+    assert (job.commitment, job.pay_min) == (Commitment.PART_TIME, 85)
+
+    async def scenario(user) -> None:  # noqa: ANN001
+        await user.open("/jobs")
+        await user.should_see("- PT", marker=f"commitment:{job.job_id}")
+
+    run_ui(service, scenario)
