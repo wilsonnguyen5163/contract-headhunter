@@ -59,6 +59,9 @@ class CsvDataLoader:
         self.job_scans = CsvAppendRepository(self.store.job_scans)
         self.job_rounds = CsvAppendRepository(self.store.job_rounds)
         self.applications = CsvAppendRepository(self.store.applications)
+        self.talent_availability = CsvAppendRepository(self.store.talent_availability)
+        self.contractor_changes = CsvAppendRepository(self.store.contractor_changes)
+        self.removed_jobs = CsvAppendRepository(self.store.removed_jobs)
 
 
 class MongoDataLoader:

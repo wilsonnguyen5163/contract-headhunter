@@ -21,7 +21,7 @@ appears, which can cost a skill word. Privacy wins.
 
 import re
 import unicodedata
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 from pydantic import BaseModel
 
@@ -211,14 +211,25 @@ def render_roster(cards: Iterable[ContractorCard]) -> str:
     return "\n\n".join(render_card(c) for c in cards)
 
 
-def build_roster(profiles: Iterable[ContractorProfile], settings: LlmPayloadSettings) -> Roster:
+def build_roster(
+    profiles: Iterable[ContractorProfile],
+    settings: LlmPayloadSettings,
+    available: Mapping[str, bool] | None = None,
+) -> Roster:
+    """`available`: the reviewer's toggle per talent ID (Talent screen). It overrides the
+    profile's own `contract` answer either way; without one, the profile decides."""
     ordered = sorted(profiles, key=lambda p: p.talent_id)
     width = max(2, len(str(len(ordered))))
     cards: list[ContractorCard] = []
     aliases: dict[str, str] = {}
     excluded: list[Exclusion] = []
+    toggles = available or {}
     for profile in ordered:
-        if not profile.contract:
+        toggle = toggles.get(profile.talent_id)
+        if toggle is False:
+            excluded.append(Exclusion(talent_id=profile.talent_id, reason="marked unavailable"))
+            continue
+        if toggle is None and not profile.contract:
             excluded.append(Exclusion(talent_id=profile.talent_id, reason="not contract"))
             continue
         alias = f"C{len(cards) + 1:0{width}d}"

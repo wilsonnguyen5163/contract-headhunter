@@ -18,6 +18,7 @@ import re
 from pydantic import BaseModel
 
 from jobmatch.config import LlmPayloadSettings
+from jobmatch.normalize.contact import EMAIL
 from jobmatch.schemas import (
     Commitment,
     EmploymentType,
@@ -50,7 +51,9 @@ def content_hash(text: str) -> str:
 
 
 def neutralize(text: str) -> str:
-    """One line of untrusted text: whitespace collapsed, angle brackets replaced."""
+    """One line of untrusted text: whitespace collapsed, angle brackets replaced, email
+    addresses masked (a posting's HR contact is personal data and says nothing about fit)."""
+    text = EMAIL.sub("[email]", text)
     return _SPACES.sub(" ", text).replace("<", "‹").replace(">", "›").strip()
 
 
@@ -76,6 +79,7 @@ class JobCard(BaseModel):
     requirements: list[str] = []
     nice_to_have: list[str] = []
     description: str | None = None  # only when the posting has no lists
+    hours: str | None = None  # as a reviewer entered it (jobs CSV / form)
 
 
 def _contract_line(job: Job) -> str | None:
@@ -103,6 +107,8 @@ def render_job(card: JobCard) -> str:
         lines.append(f"Contract: {card.contract}")
     if card.language:
         lines.append(f"Posting language: {card.language}")
+    if card.hours:
+        lines.append(f"Hours: {card.hours}")
     for label, items in (
         ("Responsibilities", card.responsibilities),
         ("Requirements", card.requirements),
@@ -135,6 +141,7 @@ def job_card(job: Job, settings: LlmPayloadSettings) -> JobCard:
         requirements=requirements,
         nice_to_have=nice_to_have,
         description=description,
+        hours=f"{job.hours_per_week:g} per week" if job.hours_per_week else None,
     )
     return _fit(card, settings)
 

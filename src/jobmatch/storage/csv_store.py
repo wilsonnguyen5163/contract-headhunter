@@ -30,15 +30,18 @@ from pydantic import BaseModel, ValidationError
 from jobmatch.schemas import (
     SCHEMA_VERSION,
     Application,
+    ContractorChange,
     ContractorProfile,
     Job,
     JobStatus,
     LlmMatch,
     LlmUsage,
+    RemovedJob,
     Review,
     RoundEvent,
     Run,
     ScanRecord,
+    TalentAvailability,
 )
 from jobmatch.storage.files import atomic_open, atomic_write_text
 
@@ -355,6 +358,29 @@ class CsvTable[M: BaseModel]:
             self._ensure_sidecar()
         return backup
 
+    def purge(self, drop: Callable[[M], bool]) -> int:
+        """Delete the rows `drop` selects, for a deletion the reviewer confirmed (user
+        decisions 2026-11-10). The only way rows ever leave an append-only table: under the
+        lock, after a timestamped backup, as one atomic rewrite. Returns the rows deleted
+        (0: the file is not touched)."""
+        if self.mode is TableMode.READ_ONLY:
+            self._require_writable(rewrite=True)
+        if not self.path.exists():
+            return 0
+        with self.lock:
+            rows = self.read_all()
+            kept = [r for r in rows if not drop(r)]
+            if len(kept) == len(rows):
+                return 0
+            cells = [self._to_cells(r) for r in kept]
+            self._backup()
+            with atomic_open(self.path) as f:
+                writer = csv.writer(f, lineterminator="\n")
+                writer.writerow(self.columns)
+                writer.writerows(cells)
+            self._ensure_sidecar()
+        return len(rows) - len(kept)
+
     def update(self, change: Callable[[list[M]], list[M]]) -> list[M]:
         """Read-modify-write under one lock. `change` may raise to abort without writing."""
         self._require_writable(rewrite=True)
@@ -483,6 +509,15 @@ class CsvStore:
         self.job_scans = table("job_scans.csv", ScanRecord, TableMode.APPEND_ONLY)
         self.job_rounds = table("job_rounds.csv", RoundEvent, TableMode.APPEND_ONLY)
         self.applications = table("applications.csv", Application, TableMode.APPEND_ONLY)
+        self.talent_availability = table(
+            "talent_availability.csv", TalentAvailability, TableMode.APPEND_ONLY
+        )
+        # 0.5: contractor imports that changed what Gemini sees (rescan only those).
+        self.contractor_changes = table(
+            "contractor_changes.csv", ContractorChange, TableMode.APPEND_ONLY
+        )
+        # Jobs the reviewer deleted: what the Talent screen still lists for each contractor.
+        self.removed_jobs = table("removed_jobs.csv", RemovedJob, TableMode.APPEND_ONLY)
 
     def all_tables(self) -> list[CsvTable[Any]]:
         return [
@@ -494,6 +529,9 @@ class CsvStore:
             self.job_scans,
             self.job_rounds,
             self.applications,
+            self.talent_availability,
+            self.contractor_changes,
+            self.removed_jobs,
         ]
 
 
@@ -571,6 +609,10 @@ class CsvJobRepository:
         if replacements:
             self._table.update(apply)
 
+    def remove(self, job_id: str) -> int:
+        """Delete one job (the reviewer confirmed it), after a backup."""
+        return self._table.purge(lambda j: j.job_id == job_id)
+
 
 class CsvRunRepository:
     def __init__(self, store: CsvStore) -> None:
@@ -603,6 +645,9 @@ class CsvLlmMatchRepository:
             self._table.append(added)
         return added
 
+    def remove_where(self, drop: Callable[[LlmMatch], bool]) -> int:
+        return self._table.purge(drop)
+
     def current(self, judge_keys: Mapping[str, str]) -> dict[str, list[LlmMatch]]:
         """Each job's current shortlist, best first: the rows of the judge_key the job has
         now (job_id -> judge_key). A job judged "no fit" has no rows, so it maps to []."""
@@ -622,6 +667,9 @@ class CsvReviewRepository:
 
     def list_all(self) -> list[Review]:
         return self._table.read_all()
+
+    def remove_where(self, drop: Callable[[Review], bool]) -> int:
+        return self._table.purge(drop)
 
     def latest_by_match(self) -> dict[str, Review]:
         """Current decision per match: the latest review (later rows win ties)."""
@@ -663,6 +711,9 @@ class CsvContractorProfileRepository:
         backup = self._table.rewrite(profiles)
         return str(backup) if backup else None
 
+    def remove_where(self, drop: Callable[[ContractorProfile], bool]) -> int:
+        return self._table.purge(drop)
+
 
 class CsvAppendRepository[M: BaseModel]:
     """An append-only table read whole: job_scans.csv, job_rounds.csv, applications.csv."""
@@ -676,6 +727,9 @@ class CsvAppendRepository[M: BaseModel]:
     def add_many(self, rows: Iterable[M]) -> int:
         return self._table.append(rows)
 
+    def remove_where(self, drop: Callable[[M], bool]) -> int:
+        return self._table.purge(drop)
+
 
 class CsvUsageRepository:
     """data/llm_usage.csv (append-only): one row per LLM API call, token counts only."""
@@ -688,3 +742,20 @@ class CsvUsageRepository:
 
     def list_all(self) -> list[LlmUsage]:
         return self._table.read_all()
+
+
+def check_data_folder(folder: Path, contractors_rel: Path, *, lock_timeout: float) -> list[str]:
+    """Every problem in a data folder's CSV files (the tables jobmatch writes, and its
+    contractor list), as validate-data reports them. Used to check a backup before it is
+    imported (backup.py). Empty when all is well."""
+    problems: list[str] = []
+    for table in CsvStore(folder, lock_timeout=lock_timeout).all_tables():
+        if table.path.exists():
+            problems += [str(e) for e in table.check()[1]]
+    contractors = folder / contractors_rel
+    if contractors.exists():
+        try:
+            CsvContractorProfileRepository(contractors, lock_timeout=lock_timeout).list_all()
+        except CsvStoreError as exc:
+            problems.append(f"{contractors.name}: {str(exc).splitlines()[0]}")
+    return problems
