@@ -249,3 +249,28 @@ def test_resumes_are_never_read_for_content() -> None:
 
     source = Path(module.__file__).read_text(encoding="utf-8")
     assert "pypdf" not in source and "extract_text" not in source
+
+
+def test_results_resume_button(
+    app_with_job: tuple[AppService, MarkerGemini], tmp_path: Path
+) -> None:
+    """User request 2026-11-10: the Résumé button on a Results match opens the stored résumé,
+    as on the Talent screen, and is greyed out when there is none."""
+    service, _ = app_with_job
+    service.pick_contractor_folder(folder(tmp_path))
+    service.run(echo=lambda s: None, confirm=lambda c: True)
+    (resumes_dir(service.data_dir) / "TAL-CAN-0002.pdf").unlink()
+    [job] = service.results()
+    views = {v.match.talent_id: v for v in job.matches}
+    assert views["TAL-CAN-0001"].has_resume and not views["TAL-CAN-0002"].has_resume
+
+    async def scenario(user) -> None:  # noqa: ANN001
+        await user.open("/results")
+        with_one = views["TAL-CAN-0001"].match.match_id
+        without = views["TAL-CAN-0002"].match.match_id
+        [none] = user.find(marker=f"resume:{without}").elements
+        assert not none.enabled
+        user.find(marker=f"resume:{with_one}").click()
+        await user.should_see(marker="resume-frame")
+
+    run_ui(service, scenario)
