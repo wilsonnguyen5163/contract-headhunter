@@ -4,6 +4,18 @@ What each change solves, for the team. Newest first. Add an entry with every com
 
 ---
 
+## 2026-11-10 · Résumé button on Results
+
+### What this solves
+The Résumé button in a Results match's Details was a disabled placeholder, so checking a candidate's résumé meant going to the Talent screen.
+
+### How to use
+- Results → a match → **Details** → **Résumé** opens the contractor's stored résumé in a pop-up, the same as on the Talent screen.
+- Greyed out ("No résumé on file") when the contractor has none.
+- **Tests:** `tests/test_resumes.py`.
+
+---
+
 ## 2026-11-10 · Pay ranges and FT/PT beside job titles
 
 ### What this solves
