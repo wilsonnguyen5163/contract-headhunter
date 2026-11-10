@@ -779,6 +779,25 @@ def _serve_resumes(service: AppService) -> None:
         )
 
 
+def resume_button(talent_id: str, name: str | None, has_resume: bool, marker: str) -> None:
+    """Opens the contractor's stored résumé (Talent and Results). Always shown; greyed out
+    when there is no résumé on file (user request). The tooltip sits on a wrapper: a
+    disabled button gets no hover events."""
+    with ui.element("span") as wrapper:
+        button = (
+            ui.button(
+                "Résumé", icon="picture_as_pdf", on_click=lambda: _resume_dialog(talent_id, name)
+            )
+            .props("outline dense no-caps")
+            .classes("bg-white pl-1 pr-3")
+            .mark(marker)
+        )
+    if not has_resume:
+        button.disable()
+        button.props("color=grey-7")
+        wrapper.tooltip("No résumé on file")
+
+
 def _resume_dialog(talent_id: str, name: str | None) -> None:
     """The résumé in the browser's (or webview's) own PDF viewer."""
     with (
@@ -953,9 +972,7 @@ def _match_row(
                     icon="badge",
                     on_click=lambda: _profile_dialog(service, m.talent_id, view.name),
                 ).props("outline dense no-caps")
-                ui.button("Resume", icon="description").props(
-                    "outline dense no-caps disable"
-                ).tooltip("Resumes come in a later version")
+                resume_button(m.talent_id, view.name, view.has_resume, f"resume:{m.match_id}")
             if m.requirements_met:
                 _meets_table(m.requirements_met)
             for title, items in (
@@ -1696,23 +1713,9 @@ def _talent_card(
                         icon="badge",
                         on_click=lambda: _profile_dialog(service, item.talent_id, item.name),
                     ).props("outline dense no-caps").classes("bg-white pl-1 pr-3")
-                    # Always shown; greyed out when there is no résumé on file (user request).
-                    # The tooltip sits on a wrapper: a disabled button gets no hover events.
-                    with ui.element("span") as wrapper:
-                        resume = (
-                            ui.button(
-                                "Résumé",
-                                icon="picture_as_pdf",
-                                on_click=lambda: _resume_dialog(item.talent_id, item.name),
-                            )
-                            .props("outline dense no-caps")
-                            .classes("bg-white pl-1 pr-3")
-                            .mark(f"resume:{item.talent_id}")
-                        )
-                    if not item.has_resume:
-                        resume.disable()
-                        resume.props("color=grey-7")
-                        wrapper.tooltip("No résumé on file")
+                    resume_button(
+                        item.talent_id, item.name, item.has_resume, f"resume:{item.talent_id}"
+                    )
                     # Icon only, the same height as Profile and Résumé (user request).
                     ui.button(icon="save", on_click=save).props(
                         'outline dense aria-label="Save availability"'

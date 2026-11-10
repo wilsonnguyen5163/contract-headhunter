@@ -117,6 +117,7 @@ class MatchView(BaseModel):
     headline: str | None
     decision: Review | None  # latest decision, if any
     unavailable: bool = False  # not available for new projects (Talent screen)
+    has_resume: bool = False  # a résumé is stored for them (Résumé button)
 
 
 class JobResult(BaseModel):
@@ -580,6 +581,11 @@ class AppService:
         contractors = loader.contractors
         return {p.talent_id: p for p in contractors.list_all()} if contractors.exists() else {}
 
+    def _with_resume(self) -> set[str]:
+        """Talent IDs with a stored résumé."""
+        folder = resumes_dir(self.data_dir)
+        return {f.stem for f in folder.glob(f"*{RESUME_SUFFIX}")} if folder.is_dir() else set()
+
     def results(self) -> list[JobResult]:
         """Every active job with its recommendations (llm/rounds.py) and the latest decision
         on each. Jobs with fits first, then those with a partial to check, then no match,
@@ -589,6 +595,7 @@ class AppService:
         pictures = sync_rounds(self.settings, loader)
         profiles = self._profiles(loader)
         decisions = latest_reviews(loader.llm_matches.list_all(), loader.reviews.latest_by_match())
+        with_resume = self._with_resume()
 
         def view(m: LlmMatch) -> MatchView:
             profile = profiles.get(m.talent_id)
@@ -598,6 +605,7 @@ class AppService:
                 headline=profile.standardized_headline if profile else None,
                 decision=_current_decision(decisions.get((m.job_id, m.talent_id))),
                 unavailable=m.talent_id in pictures[m.job_id].unavailable,
+                has_resume=m.talent_id in with_resume,
             )
 
         out: list[JobResult] = []
@@ -739,10 +747,7 @@ class AppService:
         gone: dict[str, list[RemovedJob]] = {}
         for r in loader.removed_jobs.list_all():
             gone.setdefault(r.talent_id, []).append(r)
-        folder = resumes_dir(self.data_dir)
-        with_resume = (
-            {f.stem for f in folder.glob(f"*{RESUME_SUFFIX}")} if folder.is_dir() else set()
-        )
+        with_resume = self._with_resume()
         out: list[TalentOverview] = []
         for p in profiles:
             toggle = latest.get(p.talent_id)
