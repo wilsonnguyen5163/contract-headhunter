@@ -59,6 +59,7 @@ from jobmatch.llm.usage import RunCheck
 from jobmatch.pipeline import PipelineError, RunOnceReport
 from jobmatch.schemas import (
     ApplicationStatus,
+    Commitment,
     Decision,
     Job,
     JobAvailability,
@@ -245,8 +246,10 @@ JOB_FORM_FIELDS = [
      "line"),
     ("location", "Location", "City and province, e.g. Toronto, ON.", "line"),
     ("work_mode", "Work mode", "Where the work happens, as the posting says.", "work_mode"),
-    ("hours_per_week", "Hours per week", "A number, e.g. 40 or 37.5.", "hours"),
-    ("pay", "Pay", "A number only, e.g. 90 or 95000 (Canadian dollars).", "pay"),
+    ("hours_per_week", "Hours per week",
+     "A number, e.g. 40 or 37.5. {ft} or more shows as FT, fewer as PT.", "hours"),
+    ("pay", "Pay", "Canadian dollars: a number, or a range (the lower end is kept), e.g. 90 or "
+     "85–95.", "line"),
     ("pay_type", "Pay type", "Hourly rate, or yearly salary.", "pay_type"),
     ("posted_date", "Posted date", "When the job was posted. Leave empty if unknown.", "date"),
     ("responsibility", "Responsibilities", "One per line. What the person will do.", "list"),
@@ -274,7 +277,9 @@ def job_form(service: AppService, on_saved: Callable[[], None]) -> None:
             'spaces and empty lines) is removed. <span class="required-mark">*</span> Required.'
         ).classes("text-sm text-grey-8")
         with ui.grid(columns=2).classes("w-full gap-x-4 gap-y-1"):
+            full_time = service.settings.normalize.full_time_hours_per_week
             for name, label, hint, kind in JOB_FORM_FIELDS:
+                hint = hint.replace("{ft}", f"{full_time:g}")  # noqa: PLW2901
                 if kind == "list":
                     field = ui.textarea(label).props(f'outlined autogrow hint="{hint}"')
                     field.classes("col-span-2")
@@ -283,10 +288,9 @@ def job_form(service: AppService, on_saved: Callable[[], None]) -> None:
                     field = ui.select(choices, label=label, value=FORM_DEFAULTS[name]).props(
                         f'outlined dense hint="{hint}"'
                     )
-                elif kind in ("hours", "pay"):
-                    limits = "min=1 max=80 step=0.5" if kind == "hours" else "min=0 step=0.01"
+                elif kind == "hours":
                     field = ui.input(label).props(
-                        f'outlined dense type=number {limits} hint="{hint}"'
+                        f'outlined dense type=number min=1 max=80 step=0.5 hint="{hint}"'
                     )
                 else:
                     field = ui.input(label).props(f'outlined dense hint="{hint}"')
@@ -1003,6 +1007,21 @@ def pay_text(job: Job) -> str | None:
     return amount + unit
 
 
+COMMITMENT_SHORT = {Commitment.FULL_TIME: "FT", Commitment.PART_TIME: "PT"}
+
+
+def job_title(job: Job, classes: str = "") -> None:
+    """The job title, with full-time / part-time after it in smaller text when known
+    (user request 2026-11-10), e.g. "Bilingual (Fr/Eng) - PT"."""
+    with ui.row().classes(f"items-baseline gap-x-2 gap-y-0 {classes}"):
+        ui.label(title_case(job.title_norm or job.title_raw)).classes("text-h6")
+        short = COMMITMENT_SHORT.get(job.commitment)
+        if short:
+            ui.label(f"- {short}").classes("text-sm font-medium text-grey-8").mark(
+                f"commitment:{job.job_id}"
+            ).tooltip("Full-time" if short == "FT" else "Part-time")
+
+
 def contact_line(job: Job) -> None:
     """The posting's HR contact email with a copy button, or a note that there is none.
     Shown and copied only: the app never sends email."""
@@ -1102,7 +1121,7 @@ def _job_card_body(
         .classes("w-full p-0 gap-0 rounded-lg overflow-hidden")
     ):
         with ui.row().classes("w-full items-center justify-between no-wrap px-4 py-3").style(band):
-            ui.label(title_case(job.title_norm or job.title_raw)).classes("text-h6 flex-1 min-w-0")
+            job_title(job, "flex-1 min-w-0")
             ui.button(
                 "See on Jobs", icon="work", on_click=lambda: go_to_card("jobs", job.job_id)
             ).props("outline dense no-caps").classes("bg-white pl-1 pr-3").mark(
@@ -1404,7 +1423,7 @@ def _jobs_card_head(
     job = item.job
     with ui.row().classes("w-full items-start justify-between no-wrap gap-3"):
         with ui.column().classes("flex-1 min-w-0 gap-0" + (" opacity-60" if grey else "")):
-            ui.label(title_case(job.title_norm or job.title_raw)).classes("text-h6")
+            job_title(job)
             where = " · ".join(p for p in (job.company_raw, job.location_raw) if p)
             if where:
                 ui.label(where).classes("text-sm text-grey-8")

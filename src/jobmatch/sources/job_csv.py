@@ -9,8 +9,10 @@ stored as given, without the normaliser (no filters, no title or pay parsing): e
 only cleaned of what copying from a web page or a document drags along (HTML tags, bullet
 and numbering marks, bold markers, odd spaces, empty lines). `responsibility` and
 `qualification` hold several items, one per line inside the cell (Alt+Enter in Excel) or
-separated by "|". `work_mode` is on-site, hybrid or remote; `hours_per_week` a number; `pay`
-a number with `pay_type` salary (per year) or hourly (French words are accepted too).
+separated by "|". `work_mode` is on-site, hybrid or remote; `hours_per_week` a number, which
+also gives full-time (FT) or part-time (PT) from settings normalize.full_time_hours_per_week;
+`pay` a number, or a range of which the lower end is kept ("85–95" -> 85), with `pay_type`
+salary (per year) or hourly (French words are accepted too).
 
 Rules (CLAUDE.md CSV rules): read with utf-8-sig; the header is checked, and every problem
 names the file and the row; a bad row is skipped and reported, the other rows go in. `url`
@@ -33,7 +35,7 @@ from pydantic import BaseModel, field_validator, model_validator
 
 from jobmatch.normalize.contact import contact_email
 from jobmatch.normalize.pipeline import job_id_for
-from jobmatch.schemas import Job, JobStatus, PayUnit, RemoteType
+from jobmatch.schemas import Commitment, Job, JobStatus, PayUnit, RemoteType
 from jobmatch.sources.paste import PasteFormatError, canonical_url
 
 COLUMNS = (
@@ -95,6 +97,17 @@ def parse_number(text: str) -> float:
     if not re.fullmatch(r"\d+(\.\d+)?", value):
         raise ValueError(f"{text!r} is not a number")
     return float(value)
+
+
+_RANGE = re.compile(r"\s*(?:-|–|—|\bto\b|\bà\b|\ba\b)\s*", re.I)
+
+
+def parse_pay(text: str) -> float:
+    """A pay, or the lower end of a range: "90", "$85,000", "85–95", "90 000 $ à 110 000 $"."""
+    parts = [p for p in _RANGE.split(text) if p.strip()]
+    if not parts or len(parts) > 2:
+        raise ValueError(f"{text!r} is not a number or a range")
+    return min(parse_number(p) for p in parts)
 
 
 class JobCsvError(Exception):
@@ -200,7 +213,7 @@ class JobEntry(BaseModel):
     def _pay(cls, value: str) -> str:
         if not value:
             return ""
-        amount = parse_number(value)
+        amount = parse_pay(value)
         if amount <= 0:
             raise ValueError(f"{value!r}: a pay above 0")
         return f"{amount:g}"
@@ -231,14 +244,18 @@ class JobEntry(BaseModel):
             "\n".join(getattr(self, c)) if c in LIST_COLUMNS else getattr(self, c) for c in COLUMNS
         ]
 
-    def to_job(self, now: datetime) -> Job:
-        """The stored job: the entry as given (status new, no filters, no parsing)."""
+    def to_job(self, now: datetime, *, full_time_hours: float | None = None) -> Job:
+        """The stored job: the entry as given (status new, no filters, no parsing). With
+        `full_time_hours`, the hours per week also give full-time or part-time."""
         try:
             source, source_id, url = canonical_url(self.url)
         except PasteFormatError as exc:
             raise ValueError(str(exc)) from exc
         posted = parse_posted(self.posted_date)
         hours = float(self.hours_per_week) if self.hours_per_week else None
+        commitment = Commitment.UNKNOWN
+        if hours is not None and full_time_hours is not None:
+            commitment = Commitment.FULL_TIME if hours >= full_time_hours else Commitment.PART_TIME
         pay = float(self.pay) if self.pay else None
         unit = PAY_UNITS[self.pay_type] if pay is not None else None
         lines = [
@@ -260,6 +277,7 @@ class JobEntry(BaseModel):
             description_raw=text,
             description_clean=text,
             remote_type=WORK_MODE_TYPES.get(self.work_mode, RemoteType.UNKNOWN),
+            commitment=commitment,
             hours_per_week=hours,
             pay_min=pay,
             pay_max=pay,
@@ -278,7 +296,9 @@ class RowResult(BaseModel):
     error: str | None = None
 
 
-def read_job_csv(path: Path, now: datetime) -> list[RowResult]:
+def read_job_csv(
+    path: Path, now: datetime, *, full_time_hours: float | None = None
+) -> list[RowResult]:
     """Every row of a jobs CSV file, as a job or as the reason it was refused."""
     try:
         text = path.read_bytes().decode("utf-8-sig")
@@ -315,7 +335,9 @@ def read_job_csv(path: Path, now: datetime) -> list[RowResult]:
         values = dict(zip(header, cells + [""] * (len(header) - len(cells)), strict=True))
         try:
             entry = JobEntry.from_cells(values)
-            out.append(RowResult(row=row_no, job=entry.to_job(now)))
+            out.append(
+                RowResult(row=row_no, job=entry.to_job(now, full_time_hours=full_time_hours))
+            )
         except ValueError as exc:
             out.append(RowResult(row=row_no, error=_reason(exc)))
     return out
