@@ -25,7 +25,9 @@ from test_app_ui import run_ui
 from test_talent import MarkerGemini
 
 NOW = datetime(2026, 11, 10, 12, 0, tzinfo=UTC)
-HEADER = ",".join(COLUMNS)
+# Rows below leave out the optional contact columns: a file without them still loads.
+CONTACT = ("contact_person", "contact_email")
+HEADER = ",".join(c for c in COLUMNS if c not in CONTACT)
 
 
 def write(tmp_path: Path, body: str, name: str = "jobs.csv") -> Path:
@@ -152,6 +154,51 @@ def test_hours_and_work_mode_go_to_gemini_but_not_pay(
     assert "Hours: 20 per week" in text and "remote" in text and "135" not in text
 
 
+def test_contact_columns(tmp_path: Path) -> None:
+    path = tmp_path / "jobs.csv"
+    path.write_text(
+        ",".join(COLUMNS) + "\n"
+        "https://x.ca/j/1,Analyst,Acme,Jordan Lee,Jordan.Lee@Acme.ca,,,,,,,,\n"
+        'https://x.ca/j/2,Analyste,Ville,Marie Tremblay,,,,,,,,"Écrire à rh@ville.qc.ca",\n'
+        "https://x.ca/j/3,Analyst,Acme,,not-an-email,,,,,,,,\n",
+        encoding="utf-8-sig",
+    )
+    first, second, bad = read_job_csv(path, NOW)
+    assert first.job is not None and second.job is not None
+    assert (first.job.contact_person, first.job.contact_email) == (
+        "Jordan Lee",
+        "jordan.lee@acme.ca",
+    )
+    assert (second.job.contact_person, second.job.contact_email) == (
+        "Marie Tremblay", "rh@ville.qc.ca",  # empty column: the address in the text is used
+    )  # fmt: skip
+    assert bad.job is None and "not an email address" in (bad.error or "")
+
+
+def test_contact_never_reaches_gemini(app_settings: Settings, tmp_path: Path) -> None:
+    assert app_settings.llm is not None
+    path = tmp_path / "jobs.csv"
+    path.write_text(
+        ",".join(COLUMNS)
+        + "\nhttps://x.ca/j/1,Analyst,Acme,Jordan Lee,jl@acme.ca,,,,,,,Build,SQL\n",
+        encoding="utf-8-sig",
+    )
+    [row] = read_job_csv(path, NOW)
+    assert row.job is not None
+    text = render_job(job_card(row.job, app_settings.llm.payload))
+    assert "Jordan" not in text and "jl@acme.ca" not in text
+
+
+def test_template_is_a_new_copy_where_asked(service: AppService, tmp_path: Path) -> None:
+    dest = tmp_path / "chosen" / "my-template.csv"
+    assert service.job_template(dest) == dest
+    dest.write_text("changed", encoding="utf-8")
+    service.job_template(dest)  # a fresh copy every time
+    rows = read_job_csv(dest, NOW)
+    assert [r.error for r in rows] == [None, None] and rows[0].job is not None
+    assert rows[0].job.contact_person == "Jordan Lee"
+
+
 def test_bad_header_names_the_file(tmp_path: Path) -> None:
     path = tmp_path / "jobs.csv"
     path.write_text("link,title\nhttps://x.ca,Analyst\n", encoding="utf-8")
@@ -189,19 +236,21 @@ def test_csv_file_and_form_go_in_on_ingest(service: AppService, tmp_path: Path) 
 
     report = service.run(echo=lambda s: None, confirm=lambda c: True, match=False)
     outcomes = sorted(o.outcome for i in report.ingest for o in i.outcomes)
-    assert outcomes == ["error", "new", "new"]
+    assert outcomes == ["invalid", "new", "new"]
     loader = service._loader()
     stored = {j.title_raw: j for j in loader.jobs.list_all()}
     assert set(stored) == {"Data Analyst", "Analyste (mandat)"}
     assert stored["Analyste (mandat)"].hours_per_week == 35
     assert service.pending_entries() == []  # the form entry is stored and left the inbox
     inbox = service.data_dir / "inbox" / "manual"
-    assert [p.name.endswith("-jobs.csv") for p in inbox.glob("*.csv")] == [True]  # bad row: kept
+    assert list(inbox.glob("*.csv")) == []  # the bad row was dropped; the file is done
 
-    # Entered again: already stored, nothing changes.
+    # Entered again with another title: already stored, never considered again.
     service.add_job_entry({"url": "https://www.exemple.qc.ca/emplois/2/", "job_title": "Autre"})
     report = service.run(echo=lambda s: None, confirm=lambda c: True, match=False)
-    assert "already_stored" in [o.outcome for i in report.ingest for o in i.outcomes]
+    assert [o.outcome for i in report.ingest for o in i.outcomes] == ["already_stored"]
+    titles = {j.title_raw for j in service._loader().jobs.list_all()}
+    assert titles == {"Data Analyst", "Analyste (mandat)"}
 
 
 def test_template_reads_back(service: AppService) -> None:

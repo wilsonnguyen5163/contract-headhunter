@@ -63,12 +63,18 @@ def latest_rows(rows: Iterable[LlmMatch]) -> dict[Pair, LlmMatch]:
 
 def latest_reviews(rows: Iterable[LlmMatch], by_match: Mapping[str, Review]) -> dict[Pair, Review]:
     """The latest reviewer decision per (job, contractor), whichever scan's row it was made
-    on, so a decision survives a rescan."""
+    on, so a decision survives a rescan. A decision older than its row does not count: the
+    row was made again after its job was deleted and imported anew (same text, same
+    match_id), and the kept decision belongs to the deleted job (user decision 2026-11-11)."""
+    rows = list(rows)
     pair_of = {m.match_id: (m.job_id, m.talent_id) for m in rows}
+    created = {m.match_id: m.created_at for m in rows}
     out: dict[Pair, Review] = {}
     for match_id, review in by_match.items():
         pair = pair_of.get(match_id)
-        if pair and (pair not in out or review.reviewed_at >= out[pair].reviewed_at):
+        if pair is None or review.reviewed_at < created[match_id]:
+            continue
+        if pair not in out or review.reviewed_at >= out[pair].reviewed_at:
             out[pair] = review
     return out
 

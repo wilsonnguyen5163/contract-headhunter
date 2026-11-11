@@ -4,6 +4,47 @@ What each change solves, for the team. Newest first. Add an entry with every com
 
 ---
 
+## 2026-11-11 · Fixing a jobs CSV and picking it again now works; Delete job clears Gemini's results
+
+### What this solves
+- A jobs CSV with one bad row (for example `in-person` as the work mode) stayed in the app's inbox, so every Ingest read the old file again and showed the same error, even after the fixed file was picked.
+- A deleted job imported again got Gemini's old answer back from the cache, and old decisions came back with it.
+
+### How to use
+- **A bad row is dropped and reported.** The other rows of the file go in, and the file leaves the inbox. The log says why the row was dropped; fix it in your file and pick the file again, and the fixed row goes in.
+- **A stored job is never considered again**, even if its row changes ("already stored"). To change one: mark it unavailable on Jobs, delete it, then import it again. The same goes for "Add a job by hand", which checks every field before saving.
+- **Delete job** now also removes Gemini's results for that job:
+  - its shortlist rows (after a backup);
+  - its cached Gemini answers, moved to `data/backups/removed-judgments/<time>-<job>/`, so the job imported again is sent to Gemini afresh (one call).
+  - Reviewers' decisions stay in `reviews.csv` as evaluation data, but no longer count for the re-imported job.
+  - The job leaves the app entirely. Only a contractor hired for it still sees its title on Talent (before, every approved contractor did).
+- **Tests:** `tests/test_job_csv_updates.py`, `tests/test_deletions.py`, `tests/test_job_csv.py`.
+
+---
+
+## 2026-11-11 · Runs keep going across tabs; contact columns; template saved where you choose
+
+### What this solves
+- Switching to another tab while Gemini was working stopped the run.
+- The jobs template had nowhere to put the HR contact.
+- "Get CSV template" always wrote to the same place inside the data folder.
+
+### How to use
+- **Ingest and Find matches keep running when you change tab.**
+  - The header shows "Matching… 45%" (or "Ingesting…") on every tab; click it to go back to Find matches.
+  - When the run needs your answer about today's Gemini quota, the header says "Answer needed on Find matches" and the question appears there.
+  - Coming back to Find matches shows the run's log, progress and result.
+- **Contact columns:** the jobs CSV and the "Add a job by hand" form have `contact_person` and `contact_email`.
+  - Both are optional.
+  - If the email is left empty, an address written in the responsibilities or qualifications is used.
+  - Jobs and Results cards show the name next to the email (with its copy button).
+  - Personal data: never sent to Gemini or written to logs.
+  - CSV files without these columns still load, since columns are matched by name.
+- **Get CSV template:** makes a new copy every time. The desktop app asks where to save it; the browser preview downloads it, and the browser asks where, or uses Downloads, as its settings say.
+- **Tests:** `tests/test_run_job.py`, `tests/test_job_csv.py`.
+
+---
+
 ## 2026-11-10 · Résumé button on Results
 
 ### What this solves
@@ -80,7 +121,7 @@ There was no way to back up the app or move it to another computer or person (a 
 Many job sites block automated reading, and saved pages can come out empty. A reviewer can now enter postings directly, either many at once in a CSV file or one at a time in a form, and the app stores them exactly as entered.
 
 ### How to use
-- **Jobs CSV:** on Find matches → Jobs, click **Get CSV template**. Fill one row per posting with the columns `url, job_title, company, location, work_mode, hours_per_week, pay, pay_type, posted_date, responsibility, qualification`, then pick the file with **Choose files…**.
+- **Jobs CSV:** on Find matches → Jobs, click **Get CSV template**. Fill one row per posting with the columns `url, job_title, company, contact_person, contact_email, location, work_mode, hours_per_week, pay, pay_type, posted_date, responsibility, qualification`, then pick the file with **Choose files…**.
   - **Required:** `url` and `job_title`. The link is how the app recognises the same job again.
   - **Several items in one cell:** `responsibility` and `qualification` take one item per line (Alt+Enter in Excel) or items separated by `|`.
   - **Work mode:** `on-site`, `hybrid` or `remote` (French accepted: `sur place`, `hybride`, `à distance`/`télétravail`), or empty.

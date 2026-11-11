@@ -19,6 +19,8 @@
 - Nothing here changes jobs.csv or any match file.
 """
 
+import json
+import os
 import time
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
@@ -64,6 +66,25 @@ def save_judgment(folder: Path, result: TrialResult) -> Path:
     path = folder / f"{result.judge_key}.json"
     atomic_write_text(path, result.model_dump_json(indent=2) + "\n")
     return path
+
+
+def move_judgments(folder: Path, job_id: str, dest: Path) -> int:
+    """Move a job's cached answers (judgments and screenings) out of the cache into `dest`
+    (a backup folder), so the job, imported again, is asked afresh (Delete job, user
+    decision 2026-11-11). Never deletes. Returns the files moved."""
+    moved = 0
+    for source in [*folder.glob("*.json"), *(folder / SCREENING_DIR).glob("*.json")]:
+        try:
+            owner = json.loads(source.read_text(encoding="utf-8")).get("job_id")
+        except (OSError, ValueError, AttributeError):
+            continue
+        if owner != job_id:
+            continue
+        target = dest / source.relative_to(folder)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(source, target)
+        moved += 1
+    return moved
 
 
 class ScreeningRecord(BaseModel):

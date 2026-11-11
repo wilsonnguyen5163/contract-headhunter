@@ -27,6 +27,7 @@ from jobmatch.backup import (
 )
 from jobmatch.config import Settings
 from jobmatch.llm.export import ExportResult, export_current
+from jobmatch.llm.judge import judgments_dir, move_judgments
 from jobmatch.llm.payload import ACTIVE_STATUSES, is_active
 from jobmatch.llm.provider import LLMProvider
 from jobmatch.llm.rounds import latest_applications, latest_reviews, rank
@@ -444,9 +445,10 @@ class AppService:
             raise AppError("That entry is already stored or removed.")
         (self._manual_inbox() / name).unlink()
 
-    def job_template(self) -> Path:
-        """A jobs CSV template with the header and two example rows (English, French)."""
-        dest = self.data_dir / "templates" / "jobs-template.csv"
+    def job_template(self, dest: Path | None = None) -> Path:
+        """A fresh jobs CSV template (header and two example rows, English and French) at
+        `dest`, chosen by the reviewer; default: data/templates/jobs-template.csv."""
+        dest = dest or self.data_dir / "templates" / "jobs-template.csv"
         dest.parent.mkdir(parents=True, exist_ok=True)
         write_job_csv(dest, TEMPLATE_ROWS)
         return dest
@@ -917,12 +919,15 @@ class AppService:
     # ---- deletions (the screens ask for confirmation first) ----
 
     def delete_job(self, job_id: str, now: datetime | None = None) -> int:
-        """Delete a completed or unavailable job from the app (user decisions 2026-11-10):
-        its row in jobs.csv, its scans, rounds and application statuses. The contractors
-        approved for it keep it on the Talent screen (removed_jobs.csv: title, company,
-        location, their status). Shortlist rows and decisions stay (evaluation data, IDs
-        only). Every file is backed up before it is rewritten. Returns the contractors
-        who keep it on their list."""
+        """Delete a completed or unavailable job from the app entirely (user decisions
+        2026-11-10, 2026-11-11): its row in jobs.csv, its scans, rounds and application
+        statuses. Only a contractor hired for it keeps it on the Talent screen
+        (removed_jobs.csv: title, company, location, status). Gemini's results for it go
+        too: its shortlist rows, and its cached answers, moved to
+        data/backups/removed-judgments/<time>-<job>/, so the job imported again is asked
+        afresh. Decisions stay (evaluation data, IDs only) but no longer count for a row made
+        again (rounds.latest_reviews). Every file is backed up before it is rewritten.
+        Returns the contractors who keep it on their list."""
         loader = self._loader()
         job = loader.jobs.get(job_id)
         if job is None:
@@ -938,21 +943,25 @@ class AppService:
                 title=job.title_norm or job.title_raw,
                 company=job.company_raw,
                 location=job.location_raw,
-                status=a.status if (a := applications.get((j, talent_id))) else (
-                    ApplicationStatus.REJECTED if state == "removed"
-                    else ApplicationStatus.NOT_REFERRED
-                ),
+                status=ApplicationStatus.HIRED,
                 removed_at=now,
                 removed_by=self.reviewer(),
             )
-            for (j, talent_id), state in pair_states(loader).items()
-            if j == job_id and state in ("approved", "removed")
+            for (j, talent_id), a in applications.items()
+            if j == job_id and a.status is ApplicationStatus.HIRED
         ]  # fmt: skip
         if keep:
             loader.removed_jobs.add_many(keep)  # first: an interrupted delete loses nothing
         loader.job_scans.remove_where(lambda r: r.job_id == job_id)
         loader.job_rounds.remove_where(lambda r: r.job_id == job_id)
         loader.applications.remove_where(lambda r: r.job_id == job_id)
+        loader.llm_matches.remove_where(lambda r: r.job_id == job_id)
+        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in job_id)
+        move_judgments(
+            judgments_dir(self.data_dir),
+            job_id,
+            self.data_dir / "backups" / "removed-judgments" / f"{now:%Y%m%dT%H%M%SZ}-{safe}",
+        )
         loader.jobs.remove(job_id)
         return len(keep)
 

@@ -19,10 +19,11 @@ a dialog (run_coroutine_threadsafe), and the worker waits for the answer.
 """
 
 import asyncio
-import queue
+import logging
 import re
 import subprocess
 import sys
+import threading
 import unicodedata
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -32,7 +33,7 @@ from urllib.parse import quote
 from fastapi import HTTPException
 from fastapi.responses import FileResponse
 from nicegui import app as nicegui_app
-from nicegui import run, ui
+from nicegui import background_tasks, run, ui
 from nicegui.events import (
     GenericEventArguments,
     UploadEventArguments,
@@ -81,6 +82,8 @@ PAGE_NARROW = "w-full mx-auto max-w-[900px] px-2 sm:px-4 lg:px-8"
 # (SHADE below: green / yellow / red) carry meaning and are not part of the theme.
 THEME_PRIMARY = "#7E57C2"
 THEME_BACKGROUND = "#EDE7F6"
+
+logger = logging.getLogger("jobmatch.app")
 
 RUN_ERRORS = (
     AppError,
@@ -244,6 +247,9 @@ JOB_FORM_FIELDS = [
      "line"),
     ("company", "Company", "The hiring company, or the agency if that's all the posting names.",
      "line"),
+    ("contact_person", "Contact person", "The HR or hiring contact's name, if the posting gives "
+     "one.", "line"),
+    ("contact_email", "Contact email", "Where to reach them, e.g. jordan.lee@example.ca.", "line"),
     ("location", "Location", "City and province, e.g. Toronto, ON.", "line"),
     ("work_mode", "Work mode", "Where the work happens, as the posting says.", "work_mode"),
     ("hours_per_week", "Hours per week",
@@ -460,7 +466,8 @@ def home_page(service: AppService, native: bool) -> None:
             ui.label("Jobs").classes("text-h6")
             ui.label(
                 "A jobs CSV (one row per posting, from the template), or add jobs one at a time "
-                "by hand. Jobs already imported are skipped."
+                "by hand. Jobs already imported are skipped: to change one, delete it on Jobs "
+                "and import it again."
             ).classes("text-sm text-grey-8")
 
             added = ui.column().classes("gap-0")
@@ -478,9 +485,10 @@ def home_page(service: AppService, native: bool) -> None:
                 with added:
                     ui.label(f"Added {name}: {what}.").classes("text-sm")
                     for problem in info.problems:
-                        ui.label(f"Skipped: {problem}").classes("text-sm text-orange-9").mark(
-                            "jobs-row-problem"
-                        )
+                        ui.label(
+                            f"Not imported: {problem}. Fix the row in your file, then pick "
+                            "the file again."
+                        ).classes("text-sm text-orange-9").mark("jobs-row-problem")
 
             reset_jobs = file_picker(
                 native, JOB_SUFFIXES, "Jobs files", jobs, multiple=True, marker="jobs-files"
@@ -492,13 +500,33 @@ def home_page(service: AppService, native: bool) -> None:
                     on_click=lambda: job_form(service, pending.refresh),
                 ).props("outline no-caps").classes("bg-white").mark("add-job")
 
-                def template() -> None:
-                    path = service.job_template()
-                    if native:
-                        open_in_file_manager(path.parent)
-                        ui.notify(f"Template saved: {path}", type="positive", multi_line=True)
-                    else:
-                        ui.download(path, "jobs-template.csv")
+                async def template() -> None:
+                    """A new copy every time, saved where the reviewer chooses (user request
+                    2026-11-11). The browser preview downloads it (the browser asks where, or
+                    uses Downloads, as its settings say)."""
+                    if not native:
+                        ui.download(service.job_template(), "jobs-template.csv")
+                        return
+                    import webview  # only in the desktop app
+
+                    window = nicegui_app.native.main_window
+                    if window is None:
+                        ui.notify("The save dialog is not available.", type="negative")
+                        return
+                    chosen = await window.create_file_dialog(
+                        webview.FileDialog.SAVE, save_filename="jobs-template.csv"
+                    )
+                    if not chosen:
+                        return
+                    dest = Path(chosen if isinstance(chosen, str) else chosen[0])
+                    if dest.suffix.lower() != ".csv":
+                        dest = dest.with_suffix(".csv")
+                    try:
+                        path = service.job_template(dest)
+                    except OSError as exc:
+                        ui.notify(f"Could not save the template: {exc}", type="negative")
+                        return
+                    ui.notify(f"Template saved: {path}", type="positive", multi_line=True)
 
                 ui.button("Get CSV template", icon="download", on_click=template).props(
                     "flat no-caps"
@@ -555,15 +583,23 @@ def home_page(service: AppService, native: bool) -> None:
             bar = ui.linear_progress(value=0, show_value=False).props("rounded size=12px")
             bar.classes("w-full sm:w-3/4 lg:w-1/2")
             bar.set_visibility(False)
-            status = ui.label("").classes("text-sm text-center")
+            status = ui.label("").classes("text-sm text-center").mark("run-status")
         log = ui.log(max_lines=400).classes("w-full h-[33vh] min-h-[200px] font-mono text-xs")
-        quota = service.quota()
-        quota_label = ui.label(
-            f"Gemini today: {quota.requests} of {quota.rpd} requests, {quota.tokens:,} tokens."
-        ).classes("text-xs text-grey-7")
+        quota_label = ui.label().classes("text-xs text-grey-7")
         after = ui.row()
 
-    async def ask(check: RunCheck) -> bool:
+    def show_quota() -> None:
+        q = service.quota()
+        quota_label.text = f"Gemini today: {q.requests} of {q.rpd} requests, {q.tokens:,} tokens."
+
+    show_quota()
+    # The run lives in a RunJob, not in this screen: changing tab never stops it (user request
+    # 2026-11-11). This screen shows it, whenever it is open, from a timer.
+    job = run_job(service)
+    seen = {"lines": 0, "finished": job.finished, "asking": False}
+
+    def ask(check: RunCheck) -> None:
+        seen["asking"] = True
         with page, ui.dialog().props("persistent") as dialog, ui.card():
             ui.label("Use more of today's Gemini quota?").classes("text-h6")
             ui.label(check.message).classes("text-sm")
@@ -572,59 +608,28 @@ def home_page(service: AppService, native: bool) -> None:
                     f"Yes sends the {check.calls_that_fit} call(s) that fit today; "
                     "the rest wait for the next run."
                 ).classes("text-sm")
+
+            def answer(yes: bool) -> None:
+                job.answer(yes)
+                dialog.close()
+                seen["asking"] = False
+
             with ui.row():
-                ui.button("Yes, go ahead", on_click=lambda: dialog.submit(True))
-                ui.button("Not now", on_click=lambda: dialog.submit(False)).props("flat")
-        answer = await dialog
-        dialog.delete()
-        return bool(answer)
+                ui.button("Yes, go ahead", on_click=lambda: answer(True)).mark("quota-yes")
+                ui.button("Not now", on_click=lambda: answer(False)).props("flat").mark("quota-no")
+        dialog.open()
 
-    async def start(match: bool) -> None:
-        loop = asyncio.get_running_loop()
-        lines: queue.Queue[str] = queue.Queue()
-        latest: dict[str, float | str] = {"share": 0.0, "stage": "Starting"}
-
-        def drain() -> None:
-            while not lines.empty():
-                log.push(lines.get_nowait())
-            bar.value = float(latest["share"])
-            stage.text = f"{latest['stage']} ({round(float(latest['share']) * 100)}%)"
-
-        def on_progress(share: float, text: str) -> None:  # called from the worker thread
-            latest["share"], latest["stage"] = share, text
-
-        def confirm(check: RunCheck) -> bool:
-            return asyncio.run_coroutine_threadsafe(ask(check), loop).result()
-
-        run_button.disable()
-        ingest_button.disable()
-        after.clear()
-        bar.value = 0
-        bar.set_visibility(True)
-        status.text = (
-            "Working… this can take a few minutes when there are new jobs."
-            if match
-            else "Storing contractors and jobs…"
-        )
-        timer = ui.timer(0.2, drain)
-        try:
-            report = await run.io_bound(
-                service.run, echo=lines.put, confirm=confirm, progress=on_progress, match=match
-            )
-        except RUN_ERRORS as exc:
-            drain()
-            status.text = f"Stopped: {exc}"
-            ui.notify(str(exc), type="negative", multi_line=True)
+    def finished() -> None:
+        """The run ended (seen once per run, even if it ended while on another tab)."""
+        run_button.enable()
+        ingest_button.enable()
+        bar.value = job.share
+        show_quota()
+        if job.error is not None:
+            status.text = f"Stopped: {job.error}"
+            ui.notify(job.error, type="negative", multi_line=True)
             return
-        finally:
-            timer.cancel()
-            drain()
-            run_button.enable()
-            ingest_button.enable()
-            q = service.quota()
-            quota_label.text = (
-                f"Gemini today: {q.requests} of {q.rpd} requests, {q.tokens:,} tokens."
-            )
+        report = job.report
         if report is None:
             return
         # The picks are stored now: clear them from the screen.
@@ -635,21 +640,166 @@ def home_page(service: AppService, native: bool) -> None:
         skipped.set_visibility(False)
         added.clear()
         show_count()
-        if report.ingest_only:
-            status.text = _ingested_text(report)
-            return
-        status.text = (
-            f"Done: {report.jobs_matched} job(s) with suggestions, {report.jobs_no_match} with "
-            f"none, {report.jobs_not_judged} not judged yet."
-            + (f" {report.stopped}." if report.stopped else "")
-        )
-        with after.classes("w-full justify-center"):
-            ui.button(
-                "See results", icon="arrow_forward", on_click=lambda: ui.navigate.to("/results")
-            )
+        status.text = run_summary(report)
+        if not report.ingest_only:
+            after.clear()
+            with after.classes("w-full justify-center"):
+                ui.button(
+                    "See results",
+                    icon="arrow_forward",
+                    on_click=lambda: ui.navigate.to("/results"),
+                )
 
+    def update() -> None:
+        for line in job.lines[seen["lines"] :]:
+            log.push(line)
+        seen["lines"] = len(job.lines)
+        if job.running:
+            run_button.disable()
+            ingest_button.disable()
+            bar.set_visibility(True)
+            bar.value = job.share
+            stage.text = f"{job.stage} ({round(job.share * 100)}%)"
+            status.text = job.working_text()
+            if job.question is not None and not seen["asking"]:
+                ask(job.question)
+        elif job.finished != seen["finished"]:
+            seen["finished"] = job.finished
+            stage.text = f"{job.stage} ({round(job.share * 100)}%)" if job.stage else ""
+            finished()
+
+    def start(match: bool) -> None:
+        if not job.start(match):
+            ui.notify("A run is already going: it shows here.", type="warning")
+            return
+        after.clear()
+        log.clear()
+        seen["lines"] = 0
+        bar.value = 0
+        update()
+
+    if job.running or job.lines:  # a run going on, or the last one: shown again
+        if not job.running and job.report is not None:
+            status.text = run_summary(job.report)
+            bar.set_visibility(True)
+            bar.value = job.share
+        update()
+    ui.timer(0.25, update)
     run_button.on_click(lambda: start(match=True))
     ingest_button.on_click(lambda: start(match=False))
+
+
+def run_summary(report: RunOnceReport) -> str:
+    if report.ingest_only:
+        return _ingested_text(report)
+    return (
+        f"Done: {report.jobs_matched} job(s) with suggestions, {report.jobs_no_match} with "
+        f"none, {report.jobs_not_judged} not judged yet."
+        + (f" {report.stopped}." if report.stopped else "")
+    )
+
+
+class RunJob:
+    """One Ingest or Find matches run, kept outside the screens so that changing tab never
+    stops it (user request 2026-11-11). The worker thread writes progress, lines and the
+    budget question here; whichever screen is open reads them on a timer. One per app."""
+
+    def __init__(self, service: AppService) -> None:
+        self.service = service
+        self.running = False
+        self.match = True
+        self.lines: list[str] = []
+        self.share = 0.0
+        self.stage = ""
+        self.report: RunOnceReport | None = None
+        self.error: str | None = None
+        self.finished = 0  # counts finished runs, so a screen sees each ending once
+        self.question: RunCheck | None = None  # the budget question waiting for an answer
+        self._answered = threading.Event()
+        self._answer = False
+
+    def working_text(self) -> str:
+        if self.question is not None:
+            return "Waiting for your answer about today's Gemini quota."
+        return (
+            "Working… this can take a few minutes when there are new jobs. You can use the "
+            "other tabs meanwhile."
+            if self.match
+            else "Storing contractors and jobs…"
+        )
+
+    def start(self, match: bool) -> bool:
+        if self.running:
+            return False
+        self.running, self.match = True, match
+        self.lines, self.share, self.stage = [], 0.0, "Starting"
+        self.report, self.error, self.question = None, None, None
+        background_tasks.create(self._work(match), name="find-matches")
+        return True
+
+    async def _work(self, match: bool) -> None:
+        try:
+            self.report = await run.io_bound(
+                self.service.run,
+                echo=self.lines.append,
+                confirm=self._confirm,
+                progress=self._progress,
+                match=match,
+            )
+        except RUN_ERRORS as exc:
+            self.error = str(exc)
+        except Exception:  # noqa: BLE001 (shown in plain words; details go to the log)
+            logger.exception("run_failed")
+            self.error = "The run stopped on an unexpected error. See the app's log."
+        finally:
+            self.question = None
+            self.running = False
+            self.finished += 1
+
+    def _progress(self, share: float, stage: str) -> None:  # worker thread
+        self.share, self.stage = share, stage
+
+    def _confirm(self, check: RunCheck) -> bool:  # worker thread: waits for the reviewer
+        self._answered.clear()
+        self.question = check
+        self._answered.wait()
+        self.question = None
+        return self._answer
+
+    def answer(self, yes: bool) -> None:
+        self._answer = yes
+        self._answered.set()
+
+
+_RUN_JOBS: dict[int, RunJob] = {}
+
+
+def run_job(service: AppService) -> RunJob:
+    """The app's run (one per service)."""
+    return _RUN_JOBS.setdefault(id(service), RunJob(service))
+
+
+def run_indicator(service: AppService) -> None:
+    """In the header on every tab: the run going on, and a link back to it."""
+    job = run_job(service)
+    chip = (
+        ui.button(on_click=lambda: ui.navigate.to("/"))
+        .props("flat dense no-caps color=white icon=autorenew")
+        .mark("run-indicator")
+    )
+
+    def update() -> None:
+        chip.set_visibility(job.running)
+        if job.running:
+            what = "Matching" if job.match else "Ingesting"
+            chip.text = (
+                "Answer needed on Find matches"
+                if job.question is not None
+                else f"{what}… {round(job.share * 100)}%"
+            )
+
+    update()
+    ui.timer(0.5, update)
 
 
 def _ingested_text(report: RunOnceReport) -> str:
@@ -662,6 +812,9 @@ def _ingested_text(report: RunOnceReport) -> str:
         parts.append(f"{r.added + r.replaced} résumé(s) stored")
     new_jobs = sum(i.count("new") + i.count("needs_details") for i in report.ingest)
     parts.append(f"{new_jobs} job(s) imported")
+    dropped = sum(i.count("invalid") for i in report.ingest)
+    if dropped:
+        parts.append(f"{dropped} row(s) dropped (see the log)")
     return "Ingested: " + " · ".join(parts) + ". Nothing sent to Gemini."
 
 
@@ -1044,6 +1197,8 @@ def contact_line(job: Job) -> None:
     Shown and copied only: the app never sends email."""
     with ui.row().classes("items-center gap-1 no-wrap text-sm").mark("contact-email"):
         ui.icon("mail_outline", size="16px").classes("text-grey-7")
+        if job.contact_person:
+            ui.label(job.contact_person).classes("font-medium").mark("contact-person")
         if not job.contact_email:
             ui.label("No contact email in the posting").classes("text-grey-7")
             return
@@ -1395,9 +1550,10 @@ def _jobs_card(
         confirm_delete(
             f"Delete {title}?",
             [
-                "The job leaves the app: Jobs, Results and future matching. Its scans, rounds "
-                "and application statuses are deleted.",
-                "Contractors approved for it still see it on the Talent screen.",
+                "The job leaves the app: Jobs, Results and future matching. Its scans, rounds, "
+                "application statuses and Gemini's results are deleted.",
+                "Imported again later, it is sent to Gemini afresh.",
+                "A contractor hired for it still sees it on the Talent screen.",
             ],
             go,
         )
@@ -2070,6 +2226,7 @@ def build_root(service: AppService, *, native: bool) -> Callable[[], None]:
         with ui.header().classes("items-center"):
             ui.label(APP_TITLE).classes("text-lg font-bold").mark("app-title")
             ui.space()
+            run_indicator(service)
             for text, path in (
                 ("Find matches", "/"),
                 ("Results", "/results"),

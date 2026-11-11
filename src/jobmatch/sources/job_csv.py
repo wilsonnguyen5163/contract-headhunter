@@ -1,17 +1,20 @@
 """Jobs entered by a reviewer: a jobs CSV file, or the app's "Add a job by hand" form, which
 saves the same format (user decisions 2026-11-10).
 
-    url, job_title, company, location, work_mode, hours_per_week, pay, pay_type,
-    posted_date, responsibility, qualification
+    url, job_title, company, contact_person, contact_email, location, work_mode,
+    hours_per_week, pay, pay_type, posted_date, responsibility, qualification
 
 One row per posting, after a header row. A human typed or pasted these details, so they are
 stored as given, without the normaliser (no filters, no title or pay parsing): each cell is
 only cleaned of what copying from a web page or a document drags along (HTML tags, bullet
 and numbering marks, bold markers, odd spaces, empty lines). `responsibility` and
 `qualification` hold several items, one per line inside the cell (Alt+Enter in Excel) or
-separated by "|". `work_mode` is on-site, hybrid or remote; `hours_per_week` a number, which
-also gives full-time (FT) or part-time (PT) from settings normalize.full_time_hours_per_week;
-`pay` a number, or a range of which the lower end is kept ("85–95" -> 85), with `pay_type`
+separated by "|". `contact_person` and `contact_email` are the HR or hiring contact
+(personal data: shown and copied on screen only, never sent to Gemini or logged); when the
+email is empty, one written in the responsibilities or qualifications is used. `work_mode` is
+on-site, hybrid or remote; `hours_per_week` a number, which also gives full-time (FT) or
+part-time (PT) from settings normalize.full_time_hours_per_week; `pay` a number, or a range of
+which the lower end is kept ("85–95" -> 85), with `pay_type`
 salary (per year) or hourly (French words are accepted too).
 
 Rules (CLAUDE.md CSV rules): read with utf-8-sig; the header is checked, and every problem
@@ -33,14 +36,14 @@ from pathlib import Path
 
 from pydantic import BaseModel, field_validator, model_validator
 
-from jobmatch.normalize.contact import contact_email
+from jobmatch.normalize.contact import EMAIL, contact_email
 from jobmatch.normalize.pipeline import job_id_for
 from jobmatch.schemas import Commitment, Job, JobStatus, PayUnit, RemoteType
 from jobmatch.sources.paste import PasteFormatError, canonical_url
 
 COLUMNS = (
-    "url", "job_title", "company", "location", "work_mode", "hours_per_week", "pay", "pay_type",
-    "posted_date", "responsibility", "qualification",
+    "url", "job_title", "company", "contact_person", "contact_email", "location", "work_mode",
+    "hours_per_week", "pay", "pay_type", "posted_date", "responsibility", "qualification",
 )  # fmt: skip
 REQUIRED = ("url", "job_title")
 LIST_COLUMNS = ("responsibility", "qualification")
@@ -173,6 +176,8 @@ class JobEntry(BaseModel):
     url: str
     job_title: str
     company: str = ""
+    contact_person: str = ""
+    contact_email: str = ""
     location: str = ""
     work_mode: str = ""  # "", on-site, hybrid or remote
     hours_per_week: str = ""  # a number, as text
@@ -188,6 +193,13 @@ class JobEntry(BaseModel):
         if not value:
             raise ValueError("is empty")
         return value
+
+    @field_validator("contact_email", mode="after")
+    @classmethod
+    def _email(cls, value: str) -> str:
+        if value and not EMAIL.fullmatch(value):
+            raise ValueError(f"{value!r} is not an email address")
+        return value.lower()
 
     @field_validator("work_mode", mode="after")
     @classmethod
@@ -286,7 +298,8 @@ class JobEntry(BaseModel):
             posted_at=posted,
             first_seen_at=now,
             status=JobStatus.NEW,
-            contact_email=contact_email(text),
+            contact_email=self.contact_email or contact_email(text),
+            contact_person=self.contact_person or None,
         )
 
 
@@ -366,6 +379,8 @@ TEMPLATE_ROWS = [
         url="https://www.example.ca/jobs/12345",
         job_title="Data Analyst (6-month contract)",
         company="Example Insurance Inc.",
+        contact_person="Jordan Lee",
+        contact_email="jordan.lee@example.ca",
         location="Toronto, ON",
         work_mode="hybrid",
         hours_per_week="40",
@@ -379,6 +394,8 @@ TEMPLATE_ROWS = [
         url="https://www.exemple.qc.ca/emplois/678",
         job_title="Analyste d'affaires (mandat de 12 mois)",
         company="Ville de Québec",
+        contact_person="Service des ressources humaines",
+        contact_email="emplois@exemple.qc.ca",
         location="Québec, QC",
         work_mode="on-site",
         hours_per_week="35",

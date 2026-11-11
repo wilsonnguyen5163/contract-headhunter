@@ -184,6 +184,7 @@ _OUTCOME_LABELS = {
     "filled_stub": "stub completed",
     "already_stored": "already stored",
     "error": "ERROR",
+    "invalid": "row dropped",
     "skipped": "skipped",
 }
 

@@ -261,8 +261,9 @@ def _run(
         report.ingest.append(ingest)
         echo(f"  {_ingest_line(ingest)}")
         for o in ingest.outcomes:
-            if o.outcome == "error" and o.detail:
-                echo(f"  {o.detail}")
+            if o.outcome in ("error", "invalid") and o.detail:
+                dropped = " (row dropped: fix it in your file and pick the file again)"
+                echo(f"  {o.detail}{dropped if o.outcome == 'invalid' else ''}")
         if inbox_pastes:
             _clear_inbox(default_pastes[0], ingest, echo)
     filled = fill_contact_emails(loader)
@@ -410,6 +411,7 @@ def _ingest_line(report: IngestReport) -> str:
             ("duplicate", "duplicate"),
             ("already_stored", "already stored"),
             ("skipped", "skipped"),
+            ("invalid", "row(s) dropped"),
             ("error", "error(s)"),
         )  # fmt: skip
         if report.count(o)  # type: ignore[arg-type]

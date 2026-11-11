@@ -148,7 +148,7 @@ def test_older_jobs_csv_loads_and_is_upgraded_with_a_backup(
     repo.add_new([make_job(job_id="paste:1", source_id="1")])
     new_columns = [
         "availability", "availability_changed_at", "reopened_at", "contact_email",
-        "hours_per_week",
+        "contact_person", "hours_per_week",
     ]  # fmt: skip
     # Rewrite the file as 0.3 wrote it: no availability or contact columns.
     with store.jobs.path.open(encoding="utf-8", newline="") as f:
@@ -165,10 +165,10 @@ def test_older_jobs_csv_loads_and_is_upgraded_with_a_backup(
     repo.add_new([make_job(job_id="paste:2", source_id="2", title_raw="Analyste (mandat)")])
     assert [j.job_id for j in repo.list_all()] == ["paste:1", "paste:2"]
     with store.jobs.path.open(encoding="utf-8", newline="") as f:
-        assert next(csv.reader(f))[-5:] == new_columns
+        assert next(csv.reader(f))[-6:] == new_columns
     assert list(store.backups_dir.glob("jobs.*.csv"))  # the old file was kept
     sidecar = json.loads(store.jobs.sidecar_path.read_text(encoding="utf-8"))
-    assert sidecar["columns"][-5:] == new_columns
+    assert sidecar["columns"][-6:] == new_columns
 
 
 # ---- the screen ----

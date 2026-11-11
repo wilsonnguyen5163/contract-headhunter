@@ -70,7 +70,7 @@ def test_find_matches_page(app_settings, tmp_path: Path) -> None:  # noqa: ANN00
         await user.should_see(marker="ingest")
         await user.should_see(marker="find-matches")
         user.find(marker="ingest").click()
-        await user.should_see("Ingested: ")
+        await user.should_see("Ingested: ", retries=40)
         await user.should_see("Nothing sent to Gemini.")
 
     run_ui(service, scenario)

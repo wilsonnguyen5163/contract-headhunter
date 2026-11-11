@@ -1,7 +1,7 @@
 """Hires and deletions (user decisions 2026-11-10):
 - "Hired" makes the contractor not available; undoing the hire restores what it was before,
   unless a reviewer changed it since.
-- A closed job can be deleted; its approved contractors still see it on the Talent screen.
+- A closed job can be deleted; only a contractor hired for it still sees it on Talent.
 - A not-available contractor can be deleted with everything about them; a later import adds
   them back. Every rewritten CSV is backed up first. Fake Gemini, no network."""
 
@@ -40,11 +40,12 @@ def test_hire_and_undo(talent) -> None:  # noqa: ANN001, F811
 def test_delete_closed_job_keeps_it_on_talent(talent) -> None:  # noqa: ANN001, F811
     service, _ = talent
     approve(service, "TAL-2")
-    service.set_application("paste:1", "TAL-2", ApplicationStatus.OUTREACHED)
+    approve(service, "TAL-1")
+    service.set_application("paste:1", "TAL-1", ApplicationStatus.OUTREACHED)  # not kept
     with pytest.raises(AppError, match="Only a completed or unavailable job"):
         service.delete_job("paste:1")
-    service.set_job_availability("paste:1", "unavailable")
-    assert service.delete_job("paste:1") == 1
+    service.set_application("paste:1", "TAL-2", ApplicationStatus.HIRED)  # closes the job
+    assert service.delete_job("paste:1") == 1  # kept for the hired contractor only
     loader = service._loader()
     assert loader.jobs.get("paste:1") is None
     assert [r for r in loader.job_scans.list_all() if r.job_id == "paste:1"] == []
@@ -52,11 +53,41 @@ def test_delete_closed_job_keeps_it_on_talent(talent) -> None:  # noqa: ANN001, 
     assert service.jobs_overview() == [] and service.results() == []
     [job] = {t.talent_id: t for t in service.talent_overview()}["TAL-2"].jobs
     assert (job.title, job.company, job.status, job.deleted, job.job_open) == (
-        "Analyste de données (contrat)", "Ville de Québec", ApplicationStatus.OUTREACHED,
+        "Analyste de données (contrat)", "Ville de Québec", ApplicationStatus.HIRED,
         True, False,
     )  # fmt: skip
+    assert {t.talent_id: t for t in service.talent_overview()}["TAL-1"].jobs == []
     backups = service.data_dir / "backups"
     assert any(p.name.startswith("jobs.") for p in backups.iterdir())  # backed up first
+
+
+def test_deleted_job_imported_again_is_judged_afresh(talent) -> None:  # noqa: ANN001, F811
+    """Delete job removes Gemini's results for it (user decision 2026-11-11): its shortlist
+    rows go, its cached answers move to a backup folder, and the same job imported again is
+    sent to Gemini anew. The decisions stay in reviews.csv but no longer count."""
+    from jobmatch.shortlists import pair_states
+
+    service, fake = talent
+    approve(service, "TAL-2")
+    loader = service._loader()
+    original = loader.jobs.get("paste:1")
+    assert original is not None
+    service.set_job_availability("paste:1", "unavailable")
+    service.delete_job("paste:1")
+    assert [m for m in loader.llm_matches.list_all() if m.job_id == "paste:1"] == []
+    cache = service.data_dir / "llm_results" / "judgments"
+    assert list(cache.glob("*.json")) == []
+    moved = service.data_dir / "backups" / "removed-judgments"
+    assert list(moved.rglob("*.json"))  # moved, never deleted
+    decisions = len(loader.reviews.list_all())
+    assert decisions == 1
+
+    loader.jobs.add_new([original])  # the same posting, imported again
+    calls = fake.calls
+    service.run(echo=lambda s: None, confirm=lambda c: True)
+    assert fake.calls > calls  # asked afresh, not served from the old cache
+    assert len(loader.reviews.list_all()) == decisions  # kept (evaluation data)
+    assert ("paste:1", "TAL-2") not in pair_states(loader)  # but no longer counts
 
 
 def test_delete_talent_removes_everything(talent, tmp_path: Path) -> None:  # noqa: ANN001, F811

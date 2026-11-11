@@ -47,6 +47,7 @@ GONE_STATUSES = (404, 410)
 Outcome = Literal[
     "new", "needs_details", "filtered", "duplicate", "filled_stub", "already_stored", "error",
     "skipped",
+    "invalid",  # jobs CSV only: a row failed the checks and was dropped; the rest goes in
 ]  # fmt: skip
 
 
@@ -410,9 +411,14 @@ def ingest_job_csv_files(
     now: datetime | None = None,
 ) -> IngestReport:
     """Store the jobs a reviewer entered, as given: no normaliser, no filters (user decisions
-    2026-11-10). A job whose link is already stored is left as it is ("already stored").
-    Outcomes are labelled "<file>:<row>", so a file whose rows all went in leaves the inbox
-    (pipeline._clear_inbox) and a file with a bad row stays for the next run."""
+    2026-11-10). Each row stands alone (user decisions 2026-11-11):
+    - a row that fails the checks is dropped and reported ("invalid"); the other rows go in;
+    - a row whose link is already stored is ignored ("already stored"), even if its details
+      differ: a stored job is never considered again. To change one, the reviewer deletes it
+      (Jobs screen) and imports it again.
+    Outcomes are labelled "<file>:<row>". A file that could be read leaves the inbox
+    (pipeline._clear_inbox), so a dropped row never comes back on later runs; the fixed row
+    goes in when the reviewer picks the file again."""
     from jobmatch.sources.job_csv import JobCsvError, read_job_csv
 
     now = now or datetime.now(UTC)
@@ -429,7 +435,7 @@ def ingest_job_csv_files(
             label = f"{path.name}:{row.row}"
             if row.job is None:
                 detail = f"{path.name} row {row.row}: {row.error}"
-                outcomes.append(FileOutcome(file=label, outcome="error", detail=detail))
+                outcomes.append(FileOutcome(file=label, outcome="invalid", detail=detail))
             elif row.job.job_id in known:
                 outcomes.append(
                     FileOutcome(file=label, outcome="already_stored", job_id=row.job.job_id)
